@@ -76,23 +76,70 @@
 			csc_lc_widened = true;
 		}
 
-		// CScr_SetFilterPassEnabled compares lc against a register holding 1 (`cmp r9d, edi`), so
-		// it is not in the table and players 3/4 got no screen filters. PS4 (0x14DEC0) accepts
-		// 0..4. `cmp r9d, edi` becomes `cmp eax, 1` (same Scr_GetInt result; ja still rejects
-		// negatives), and sync_csc_lc_bound owns the immediate from then on.
-		constexpr uint32_t filter_pass_check_rva = 0x0039DB48;   // movsxd r9,eax ; cmp r9d,edi ; ja
-		bool filter_pass_owned = false;
-
-		void widen_filter_pass_lc_check()
+		// ---- Builtins with their own form of the check ----
+		// These compare lc against a register holding 1, or use `cmp eax,2 / jl`, so they are not
+		// in the table above and raised a script error for players 3/4 (no screen filters, ...).
+		// PS4 accepts 0..3 in all of them (CScr_GetLocalClientNum 0x1D926A0, CPlayerCmd_HasPerk
+		// 0x28C830, CPlayerCmd_GetPerks 0x28C930). Each window is rewritten once to
+		// `cmp eax,1 / jbe|ja` - same length, same instruction boundaries and jump targets, stock
+		// bytes verified first - and sync_csc_lc_bound owns the imm8 from then on. Every array
+		// they index for lc 2/3 is per cl_maxLocalClients (cgArray, entity pools) or moved by
+		// reloc_tables, which cl_maxLocalClients > 2 already requires; the two flags below name
+		// the relocations that are not part of that (LOG.md 2026-09-29, "odd lc checks").
+		struct odd_lc_check
 		{
-			static constexpr uint8_t stock[] = {0x4C, 0x63, 0xC8, 0x44, 0x3B, 0xCF, 0x0F, 0x87};
-			static constexpr uint8_t cmp_eax_1[] = {0x83, 0xF8, 0x01};
-			auto* at = reinterpret_cast<uint8_t*>(base() + filter_pass_check_rva);
-			filter_pass_owned = readable(at, sizeof(stock)) && std::memcmp(at, stock, sizeof(stock)) == 0
-				&& write_bytes(at + 3, cmp_eax_1, sizeof(cmp_eax_1));
-			if (!filter_pass_owned)
+			const char* name;
+			uint32_t rva;             // first byte of the rewritten window
+			uint8_t len;
+			uint8_t imm;              // offset of the bound imm8 in the window
+			uint8_t stock[15];
+			uint8_t patched[15];
+			bool needs_signin;        // reads clientGameStates[lc] (signin_relocated)
+			bool needs_lui_roots;     // reads s_rootData[controller] (lui_roots_relocated)
+		};
+		constexpr odd_lc_check odd_lc_checks[] = {
+			// movsxd r9,eax / cmp r9d,edi / ja  ->  movsxd r9,eax / cmp eax,1 / ja
+			{"SetFilterPassEnabled", 0x0039DB48, 8, 5,
+			 {0x4C, 0x63, 0xC8, 0x44, 0x3B, 0xCF, 0x0F, 0x87},
+			 {0x4C, 0x63, 0xC8, 0x83, 0xF8, 0x01, 0x0F, 0x87}, false, false},
+			// mov ebx,eax / cmp eax,edi / jbe / lea rcx,msg / mov edx,eax
+			//   ->  cmp eax,1 / xchg ebx,eax / jbe / lea rcx,msg / mov edx,ebx
+			{"LUIDisable", 0x004259CD, 15, 2,
+			 {0x8B, 0xD8, 0x3B, 0xC7, 0x76, 0x1B, 0x48, 0x8D, 0x0D, 0x56, 0xFD, 0xAF, 0x02, 0x8B, 0xD0},
+			 {0x83, 0xF8, 0x01, 0x93, 0x76, 0x1B, 0x48, 0x8D, 0x0D, 0x56, 0xFD, 0xAF, 0x02, 0x8B, 0xD3},
+			 true, true},
+			// mov r14d,eax / cmp eax,edi  ->  cmp eax,1 / xchg r14d,eax. A rejected lc's error text
+			// then shows r14's old value (no room for mov edx,r14d); only a bad script sees it.
+			{"GetDStat", 0x00A187BF, 7, 2,
+			 {0x44, 0x8B, 0xF0, 0x3B, 0xC7, 0x76, 0x1B},
+			 {0x83, 0xF8, 0x01, 0x41, 0x96, 0x76, 0x1B}, true, false},
+			// cmp eax,2 / jl  ->  cmp eax,1 / jbe (unsigned: a negative lc is rejected now)
+			{"GetPerks", 0x00A22072, 5, 2,
+			 {0x83, 0xF8, 0x02, 0x7C, 0x1B}, {0x83, 0xF8, 0x01, 0x76, 0x1B}, false, false},
+			{"HasPerk", 0x00A22137, 5, 2,
+			 {0x83, 0xF8, 0x02, 0x7C, 0x1B}, {0x83, 0xF8, 0x01, 0x76, 0x1B}, false, false},
+			// mov r9d,eax / mov [rbp+48h],eax / cmp eax,ebx / jbe
+			//   ->  mov [rbp+48h],eax / cmp eax,1 / nop / jbe to the stock `mov r9d,[rbp+48h]`
+			{"IsInHelicopter", 0x00D8B0B9, 10, 5,
+			 {0x44, 0x8B, 0xC8, 0x89, 0x45, 0x48, 0x3B, 0xC3, 0x76, 0x1F},
+			 {0x89, 0x45, 0x48, 0x83, 0xF8, 0x01, 0x66, 0x90, 0x76, 0x1B}, false, false},
+		};
+		bool odd_lc_owned[std::size(odd_lc_checks)]{};
+		uint8_t odd_lc_applied[std::size(odd_lc_checks)]{};
+
+		void widen_odd_lc_checks()
+		{
+			for (size_t i = 0; i < std::size(odd_lc_checks); ++i)
 			{
-				note("[splitscreen] SetFilterPassEnabled: bytes differ - not widened\n");
+				const auto& c = odd_lc_checks[i];
+				auto* at = reinterpret_cast<uint8_t*>(base() + c.rva);
+				odd_lc_owned[i] = readable(at, c.len) && std::memcmp(at, c.stock, c.len) == 0
+					&& write_bytes(at, c.patched, c.len);
+				odd_lc_applied[i] = 1;
+				if (!odd_lc_owned[i])
+				{
+					note("[splitscreen] %s: lc check bytes differ - not widened\n", c.name);
+				}
 			}
 		}
 
@@ -107,19 +154,26 @@
 			const auto b = base();
 			const auto max_local = *reinterpret_cast<const volatile uint32_t*>(b + cl_max_local_clients_rva);
 			const uint8_t bound = max_local >= 4 ? 3 : max_local == 3 ? 2 : 1;
-			if (bound == csc_lc_bound_applied)
+			if (bound != csc_lc_bound_applied)
 			{
-				return;
+				for (const auto rva : csc_lc_check_imms)
+				{
+					write_bytes(reinterpret_cast<uint8_t*>(b + rva), &bound, 1);
+				}
+				csc_lc_bound_applied = bound;
 			}
-			for (const auto rva : csc_lc_check_imms)
+			for (size_t i = 0; i < std::size(odd_lc_checks); ++i)
 			{
-				write_bytes(reinterpret_cast<uint8_t*>(b + rva), &bound, 1);
+				const auto& c = odd_lc_checks[i];
+				const bool held = (c.needs_signin && !signin_relocated)
+					|| (c.needs_lui_roots && !lui_roots_relocated);
+				const uint8_t want = held ? 1 : bound;
+				if (odd_lc_owned[i] && want != odd_lc_applied[i])
+				{
+					write_bytes(reinterpret_cast<uint8_t*>(b + c.rva + c.imm), &want, 1);
+					odd_lc_applied[i] = want;
+				}
 			}
-			if (filter_pass_owned)
-			{
-				write_bytes(reinterpret_cast<uint8_t*>(b + filter_pass_check_rva + 5), &bound, 1);
-			}
-			csc_lc_bound_applied = bound;
 		}
 
 		// AllocatePerLocalClientMemory stores cl_maxLocalClients as its last act and

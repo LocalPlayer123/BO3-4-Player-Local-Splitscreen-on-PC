@@ -32,11 +32,14 @@ Not re-tested since the sun-shadow change (B3); A4/A6 are the better leads.
 (`view+0xB267C` is the light-state index, copied from the refdef at
 `0x01CE01D0` - not a view index.)
 
-### A4. MP: panes 3/4 look overexposed
+### A4. MP: panes 3/4 look overexposed - not reproduced (2.2.4)
 Panes 3 and 4 looked too bright in Multiplayer (seen together with player 3's
-white HUD panels, which are fixed - B7). Not re-measured since that fix.
-Earlier measurements: exposure records `[5]` are relocated and selected per
-client (`0x01C5FC0C`); luminance target RT 35 (56x32) is shared by all views.
+white HUD panels, which are fixed - B7). Re-measured with 2.2.3: 4-player
+offline MP on Rise, all four players moving, 30 captures; mean brightness per
+pane 94.4 / 87.2 / 91.9 / 85.7 (0-255), clipped pixels about 0.2% in every
+pane, no white HUD blocks. Not re-tested on Splash, where it was first seen.
+For reference: exposure records `[5]` are relocated and selected per client
+(`0x01C5FC0C`); luminance target RT 35 (56x32) is shared by all views.
 Test trap: idle test players stand still, so a symptom looks "latched".
 
 ### A5. Garbled name for a 3rd controller joining in the main menu
@@ -164,15 +167,6 @@ for 4 class menus, command buffers for clients 2/3.
 * Only game build 0x06531394 (ezz BOIII). Other builds: the component stands
   down; every RVA must be re-mapped. The CBServers client's build 0x06517980
   was supported up to 1.1.
-* Client-script builtins that still reject local clients 2/3 (not seen in
-  tests so far; each raises a script error for players 3/4 if a script calls
-  it): `CScr_LUIDisable` (`0x004259CF`), `CScr_GetDStat` (`0x00A187C2`),
-  `CScr_IsInHelicopter` (`0x00D8B0BF`) compare against a register holding 1,
-  so the generated immediate table does not cover them; `CScr_HasPerk` /
-  `CScr_GetPerks` (`0x00A22137` / `0x00A22072`) use `cmp eax, 2` with their
-  own "localClientNum out of range" error. PS4 accepts 0..3 in all of them.
-  LUIDisable goes through the key catcher (clientUIActives) - check that
-  before widening it.
 
 ## E. Untested / wishes
 

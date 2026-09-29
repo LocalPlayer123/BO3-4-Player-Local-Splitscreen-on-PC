@@ -259,7 +259,7 @@ namespace splitscreen
 			install_perclient_buffer_guard();
 			install_guest_copy();
 			widen_csc_lc_checks();
-			widen_filter_pass_lc_check();
+			widen_odd_lc_checks();
 			install_lc_bound_hooks();
 			gate_lensflares_for_extra_clients();
 			// Before the clamp, which bounds the slot by these slices.
