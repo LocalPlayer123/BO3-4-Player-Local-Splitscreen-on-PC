@@ -1,58 +1,6 @@
 // Sign-in and seats: player count, seat records, CL_Init for local clients 2/3, gamepad activation, guest 2 join.
 // Part of splitscreen.cpp, included in order inside namespace splitscreen::{anon}.
 
-		// --- why SigninLocalClient(2) refuses ---
-		//
-		// Native SigninLocalClient (0x01F17AD0) returns 2.0f to Lua when the
-		// predicate 0x01E0B520(ci) is false. The predicate and its sub-checks only
-		// read state, so they are called directly and the results published as a
-		// bit mask (bit clear = that check failed). No detour or code cave needed.
-		//
-		// Sub-checks, in the order the predicate evaluates them:
-		//   0x01EA9A30(ci)        ten-record stats-source walk   (0x0340D660)
-		//   0x01EAF490(ci, 1)     six-record loadout-reset walk  (0x0340D880)
-		//   0x015E2C90(ci, 1)     -> 0x02276E30(ci,3,0) && (ci,5,0)
-		//   0x02276E30(ci, t, 0)  for each required file type below
-		constexpr uint32_t signin_predicate_rva = 0x01DFEA90;
-		constexpr uint32_t ten_record_walk_rva = 0x01E9CFA0;
-		constexpr uint32_t six_record_walk_rva = 0x01EA2A00;
-		constexpr uint32_t storage_pair_rva = 0x015E2CB0;
-		constexpr uint32_t storage_has_file_rva = 0x0221A300;
-
-		// File types the predicate requires, read off the disassembly of 0x01E0B520
-		// (eleven calls). Take this list from the disassembly, not from memory.
-		constexpr int signin_required_files[] = {0, 1, 7, 9, 0xB, 0xD, 0xF, 0x12, 0x14, 0x1B, 0x1C};
-
-		void probe_signin_predicate(const int ci)
-		{
-			const auto pred = reinterpret_cast<bool (*)(int)>(base() + signin_predicate_rva);
-			const auto ten = reinterpret_cast<bool (*)(int, int)>(base() + ten_record_walk_rva);
-			const auto six = reinterpret_cast<bool (*)(int, int)>(base() + six_record_walk_rva);
-			const auto pair = reinterpret_cast<bool (*)(int, int)>(base() + storage_pair_rva);
-			const auto has = reinterpret_cast<bool (*)(int, int, int)>(base() + storage_has_file_rva);
-
-			uint32_t bits = 0;
-			// ezz BOIII detours this predicate with a side effect (Storage_Pump);
-			// called from this async thread it crashes in the game's va(). A
-			// diagnostic must not run game code on the wrong thread: skip it if hooked.
-			const bool pred_hooked = *reinterpret_cast<const uint8_t*>(base() + signin_predicate_rva) == 0xE9;
-			if (!pred_hooked && pred(ci)) { bits |= 1u << 0; }   // the whole predicate
-			if (ten(ci, 1)) { bits |= 1u << 1; }
-			if (six(ci, 1)) { bits |= 1u << 2; }
-			if (pair(ci, 1)) { bits |= 1u << 3; }
-			// storage_pair's own two, broken out so a failure is attributable
-			if (has(ci, 3, 0)) { bits |= 1u << 4; }
-			if (has(ci, 5, 0)) { bits |= 1u << 5; }
-
-			uint32_t bit = 6;
-			for (const auto t : signin_required_files)
-			{
-				if (has(ci, t, 0)) { bits |= 1u << bit; }
-				++bit;
-			}
-			set_status(63, bits);
-		}
-
 		// splitscreen_playerCount. This slot holds the dvar pointer; the current int
 		// is at +0x28. CL_SplitscreenPlayerCount (PS4 0x1516BE0) returns it, and
 		// CL_AllocatePerLocalClientMemory allocates max(count, 2) of the whole
@@ -65,16 +13,11 @@
 
 		uint8_t* active_count_slots = nullptr;
 
-		// CL_LocalClients_SetAllUsedActive(), no arguments.
 		// The count must already be right in the lobby: PS4 CL_ConnectFromLobby
-		// allocates (0x4155A0) before it activates the clients (0x41566C).
-		constexpr uint32_t set_all_used_active_rva = 0x027C19C0;
-
-		// Dvar_SetInt. Calling SetAllUsedActive is not enough: its early-out skips
-		// unless a client's active state changes, and local client 2 is outside its
-		// loop bound of 2. Do not call Dvar_SetInt from this DLL, see below.
-		constexpr uint32_t dvar_set_int_rva = 0x0226B3A0;
-
+		// allocates (0x4155A0) before it activates the clients (0x41566C). Calling
+		// CL_LocalClients_SetAllUsedActive (0x027C19C0) is not enough: its early-out
+		// skips unless a client's active state changes, and local client 2 is
+		// outside its loop bound of 2.
 		bool set_splitscreen_player_count(const uint32_t value)
 		{
 			uint64_t dvar = 0;
@@ -94,7 +37,6 @@
 		}
 
 		uint32_t last_active_refresh = 0;
-		uint32_t active_refreshes = 0;
 
 		// Com_LocalClient_IsBeingUsed, the local client's controller index and
 		// LiveUser_IsSignedIn: the conditions PS4 GetCountUsedAndSignedInLocalClients
@@ -102,36 +44,6 @@
 		constexpr uint32_t is_being_used_rva = 0x020E3210;
 		constexpr uint32_t lc_controller_index_rva = 0x020E31B0;
 		constexpr uint32_t live_user_is_signed_in_rva = 0x01EBA5A0;
-
-		// Status 72, one byte per local client: bit 0 IsBeingUsed(lc), bit 1 signed in,
-		// bits 4-7 the controller index (0xF = -1). Pure predicates, safe to call.
-		void probe_local_client_slots()
-		{
-			const auto used = reinterpret_cast<bool (*)(int)>(base() + is_being_used_rva);
-			const auto ctrl = reinterpret_cast<int (*)(int)>(base() + lc_controller_index_rva);
-			const auto signed_in = reinterpret_cast<bool (*)(int)>(base() + live_user_is_signed_in_rva);
-
-			uint32_t packed = 0;
-			for (int lc = 0; lc < 4; ++lc)
-			{
-				uint32_t b = 0;
-				const bool u = used(lc);
-				if (u) { b |= 1u; }
-				const int ci = ctrl(lc);
-				if (u && signed_in(ci)) { b |= 2u; }
-				b |= static_cast<uint32_t>(ci & 0xF) << 4;
-				packed |= b << (lc * 8);
-			}
-			set_status(72, packed);
-		}
-
-		// Hold splitscreen_playerCount at the real number of local clients.
-		// PS4 CL_LocalClient_SetActive (0x15167D0) sets it from
-		// CL_LocalClient_GetActiveCount (0x1516A20, i < 4). The PC unrolls that count
-		// to two elements, so the engine alone never writes more than 2, and it writes
-		// its value back on every activation toggle, so a one-shot set does not hold.
-		// Only ever raised; lowering it would fight the engine when a player leaves.
-		uint32_t player_count_writes = 0;
 
 		uint32_t true_local_client_count()
 		{
@@ -158,6 +70,12 @@
 		// Defined next to signin_relocated, which it reads.
 		uint32_t seat_count();
 
+		// Hold splitscreen_playerCount at the real number of local clients.
+		// PS4 CL_LocalClient_SetActive (0x15167D0) sets it from
+		// CL_LocalClient_GetActiveCount (0x1516A20, i < 4). The PC unrolls that count
+		// to two elements, so the engine alone never writes more than 2, and it writes
+		// its value back on every activation toggle, so a one-shot set does not hold.
+		// Only ever raised; lowering it would fight the engine when a player leaves.
 		void hold_splitscreen_player_count()
 		{
 			if (!raise_local_client_count)
@@ -171,14 +89,12 @@
 			            sizeof(dvar));
 			if (dvar == 0)
 			{
-				set_status(82, 0); // not registered yet - CL_SplitscreenPlayerCount returns 1
-				return;
+				return; // not registered yet - CL_SplitscreenPlayerCount returns 1
 			}
 
 			auto* current = reinterpret_cast<uint32_t*>(dvar + dvar_current_offset);
 			if (!readable(current, sizeof(uint32_t)))
 			{
-				set_status(82, 0xFFFFFFFF);
 				return;
 			}
 
@@ -189,7 +105,6 @@
 			constexpr size_t dvar_domain_offset = 0x88;
 			auto* domain_max = reinterpret_cast<uint32_t*>(
 				dvar + dvar_domain_offset + sizeof(uint32_t));
-			// No status slot is free; the live dvar's +0x8C reads 4 once this has run.
 			if (readable(domain_max, sizeof(uint32_t)) && *domain_max == 2)
 			{
 				const uint32_t four = 4;
@@ -200,70 +115,31 @@
 			// guests read as not signed in, so the predicate count alone drops to 1 and
 			// the map-load reallocation shrank cl_maxLocalClients back to 2.
 			const auto want = std::max(true_local_client_count(), seat_count());
-			set_status(82, *current);
-			set_status(83, want);
 
 			if (want > 1 && *current < want)
 			{
-				if (write_bytes(current, &want, sizeof(want)))
-				{
-					set_status(84, ++player_count_writes);
-				}
+				write_bytes(current, &want, sizeof(want));
 			}
 		}
 
-		void probe_local_client_nums()
+		// Keeps splitscreen_playerCount at the real local-client count; every 50 ms
+		// from mirror_signin_state. Set in the lobby: allocation happens before
+		// activation, and per_controller_update_stub stops running after a
+		// splitscreen sign-in. max_local >= 2 is the "game is up" test; touching the
+		// dvar system during early startup black-screened the client.
+		void sync_player_count()
 		{
-			const auto fn = reinterpret_cast<int (*)(int)>(base() + local_client_num_rva);
-			uint32_t packed = 0;
-			for (int ci = 0; ci < 4; ++ci)
-			{
-				packed |= static_cast<uint32_t>(fn(ci) & 0xFF) << (ci * 8);
-			}
-			set_status(51, packed);
-
 			uint32_t max_local = 0;
 			std::memcpy(&max_local,
 			            reinterpret_cast<const void*>(base() + cl_max_local_clients_rva),
 			            sizeof(max_local));
-			set_status(61, max_local);
-
-			// Holding cl_maxLocalClients at 4 is off (hold_max_local_clients). The
-			// allocator writes this global from the count it really used (PS4 0x41744B),
-			// so forcing 4 makes loops run to four over memory carved for fewer, which
-			// crashed. Status 62 counts re-applications.
-			if (hold_max_local_clients && raise_local_client_count && max_local == 2)
-			{
-				auto* v = reinterpret_cast<uint32_t*>(base() + cl_max_local_clients_rva);
-				if (write_bytes(v, &seed_max_local_clients, sizeof(seed_max_local_clients)))
-				{
-					set_status(62, ++max_local_seeds);
-				}
-			}
-
-			// Only worth asking once controller 2 has a seat.
-			if (fn(2) >= 0)
-			{
-				probe_signin_predicate(2);
-			}
-
-			probe_local_client_slots();
-
-			// Set splitscreen_playerCount here, in the lobby: allocation happens before
-			// activation, and per_controller_update_stub stops running after a
-			// splitscreen sign-in. max_local >= 2 is the "game is up" test; touching the
-			// dvar system during early startup black-screened the client.
 			if (active_count_slots != nullptr && max_local >= 2)
 			{
 				const auto live = true_local_client_count();
-				set_status(91, live);
-				set_status(92, last_active_refresh);
 				if (live > 1 && live != last_active_refresh
 				    && set_splitscreen_player_count(live))
 				{
 					last_active_refresh = live;
-					set_status(88, ++active_refreshes);
-					set_status(89, live);
 				}
 			}
 			hold_splitscreen_player_count();
@@ -275,12 +151,11 @@
 		// signing in, so isActive stayed 0 and SigninLocalClient(2) never returned.
 		// Mirror the donor's current signInState and isActive into guests 2/3.
 		constexpr size_t userdata_is_active = 0x28;
-		uint32_t active_mirrored = 0;
 
 		void mirror_signin_state()
 		{
-			// Unconditional: the probe is wanted during boot too.
-			probe_local_client_nums();
+			// Before the guest check: the count is held with or without guests.
+			sync_player_count();
 
 			if (!guests_filled || !guest_array_rva)
 			{
@@ -322,40 +197,9 @@
 				{
 					std::memcpy(reinterpret_cast<void*>(slot + userdata_is_active), &active,
 					            sizeof(active));
-					set_status(55, ++active_mirrored);
 				}
 			}
 		}
-
-		// TaskManager2_ProcessTasks(ControllerIndex_t), PS4 0x0101CEC0. The game only
-		// calls it for the controller it is working on, so controller 2's finished
-		// 'hdd' gamer-profile task is never reaped. That keeps StorageTarget_IsBusy
-		// true for every controller and stalls Storage_Pump.
-		// Storage work must run on the game's own thread, never from the async
-		// pipeline while the game might touch storage.
-		constexpr uint32_t process_tasks_rva = 0x02253C50;
-		constexpr uint8_t process_tasks_prologue[] = {0x83, 0xF9, 0xFF};
-		bool process_tasks_ok = false;
-
-		// The reap runs after the per-controller update (the only caller of
-		// Storage_Pump) has returned. Reaping inside the Storage_Pump detour re-entered
-		// storage through the completion handlers and halved startup survival.
-		// reaper_enabled toggles the reap for bisecting. With it on the game stayed
-		// alive but rendered black: check that the game draws, not only that it runs.
-		bool reaper_enabled = false;
-
-		// Wait until the frontend is up before reaping. Reaping during boot runs the
-		// storage read callbacks out of order and leaves the renderer black. PS4 also
-		// re-reads at sign-in time (Storage_UserSignedIn), not at boot.
-		constexpr uint32_t reap_after_updates = 2000;
-		uint32_t update_calls = 0;
-
-		// ClearStorage (PS4 0xF7E7E0, clear_storage_rva further down) makes a
-		// controller re-read: it clears each storage target, resets
-		// readOnLoginProcessed[t] and zeroes the xuid so Storage_Pump re-assigns it.
-		// It only marks state dirty; the game redoes the login read on its own frames.
-		// If the re-assign never happens the controller loses its storage (status 35
-		// records the xuid afterwards).
 
 		// Guest storage reads are filtered (storage_read_stub). Completing a guest's
 		// settings read runs configs with localClient = -1 (PS4 SettingsReadResult
@@ -399,8 +243,6 @@
 		constexpr uint32_t storage_reset_rva = 0x0221AB10;
 
 		utils::hook::detour settings_read_result_hook;
-		uint32_t guest_settings_completions = 0;
-		uint32_t guest_settings_resets = 0;
 
 		// File 0 is allowed only while this is true. If the hook is not installed,
 		// the read filter refuses file 0 again. Fail safe.
@@ -411,18 +253,13 @@
 		{
 			if (controller >= 2)
 			{
-				// Status 64: 0x8000 | controller << 8 | StorageResult. Success means the
-				// guest's own .cgp loaded; failure means Storage_Reset builds the context.
-				set_status(64, 0x8000u | (static_cast<uint32_t>(controller) << 8)
-				                       | (static_cast<uint32_t>(result) & 0xFFu));
-				set_status(65, ++guest_settings_completions);
-
+				// Success means the guest's own .cgp loaded; failure means Storage_Reset
+				// builds the context.
 				if (result != 0)
 				{
 					const auto reset = reinterpret_cast<void (*)(int, int, int)>(
 						base() + storage_reset_rva);
 					reset(controller, 0, 0);
-					set_status(66, ++guest_settings_resets);
 				}
 
 				// Return true like the original; false would reset the ready state to 0.
@@ -442,8 +279,6 @@
 		constexpr uint8_t shoutcaster_read_result_prologue[] = {0x40, 0x53, 0x48, 0x83, 0xEC, 0x20};
 
 		utils::hook::detour shoutcaster_read_result_hook;
-		uint32_t guest_shoutcaster_completions = 0;
-		uint32_t guest_shoutcaster_resets = 0;
 		bool shoutcaster_result_neutered = false;
 
 		char shoutcaster_read_result_stub(const int controller, const int file_type, const int slot,
@@ -451,16 +286,11 @@
 		{
 			if (controller >= 2)
 			{
-				set_status(68, 0x8000u | (static_cast<uint32_t>(controller) << 8)
-				                       | (static_cast<uint32_t>(result) & 0xFFu));
-				set_status(69, ++guest_shoutcaster_completions);
-
 				if (result != 0)
 				{
 					const auto reset = reinterpret_cast<void (*)(int, int, int)>(
 						base() + storage_reset_rva);
 					reset(controller, 1, 0);
-					set_status(70, ++guest_shoutcaster_resets);
 				}
 
 				return 1;
@@ -482,9 +312,6 @@
 		}
 
 		utils::hook::detour storage_read_hook;
-		uint32_t guest_reads_allowed = 0;
-		uint32_t guest_reads_blocked = 0;
-		uint64_t guest_read_mask = 0;
 
 		bool storage_read_stub(const int controller, const int file_type, const int index)
 		{
@@ -519,23 +346,13 @@
 						}
 					}
 				}
-				// Status 49/50: 64-bit mask of the file types guests request.
-				if (file_type >= 0 && file_type < 64)
-				{
-					const auto bit = 1ull << file_type;
-					guest_read_mask |= bit;
-					set_status(49, static_cast<uint32_t>(guest_read_mask));
-					set_status(50, static_cast<uint32_t>(guest_read_mask >> 32));
-				}
 				// Everything not listed stays blocked. Allowing every type killed the
 				// process: PS4 SettingsReadResult also writes s_settingsGlob[ci], another
 				// per-controller array that is likely [2] on the PC.
 				if (!allowed)
 				{
-					set_status(47, ++guest_reads_blocked);
 					return false;
 				}
-				set_status(46, ++guest_reads_allowed);
 			}
 			return storage_read_hook.invoke<bool>(controller, file_type, index);
 		}
@@ -659,14 +476,13 @@
 			const auto old_array = module_base + signin_old_base;
 			const auto new_array = module_base + signin_new_base;
 
-			// Verify every reference before writing anything (all or nothing).
-			uint32_t already = 0;
+			// Verify every reference before writing anything (all or nothing). A
+			// reference that already holds the new bytes is accepted.
 			for (const auto& r : signin_refs)
 			{
 				const auto at = reinterpret_cast<const uint8_t*>(module_base + r.disp_rva);
 				if (std::memcmp(at, r.new_bytes, 4) == 0)
 				{
-					++already;
 					continue;
 				}
 				if (std::memcmp(at, r.old_bytes, 4) != 0)
@@ -689,14 +505,9 @@
 			            reinterpret_cast<const void*>(old_array),
 			            signin_stride * signin_old_slots);
 
-			uint32_t done = 0;
 			for (const auto& r : signin_refs)
 			{
-				if (write_bytes(reinterpret_cast<void*>(module_base + r.disp_rva),
-				                r.new_bytes, 4))
-				{
-					++done;
-				}
+				write_bytes(reinterpret_cast<void*>(module_base + r.disp_rva), r.new_bytes, 4);
 			}
 
 			const uint8_t slots = static_cast<uint8_t>(signin_new_slots);
@@ -722,18 +533,13 @@
 				std::memcpy(reinterpret_cast<void*>(slot + cgs_network_id), &i, sizeof(i));
 			}
 
-			set_status(44, done);
-			set_status(45, already);
 			signin_relocated = true;
 			return true;
 		}
 
-		// Re-assert the new seats' controllerIndex if something resets it, and count
-		// it (status 52). PS4 Com_InitClientGameStates memsets the array and never
-		// writes controllerIndex, so a late initializer would put
-		// GetLocalClientNum(2) back to -1. A count of 0 means nothing clobbers it.
-		uint32_t seat_reasserts = 0;
-
+		// Re-assert the new seats' controllerIndex if something resets it. PS4
+		// Com_InitClientGameStates memsets the array and never writes controllerIndex,
+		// so a late initializer would put GetLocalClientNum(2) back to -1.
 		void maintain_signin_seats()
 		{
 			if (!signin_relocated)
@@ -751,33 +557,10 @@
 				if (have != i)
 				{
 					write_signin_seat(new_array, i, false);
-					set_status(52, ++seat_reasserts);
 				}
 			}
-
-			// Status 53: slot 2's raw controllerIndex.
-			uint32_t raw = 0;
-			std::memcpy(&raw,
-			            reinterpret_cast<const void*>(new_array + 2 * signin_stride
-				            + cgs_controller_index),
-			            sizeof(raw));
-			set_status(53, raw);
-
-			// Status 54: slot 1's localClientNum, reported but not repaired. If it drifts
-			// back to 0 the initializer ran again.
-			uint32_t lcn1 = 0;
-			std::memcpy(&lcn1,
-			            reinterpret_cast<const void*>(new_array + 1 * signin_stride
-				            + cgs_local_client_num),
-			            sizeof(lcn1));
-			set_status(54, lcn1);
 		}
 
-		// StartOp (PS4 0xF7C740) begins a gamer-profile file operation. Counted from
-		// inside the component (status 37..40 per controller, 41 = index outside 0..3)
-		// because the boot storage read is over before an external tool can attach.
-		constexpr uint32_t start_op_rva = 0x02218090;
-		constexpr uint8_t start_op_prologue[] = {0x48, 0x89, 0x5C, 0x24, 0x10};
 		// CL_SplitscreenPlayerCount (PS4 0x1516BE0): the splitscreen_playerCount dvar,
 		// or 1 while it is unregistered. Every consumer asks this, including
 		// CL_AllocatePerLocalClientMemory (max(count, 2)) and the writer of
@@ -793,8 +576,6 @@
 		};
 
 		utils::hook::detour splitscreen_player_count_hook;
-		uint32_t player_count_queries = 0;
-		uint32_t player_count_last = 0;
 
 		// CL_Init for local client 2. PS4 Com_Init calls CL_Init(i) for i 0..3 at boot
 		// (0xE49E98); the PC boot inlines clients 0 and 1 only. CL_Frame skips a client
@@ -845,17 +626,7 @@
 			in_progress_guard& operator=(const in_progress_guard&) = delete;
 		};
 
-		// SetActive hook entries, reported with a result code in status 87 as
-		// (calls << 8) | code.
-		uint32_t set_active_calls = 0;
-
-		void report87(const uint32_t code)
-		{
-			set_status(87, (set_active_calls << 8) | (code & 0xFF));
-		}
-
-		// The five SCR_UpdateFrame bound immediates (the BO3_CG_FRAME group), shared
-		// with patch_probe_once.
+		// The five SCR_UpdateFrame bound immediates, widened as one group.
 		constexpr uint32_t cg_frame_imms[] = {
 			0x013E10D4,   // cmp r13d,2 - the r_num_viewports counting loop
 			0x013E11D2,   // cmp ebx,2  - cgame frame loop, copy A exit 1
@@ -863,50 +634,6 @@
 			0x013E1264,   // cmp ebx,2  - cgame frame loop, copy B tail
 			0x013E12A6,   // cmp ebx,2  - the loading-screen scan
 		};
-
-		// Diagnostic, opt-in: BO3_PATCH_PROBE=1 writes the five immediates in a game
-		// without a third player, to tell whether the write itself trips Arxan (the
-		// 3-player deaths ~15 s into a round). Safe with two players: the widened
-		// frame loop is gated by the caved IsActive, and the viewport count only
-		// counts CA_ACTIVE slots.
-		void patch_probe_once()
-		{
-			static int state = -1;   // -1 unread, 1 armed, 0 off or done
-			if (state == 0)
-			{
-				return;
-			}
-			if (state < 0)
-			{
-				char buf[8] = {};
-				GetEnvironmentVariableA("BO3_PATCH_PROBE", buf, sizeof(buf));
-				state = std::strcmp(buf, "1") == 0 ? 1 : 0;
-				if (state == 0)
-				{
-					return;
-				}
-			}
-			if (!isactive_caved)
-			{
-				return;   // the gate the widened loop relies on is not in yet
-			}
-			state = 0;
-			for (const auto rva : cg_frame_imms)
-			{
-				const auto* at = reinterpret_cast<const uint8_t*>(base() + rva);
-				if (!readable(at, 1) || *at != 0x02)
-				{
-					note("[splitscreen] patch probe: 0x%X not stock, nothing written\n", rva);
-					return;
-				}
-			}
-			const uint8_t bound3 = 0x03;
-			for (const auto rva : cg_frame_imms)
-			{
-				write_bytes(reinterpret_cast<uint8_t*>(base() + rva), &bound3, sizeof(bound3));
-			}
-			note("[splitscreen] patch probe: five CG_FRAME immediates written (2 -> 3)\n");
-		}
 
 		void run_cl_init_for_local_client2()
 		{
@@ -924,11 +651,6 @@
 			const auto max_local = *reinterpret_cast<const volatile uint32_t*>(
 				base() + cl_max_local_clients_rva);
 
-			// Status 87 codes: 1 init ran and frame pump opened, 2 init did not set bit 1,
-			// 3 range checks not in their resting state, 4 a range write failed, 5 frame
-			// pump byte unexpected, 6 widens deferred until the allocation; 10, 11 and
-			// 20 + n (seats seen) come from the watch.
-			//
 			// Scoped widen: both sites are MSVC /GS range checks (cmp rbx,2 / jae
 			// __report_rangecheckfailure) on a [2] array, which CL_Init(2) would trip.
 			// They are opened for exactly one call and closed again, and nothing is
@@ -937,7 +659,6 @@
 			auto* range_b = reinterpret_cast<uint8_t*>(base() + cbuf_execute_range_imm_rva);
 			if (*range_a != 0x02 || *range_b != cbuf_range_resting)
 			{
-				report87(3);
 				return;
 			}
 
@@ -967,7 +688,6 @@
 				}
 				if (!a_ok || !b_ok)
 				{
-					report87(4);
 					return;
 				}
 			}
@@ -975,27 +695,24 @@
 			// If the init did not take, the frame pump stays at two.
 			if ((*flags & 0x2) == 0)
 			{
-				report87(2);
 				return;
 			}
 
 			// The init has taken; latch it only now, so an early call retries later.
-			// This latch covers the init only. The widens below are deferred in the lobby
-			// (code 6), and every trigger site keeps re-entering until lc2_widens_done.
+			// This latch covers the init only. The widens below are deferred in the lobby,
+			// and every trigger site keeps re-entering until lc2_widens_done.
 			cl_init2_done = true;
 
 			// The byte widens need the allocation, which happens at map load; the count
 			// detour re-enters here then.
 			if (max_local < 3)
 			{
-				report87(6);
 				return;
 			}
 
 			auto* site = reinterpret_cast<uint8_t*>(base() + cl_frame_pump_imm_rva);
 			if (*site != 0x02)
 			{
-				report87(5);
 				return;
 			}
 			const uint8_t three = 0x03;
@@ -1009,12 +726,10 @@
 			auto* poll = reinterpret_cast<uint8_t*>(base() + netchan_poll_imm_rva);
 			if (*poll == 0x02)
 			{
-				// Status 86: cl_maxLocalClients when the poll was widened.
 				write_bytes(poll, &three, sizeof(three));
-				set_status(86, max_local);
 			}
 
-			// cgame frame loop, opt-in with BO3_CG_FRAME=on and only with the IsActive cave.
+			// cgame frame loop, only with the IsActive cave.
 			// PC SCR_UpdateFrame calls CG_DrawActiveFrame / CG_ProcessButDontDrawActiveFrame
 			// for clients 0..1 only (PS4 0..3), so client 2 never gets a snapshot and the
 			// third pane cannot draw. The five immediates are one group: MSVC split the
@@ -1022,15 +737,13 @@
 			// computes r_num_viewports. Three, never four: clientUIActives slot 3 overlaps
 			// the clientActive base pointer. The caved IsActive refuses
 			// lc >= cl_maxLocalClients.
-			// Off by default: ticking cgame for client 2 reaches per-client resources the
-			// PC only allocates for two (NULL buffer pointers, [2] arrays; PS4
-			// CG_ProcessSnapshots 0x2A86C0 also waits for a snapshot client 2 never gets).
-			// Guarding them one at a time only moves the crash. The default build runs
-			// three players with two panes.
+			// Ticking cgame for client 2 reaches per-client resources the PC only
+			// allocates for two (NULL buffer pointers, [2] arrays; PS4
+			// CG_ProcessSnapshots 0x2A86C0 also waits for a snapshot client 2 never
+			// gets). The relocations try_apply() makes before this are what make it
+			// safe; guarding them one at a time only moved the crash.
 			// History: LOG.md, "BO3_CG_FRAME"
-			char cg_frame_env[16] = {};
-			GetEnvironmentVariableA("BO3_CG_FRAME", cg_frame_env, sizeof(cg_frame_env));
-			if (isactive_caved && std::strcmp(cg_frame_env, "on") == 0)
+			if (isactive_caved)
 			{
 				bool all_stock = true;
 				for (const auto rva : cg_frame_imms)
@@ -1070,8 +783,6 @@
 			// Both bounds are open with a real allocation behind them; close the second
 			// latch.
 			lc2_widens_done = true;
-
-			report87(1);
 		}
 
 		// Player 4: CL_Init(3), the same call as for lc 2, made once seat record 3 is
@@ -1214,15 +925,6 @@
 				base() + gamepads_reserved_rva + slot * gamepad_stride) != 0;
 		}
 
-		int32_t gamepad_device_of(const size_t slot)
-		{
-			return *reinterpret_cast<const volatile int32_t*>(
-				base() + gamepads_reserved_rva + slot * gamepad_stride + gamepad_device_index);
-		}
-
-		// Defined after the trace helpers: one line with every slot's device.
-		void log_gamepad_slots(const char* what);
-
 		// Device-type selector. Both gamepad loops (poll, per-frame update) reuse the
 		// loop-bound register as the constant 2 of the device-type selector, so the
 		// widened bound 4 made devices 4..7 (the non-XInput API) type 4, which nothing
@@ -1348,8 +1050,6 @@
 			if (gamepad_refs_match(destination_rva) && gamepad_bounds_match(4))
 			{
 				gamepads_activated = true;
-				set_status(58, static_cast<uint32_t>(expected_gamepad_refs));
-				set_status(59, static_cast<uint32_t>(std::size(gamepad_bound_rvas)));
 				return true;
 			}
 
@@ -1444,8 +1144,6 @@
 			}
 
 			gamepads_activated = true;
-			set_status(58, static_cast<uint32_t>(expected_gamepad_refs));
-			set_status(59, static_cast<uint32_t>(std::size(gamepad_bound_rvas)));
 			complete_gamepads(base() + destination_rva);
 
 			// Run the game's device rescan so the new slots get the connected
@@ -1455,42 +1153,23 @@
 				&& std::memcmp(rescan, gamepad_rescan_bytes, sizeof(gamepad_rescan_bytes)) == 0)
 			{
 				reinterpret_cast<void (*)()>(base() + gamepad_rescan_rva)();
-				log_gamepad_slots("gamepads relocated rescan=1");
 			}
 			else
 			{
-				log_gamepad_slots("gamepads relocated rescan=bytes-mismatch");
+				note("[splitscreen] gamepads relocated rescan=bytes-mismatch\n");
 			}
 			return true;
 		}
 
 		// Signs in controller 2 as a guest (player 3) once the offline lobby is up.
-		// Progress codes go through report87, not new status slots: a free literal
-		// slot cannot be assumed (11+i, 16+i and 37+i are computed indices).
 		void try_join_guest2()
 		{
 			if (guest_join_done || guest_join_attempts >= guest_join_max_attempts)
 			{
 				return;
 			}
-			// Diagnostic, opt-in: BO3_GUESTS=1 leaves seat 2 empty, for a
-			// two-player A/B round on the same build.
-			{
-				static int guests_env = -1;
-				if (guests_env < 0)
-				{
-					char buf[8] = {};
-					GetEnvironmentVariableA("BO3_GUESTS", buf, sizeof(buf));
-					guests_env = std::strcmp(buf, "1") == 0 ? 1 : 2;
-				}
-				if (guests_env == 1)
-				{
-					return;
-				}
-			}
 			if (!signin_relocated || !guests_filled || !guest_array_rva)
 			{
-				report87(40);
 				return;
 			}
 
@@ -1501,7 +1180,6 @@
 			// History: LOG.md, offline_lobby_ready_for_player3
 			if (!offline_lobby_ready_for_player3())
 			{
-				report87(54);
 				return;
 			}
 
@@ -1512,7 +1190,6 @@
 			            sizeof(bound));
 			if (bound != 0x03)
 			{
-				report87(41);
 				return;
 			}
 
@@ -1520,7 +1197,6 @@
 			// if he is, offline_lobby_ready_for_player3 checked he is a lobby member.
 			if (!controller_seated(0) || controller_seated(2))
 			{
-				report87(42);
 				return;
 			}
 
@@ -1533,7 +1209,6 @@
 			            sizeof(is_guest));
 			if (!is_guest)
 			{
-				report87(43);
 				return;
 			}
 
@@ -1541,12 +1216,10 @@
 			// frame, so refusals would use up the retries before one is plugged in.
 			if (!gamepad_connected(2))
 			{
-				report87(56);
 				return;
 			}
 
 			++guest_join_attempts;
-			report87(44);
 
 			using signin_fn = void (*)(int, bool, bool);
 			reinterpret_cast<signin_fn>(base() + guest_signin_rva)(2, true, false);
@@ -1557,10 +1230,5 @@
 			if (controller_seated(2))
 			{
 				guest_join_done = true;
-				report87(45);
-			}
-			else
-			{
-				report87(46);
 			}
 		}

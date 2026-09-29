@@ -5,7 +5,7 @@
 namespace release_policy
 {
 	// Stands in for GetEnvironmentVariableA inside the component. Answers only
-	// the switches of the tested configuration; every other name reads as unset.
+	// LOCALAPPDATA, and only in the diagnostic build.
 	DWORD get_environment_variable(LPCSTR name, LPSTR buffer, DWORD size);
 
 	// Stands in for CreateFileA inside the component. Always fails, so the

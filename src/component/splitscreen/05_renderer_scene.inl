@@ -52,7 +52,6 @@
 			}
 			scene_b_new_rva = new_rva;
 			scene_b_relocated = true;
-			note("[splitscreen] scene buffer B [2]->[4] at RVA 0x%08X\n", new_rva);
 			return true;
 		}
 
@@ -127,8 +126,6 @@
 				}
 			}
 			scene_buffers_filled = true;
-			note("[splitscreen] scene buffers allocated for clients 2/3"
-			     " (%u elements)\n", elems);
 		}
 
 		// ============ cgEntCollWorld / cgEntCollNodes: entity collision ========
@@ -194,8 +191,6 @@
 		};
 
 		bool entcoll_relocated = false;
-		size_t entcoll_world_new = 0;
-		size_t entcoll_nodes_new = 0;
 
 		// Point a site table at new_abs, all or nothing. Every site must first
 		// resolve to old_rva + target_off, or nothing is written; the original

@@ -40,6 +40,9 @@ for m in re.finditer(r"reinterpret_cast<[^;]*?\(\s*\*\s*\)\s*\([^;]*?>\s*\(\s*(?
     targets.setdefault(m.group(1), "call")
 for m in re.finditer(r"(\w+)_hook\.create\(\s*(?:reinterpret_cast<void\*>\()?\s*(?:base\(\)|b)\s*\+\s*(\w+)", text):
     targets[m.group(2)] = "hook+invoke"
+# hook_if_stock(NAME_hook, NAME_rva, prologue, stub)
+for m in re.finditer(r"hook_if_stock\(\s*\w+_hook\s*,\s*(\w+)\s*,", text):
+    targets[m.group(1)] = "hook+invoke"
 # hooks whose target sits in a local first: `const auto x = base() + NAME;` ... `.create(... x`
 for m in re.finditer(r"const\s+auto\s+(\w+)\s*=\s*(?:base\(\)|b)\s*\+\s*(\w+)\s*;", text):
     var, name = m.group(1), m.group(2)

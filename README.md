@@ -11,9 +11,10 @@ back-to-back rounds). See [OPEN_PROBLEMS.md](docs/OPEN_PROBLEMS.md) for
 everything that is not solved yet - please read it before changing things.
 
 **ezz BOIII developers:** [EZZ_REQUIRED_CHANGES.md](docs/EZZ_REQUIRED_CHANGES.md)
-lists every change ezz needs to support four local players natively, each with
-the ezz source line and the game address. Item 12 is an ezz bug that hits
-every ezz player, with or without this mod.
+lists what ezz could change to support four local players natively, each with
+the ezz source line and the game address. None of it is required: the mod
+works around every point itself today, and each item says how. Item 12 is an
+ezz bug that hits every ezz player, with or without this mod.
 
 **This code is public domain ([The Unlicense](LICENSE)).** Take it, change it,
 merge it into your client, ship it under your own name. No credit needed.
@@ -44,16 +45,17 @@ console again, at runtime, without touching any file on disk:
 
 Every patch verifies the original bytes first and skips itself (with a log
 line in diagnostic builds) if they differ - it never writes into code it does
-not recognise. The comments in `splitscreen.cpp` are the real documentation:
+not recognise. The comments in the component are the real documentation:
 almost every site names the PS4 function it was checked against and what was
 measured.
 
 **Game build:** everything targets `BlackOps3.exe` with PE checksum
 **0x06531394** (the build ezz BOIII 3.0 installs). On any other build the
 component stands down and the game runs unmodified. A new game build needs
-every RVA re-mapped (they are all in `splitscreen.cpp` /
-`splitscreen_reloc.hpp` / `splitscreen_ezz.hpp`). Versions up to 1.1 targeted
-0x06517980, the build the CBServers BOIII client runs.
+every RVA re-mapped (they are all in the component sources:
+`splitscreen.cpp` and its parts, `splitscreen_reloc.hpp`,
+`splitscreen_ezz.hpp`). Versions up to 1.1 targeted 0x06517980, the build the
+CBServers BOIII client runs.
 
 ---
 
@@ -82,7 +84,7 @@ src/standalone/                        the ezz plugin build (bo3_local_splitscre
   test/smoke.cpp                       offline smoke test of the DLL
 build_standalone.cmd                   builds the plugin (MSVC + MinHook)
 docs/OPEN_PROBLEMS.md                  what is broken or unverified - start here
-docs/EZZ_REQUIRED_CHANGES.md           what ezz BOIII needs for native 4-player support
+docs/EZZ_REQUIRED_CHANGES.md           what ezz BOIII could change natively (none of it required)
 docs/PLAN_EZZ_PORT.md                  the plan for moving the mod into ezz BOIII
 docs/PLAYER_README.txt                 the text players get with the zip
 ```
@@ -98,20 +100,17 @@ docs/PLAYER_README.txt                 the text players get with the zip
 2. The component registers itself with `REGISTER_COMPONENT` and does its work in
    `post_unpack()`. It uses only `utils::hook`, `scheduler` (the `async` and
    `renderer` pipelines) and `game::` basics.
-3. **Switches** are read with `GetEnvironmentVariableA`. The verified
-   configuration is **`BO3_CG_FRAME=on`** (the plugin build hard-wires exactly
-   that). Either set it before the component runs or change the default in
-   `splitscreen.cpp` (search for `"BO3_CG_FRAME"`). Other switches:
-   * `BO3_SUN4=off` - go back to the shared sun-shadow slot for players 2-4
-     (the separate sun shadows for all four views are on by default).
-   * `BO3_SKIP_FIX=<names>` - disable individual relocations for bisecting.
-4. Ship the two `ui_scripts` folders wherever your client loads UI scripts
+3. There are no switches: the component has one fixed behaviour, the one
+   the plugin ships. (The experiment switches and test instrumentation from
+   development were removed in the September 2026 cleanup; their history is
+   in the git log.)
+4. Ship the three `ui_scripts` folders wherever your client loads UI scripts
    from (the plugin package puts them in `<game folder>\boiii\ui_scripts\`).
 5. Built in, no plugin DLL is needed.
 
-Define `SS_DIAG` to get the diagnostic trace
-(`%LOCALAPPDATA%\boiii\splitscreen_ui_trace.txt`) - extremely useful while
-working on it, never needed by players.
+Define `SS_DIAG` to get a log (`%LOCALAPPDATA%\boiii\splitscreen_ui_trace.txt`)
+with one line for every patch that stands down because the game's bytes
+differ - useful on a new game build, never needed by players.
 
 ## Option B: the ezz plugin
 
@@ -136,12 +135,14 @@ frees plugins at exit while game threads may still run through its hooks).
 
 ---
 
-## Runtime status block
+## Memory the component uses inside the image
 
-Diagnostic readers (and the component itself, to avoid patching twice) find a
-status block at image RVA `0x1A828D00`, magic `0xB03C0FFE`, followed by
-per-feature counters. Seat records (controller -> local client) are at
-`0x1A828500`.
+* `0x1A828D00`: the magic `0xB03C0FFE`, written once. The plugin checks it
+  so the component is never applied twice (a client with the component built
+  in, plus the plugin).
+* `0x1A828500`: the seat records (controller -> local client).
+
+Both lie in the unused tail of the last `.data` page.
 
 ## Testing notes
 

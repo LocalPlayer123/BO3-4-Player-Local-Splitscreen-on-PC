@@ -39,19 +39,11 @@
 			0x0221B152, 0x0221B1C4, 0x0221B20D, 0x0221B22D, 0x0221B28B, 0x0221B5E2,
 		};
 
-		// Enabled. It matches the console layout, and off is not safe either: once
-		// s_storage[2] holds an xuid the game does storage work for controller 2
-		// by itself, and every such call reads past a two-controller row.
-		// History: LOG.md, "targets_widen".
-		constexpr bool enable_targets_widen = true;
-
+		// Needed: once s_storage[2] holds an xuid the game does storage work for
+		// controller 2 by itself, and every such call reads past a two-controller
+		// row. History: LOG.md, "targets_widen".
 		bool widen_storage_targets()
 		{
-			if (!enable_targets_widen)
-			{
-				return false;
-			}
-
 			const auto module_base = base();
 			const auto old_table = module_base + targets_rva;
 
@@ -109,7 +101,6 @@
 				write_bytes(reinterpret_cast<void*>(module_base + rva), &row, sizeof(row));
 			}
 
-			set_status(27, static_cast<uint32_t>(new_table - module_base));
 			return true;
 		}
 
@@ -123,10 +114,6 @@
 		constexpr size_t localfileop_rva = 0x17889DF0;
 		constexpr size_t localfileop_elem = 0x1820;
 		constexpr uint32_t localfileop_lea = 0x022180CE; // 7-byte lea, disp32 at +3
-
-		// Where it ended up. A gamer-profile TaskRecord holds its LocalFileOpData
-		// pointer at +0x48, so (opData - base) / 0x1820 is the controller index.
-		size_t localfileop_new_rva = 0;
 
 		bool widen_local_file_ops()
 		{
@@ -163,143 +150,22 @@
 				return false;
 			}
 
-			localfileop_new_rva = new_array - module_base;
-			set_status(29, static_cast<uint32_t>(localfileop_new_rva));
 			return true;
 		}
 
-		// Why guest pumping retries: PS4 Storage_Pump assigns a new xuid in two
-		// stages. The first call clears storage and sets inShutdown; a later call
-		// assigns the xuid, but only once no storage target is busy, and targets
-		// stop being busy only when ProcessQueue at the end of the same function
-		// drains them. A controller pumped once and abandoned stays in shutdown.
-		constexpr uint32_t max_pump_attempts = 120;
-		uint32_t pump_attempts = 0;
-
-		// Guest pumps go through the detour: once installed, Storage_Pump starts
-		// with a jmp into our stub, and invoke() runs the original.
+		// Once installed, Storage_Pump starts with a jmp into our stub, and
+		// invoke() runs the original.
 		utils::hook::detour storage_pump_hook;
-		bool storage_pump_hooked = false;
-		bool inside_guest_pump = false;
-
-		void pump_guest_storage()
-		{
-			if (guests_pumped || !guests_filled || !storage_base_rva)
-			{
-				return;
-			}
-
-			// Bounded: if this many spaced attempts have not drained the queues,
-			// something else is wrong.
-			if (pump_attempts >= max_pump_attempts)
-			{
-				return;
-			}
-			set_status(26, ++pump_attempts);
-
-			// The detour is installed only after its prologue was verified; without
-			// it, do not call blind.
-			if (!storage_pump_hooked)
-			{
-				guests_pumped = true;
-				set_status(20, 2);
-				return;
-			}
-
-			inside_guest_pump = true;
-			storage_pump_hook.invoke<void>(2);
-			storage_pump_hook.invoke<void>(3);
-			inside_guest_pump = false;
-
-			// Stop once both guests hold an xuid; a non-zero reading is conclusive.
-			const auto storage = base() + storage_base_rva;
-			uint64_t xuid2 = 0;
-			uint64_t xuid3 = 0;
-			std::memcpy(&xuid2, reinterpret_cast<const void*>(storage + 2 * storage_stride),
-			            sizeof(xuid2));
-			std::memcpy(&xuid3, reinterpret_cast<const void*>(storage + 3 * storage_stride),
-			            sizeof(xuid3));
-			set_status(23, static_cast<uint32_t>(xuid3));
-			if (xuid2 && xuid3)
-			{
-				guests_pumped = true;
-				set_status(20, 1);
-			}
-		}
-
-		void pump_on_main()
-		{
-			set_status(21, ++ticks_main);
-		}
-
-		void pump_on_renderer()
-		{
-			set_status(24, ++ticks_renderer);
-		}
-
-		void count_async_ticks()
-		{
-			set_status(25, ++ticks_async);
-		}
-
-		// Quiescence gate: pump the guests from the async pipeline only after the
-		// game's own Storage_Pump count has stayed unchanged for several checks.
-		// Pumping while the game was still pumping made s_storage[0] and [1] lose
-		// their xuids.
-		uint32_t last_seen_pumps = 0;
-		uint32_t quiet_ticks = 0;
-		constexpr uint32_t quiet_required = 6; // x500ms = 3 s of no game storage work
-
-		void reap_guest_tasks(); // defined with the detour, below
-
-		void pump_guests_when_quiet()
-		{
-			if (guests_pumped || !guests_filled || !storage_base_rva)
-			{
-				return;
-			}
-
-			// Also wait until the game has pumped at least once: before that storage
-			// is not initialised, and calling in crashed (null read at 0x022E9B94).
-			if (ticks_main == 0)
-			{
-				return;
-			}
-
-			if (ticks_main != last_seen_pumps)
-			{
-				last_seen_pumps = ticks_main;
-				quiet_ticks = 0;
-				return;
-			}
-			if (++quiet_ticks < quiet_required)
-			{
-				return;
-			}
-			quiet_ticks = 0;
-
-			// Reap first: Storage_Pump refuses to assign while any target is
-			// busy, and the busy queries are global task lookups.
-			reap_guest_tasks();
-			pump_guest_storage();
-		}
 
 		// Com_ControllerIndex_GetLocalClientNum (PC 0x020EF7C0). On PS4 the lobby's
 		// gobblegum row reaches BG_UnlockablesGetLocalCACRoot (0xE4130), which
 		// asserts that CG_GetLocalClientGlobals(GetLocalClientNum(ci)) is non-null.
-		// Retail PC has no asserts, so a -1 silently draws an empty row. Published
-		// per controller (one byte, -1 = 0xFF) so the value is measured.
+		// Retail PC has no asserts, so a -1 silently draws an empty row.
 		constexpr uint32_t local_client_num_rva = 0x020E3040;
 
 		// cl_maxLocalClients (old RVA 0x053A2720), stored by the allocator at
-		// 0x0135D489. Published so the count raise can be confirmed from outside.
+		// 0x0135D489.
 		constexpr uint32_t cl_max_local_clients_rva = 0x05323720;
-		constexpr uint32_t seed_max_local_clients = 4;
-		uint32_t max_local_seeds = 0;
 		// Enables the count patches and the cl_maxLocalClients hold. The caller
 		// applies them only after the container relocations succeeded.
 		bool raise_local_client_count = true;
-
-		// Off: forcing cl_maxLocalClients fights the allocator, which writes that
-		// global itself from the count it really used.
-		bool hold_max_local_clients = false;

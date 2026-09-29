@@ -136,8 +136,7 @@ Now relocated (`relocate_cg_marker_blocks`).
 Render targets 5 (`SHADOWMAP_SUN_1P`) and 9 (`SHADOWMAP_TRANS_1P`) now have 12
 slices = 4 views x 3 partitions; RT 9's colour views for slices 8-11 live in a
 sidecar because its view set has only 8 inline slots. Verified: no flicker,
-turning player 4 no longer changes panes 2/3. `BO3_SUN4=off` restores the
-shared slot.
+turning player 4 no longer changes panes 2/3.
 
 ### B4. Earlier the same day
 Player 4's pane grey mid-round (`s_perController` [2]), round-start crash on a

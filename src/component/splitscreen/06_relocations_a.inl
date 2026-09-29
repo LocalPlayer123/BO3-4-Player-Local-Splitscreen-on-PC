@@ -1,4 +1,5 @@
-// Relocations, part A: completion fixes, per-client array engine (relocate_perclient), batches 1-11.
+// Relocations, part A: completion fixes, per-client array engine (relocate_perclient), batches 1-11
+// (sites and steps; the order is perclient_rows in 10_relocations_b.inl).
 // Part of splitscreen.cpp, included in order inside namespace splitscreen::{anon}.
 
 		// ============ Completion of earlier relocations ============
@@ -195,8 +196,6 @@
 			return moved == b + old_base ? 0 : moved;
 		}
 
-		void trace_text(const char* text);   // defined after trace_write
-
 		void complete_relocation(const char* name, const entcoll_site& moved_site,
 		                         const uint32_t old_base, const entcoll_site* sites,
 		                         const size_t count, int32_t* saved, bool& done)
@@ -206,22 +205,18 @@
 				return;
 			}
 			const auto fresh = moved_base_from_site(moved_site, old_base);
-			char line[160]{};
 			if (!fresh)
 			{
-				std::snprintf(line, sizeof(line), "%s completion: base not moved - skipped", name);
+				note("[splitscreen] %s completion: base not moved - skipped\n", name);
 			}
 			else if (!rewrite_entcoll(sites, count, old_base, fresh, saved))
 			{
-				std::snprintf(line, sizeof(line), "%s completion: a site did not match - NOTHING written", name);
+				note("[splitscreen] %s completion: a site did not match - NOTHING written\n", name);
 			}
 			else
 			{
 				done = true;
-				std::snprintf(line, sizeof(line), "%s completion: %zu remaining references moved to the new array",
-				              name, count);
 			}
-			trace_text(line);
 		}
 
 		bool players_kb_completed = false;
@@ -250,11 +245,10 @@
 			                    0x17DEF3E0, destination_abs, saved))
 			{
 				gamepads_completed = true;
-				trace_text("s_gamePads completion: 2 remaining references moved");
 			}
 			else
 			{
-				trace_text("s_gamePads completion: a site did not match - NOTHING written");
+				note("[splitscreen] s_gamePads completion: a site did not match - NOTHING written\n");
 			}
 		}
 
@@ -350,14 +344,7 @@
 				return false;
 			}
 
-			entcoll_world_new = reinterpret_cast<size_t>(world);
-			entcoll_nodes_new = reinterpret_cast<size_t>(nodes);
 			entcoll_relocated = true;
-			note("[splitscreen] entity collision [2]->[4]: world RVA 0x%08X,"
-			     " nodes RVA 0x%08X (%zu + %zu sites)\n",
-			     static_cast<uint32_t>(entcoll_world_new - b),
-			     static_cast<uint32_t>(entcoll_nodes_new - b),
-			     std::size(entcoll_world_sites), std::size(entcoll_node_sites));
 			return true;
 		}
 
@@ -366,7 +353,7 @@
 		// at +0x20000 (total 0x20008). Growing it alone would put lc 2's entries on
 		// the counts, so the count offset moves to 0x40000 (6 sites) and the size
 		// to 0x40010 (3 sites). Consumers read the buffer through cf_pointer_rva.
-		// All or nothing with rollback; gated on BO3_CG_FRAME.
+		// All or nothing with rollback.
 		struct cf_imm
 		{
 			uint32_t rva;
@@ -390,7 +377,6 @@
 			{0x008F2DB9, 2, 0x20008, 0x40010}, // mov r8d,0x20008  (init memset)
 		};
 		bool cf_relocated = false;
-		size_t cf_new_buffer = 0;
 
 		bool relocate_clientfield_callbacks()
 		{
@@ -500,11 +486,7 @@
 				write_bytes(ptr, &v, sizeof(v));
 			}
 
-			cf_new_buffer = reinterpret_cast<size_t>(fresh);
 			cf_relocated = true;
-			note("[splitscreen] clientfield callbacks [2]->[4]: buffer RVA 0x%08X,"
-			     " 2 leas + %zu immediates\n",
-			     static_cast<uint32_t>(cf_new_buffer - b), std::size(cf_imms));
 			return true;
 		}
 
@@ -547,8 +529,6 @@
 			{0x020F8FA9, 2, 1, 0x02, 0x04},     // cmp ebp,2            free-all clients
 		};
 		bool entword_relocated = false;
-		size_t entword_new = 0;
-		const char* entword_result = "clientObjMap: not attempted";
 
 		bool entword_imm_reads(const entword_imm& s, uint32_t want)
 		{
@@ -574,7 +554,6 @@
 				if (!entword_imm_reads(s, s.was))
 				{
 					note("[splitscreen] entword imm 0x%08X is not 0x%X - not patching\n", s.rva, s.was);
-					entword_result = "clientObjMap: NOT moved - an immediate did not match";
 					return false;
 				}
 			}
@@ -583,7 +562,7 @@
 				allocate_near_module(entword_slots * entword_client_bytes));
 			if (!fresh)
 			{
-				entword_result = "clientObjMap: NOT moved - allocation failed";
+				note("[splitscreen] clientObjMap: NOT moved - allocation failed\n");
 				return false;
 			}
 			// Re-stride the two stock rows: old row r (0x702 words) -> new row r
@@ -619,16 +598,12 @@
 						auto* insn = reinterpret_cast<uint8_t*>(b + entword_sites[j].rva);
 						write_bytes(insn + entword_sites[j].disp_off, &saved[j], sizeof(int32_t));
 					}
-					entword_result = "clientObjMap: NOT moved - an immediate write failed (rolled back)";
+					note("[splitscreen] clientObjMap: NOT moved - an immediate write failed (rolled back)\n");
 					return false;
 				}
 				++done;
 			}
-			entword_new = reinterpret_cast<size_t>(fresh);
 			entword_relocated = true;
-			entword_result = "clientObjMap [2][0x702] -> [4][0x704] (8 sites, 12 immediates)";
-			note("[splitscreen] clientObjMap [2][0x702] -> [4][0x704] at RVA 0x%08X (8 sites, %zu imms)\n",
-			     static_cast<uint32_t>(entword_new - b), std::size(entword_imms));
 			return true;
 		}
 
@@ -666,7 +641,6 @@
 			0x48, 0x8B, 0xB4, 0xC8, 0xF0, 0x10, 0x00, 0x00, // mov rsi,[rax+rcx*8+0x10F0]
 		};
 		constexpr uint32_t exposure_select_lea_off = 19;   // lea rsi,[rip+d] inside the patch
-		const char* exposure_result = "exposure adaptions: not attempted";
 		size_t exposure_new = 0;
 
 		bool relocate_exposure_adaptions()
@@ -680,14 +654,15 @@
 			if (!readable(select, sizeof(exposure_select_stock))
 				|| std::memcmp(select, exposure_select_stock, sizeof(exposure_select_stock)) != 0)
 			{
-				exposure_result = "exposure adaptions: NOT moved - selector bytes differ at 0x01C6BFDC";
+				note("[splitscreen] exposure adaptions: NOT moved - selector bytes differ at 0x%08X\n",
+				     exposure_select_rva);
 				return false;
 			}
 			auto* fresh = static_cast<uint8_t*>(
 				allocate_near_module(exposure_new_count * exposure_stride));
 			if (!fresh)
 			{
-				exposure_result = "exposure adaptions: NOT moved - allocation failed";
+				note("[splitscreen] exposure adaptions: NOT moved - allocation failed\n");
 				return false;
 			}
 			std::memset(fresh, 0, exposure_new_count * exposure_stride);
@@ -709,7 +684,7 @@
 			const auto lea_disp = static_cast<int64_t>(fresh_abs + exposure_texture_off) - lea_end;
 			if (lea_disp < INT32_MIN || lea_disp > INT32_MAX)
 			{
-				exposure_result = "exposure adaptions: NOT moved - new block out of rip range";
+				note("[splitscreen] exposure adaptions: NOT moved - new block out of rip range\n");
 				return false;
 			}
 			const auto d32 = static_cast<int32_t>(lea_disp);
@@ -721,7 +696,7 @@
 			if (!rewrite_entcoll(exposure_base_sites, std::size(exposure_base_sites),
 			                     exposure_base, fresh_abs, saved_base))
 			{
-				exposure_result = "exposure adaptions: NOT moved - a base lea did not match";
+				note("[splitscreen] exposure adaptions: NOT moved - a base lea did not match\n");
 				return false;
 			}
 			const auto undo_base = [&]
@@ -736,7 +711,7 @@
 			                     exposure_base, fresh_abs, saved_fill))
 			{
 				undo_base();
-				exposure_result = "exposure adaptions: NOT moved - the fill end lea did not match";
+				note("[splitscreen] exposure adaptions: NOT moved - the fill end lea did not match\n");
 				return false;
 			}
 			const auto undo_fill = [&]
@@ -751,7 +726,7 @@
 			{
 				undo_fill();
 				undo_base();
-				exposure_result = "exposure adaptions: NOT moved - a create/free end lea did not match";
+				note("[splitscreen] exposure adaptions: NOT moved - a create/free end lea did not match\n");
 				return false;
 			}
 			if (!write_bytes(select, patch, sizeof(patch)))
@@ -763,11 +738,10 @@
 				}
 				undo_fill();
 				undo_base();
-				exposure_result = "exposure adaptions: NOT moved - selector write failed (rolled back)";
+				note("[splitscreen] exposure adaptions: NOT moved - selector write failed (rolled back)\n");
 				return false;
 			}
 			exposure_new = fresh_abs;
-			exposure_result = "exposure adaptions [3] -> [5] (PS4 MAX_LOCAL_CLIENTS+1), selector extraCam ? 4 : lc";
 			return true;
 		}
 
@@ -783,7 +757,6 @@
 		// its free list skipping node 0x9000.
 		constexpr uint32_t model_pool_base = 0x16293160;
 		constexpr uint32_t model_pool_stride = 0x28;
-		constexpr uint32_t model_pool_old_count = 0x9000;
 		constexpr uint32_t model_pool_new_count = 0xFFFF;
 		constexpr uint32_t model_pool_sentinel = 0x9000;
 		constexpr uint32_t model_pool_self_off = 0x1C;
@@ -834,7 +807,6 @@
 		constexpr uint8_t cbuf_frame_bound_stock[] = {0x83, 0xFE, 0x02, 0x7C, 0xE9};
 		constexpr uint32_t cbuf_text_size = 0x10000;
 		constexpr size_t cbuf_record_stride = 0x10;
-		const char* cbuf34_result = "command buffers 2/3: not attempted";
 
 		bool install_cbuf_for_players34()
 		{
@@ -842,7 +814,7 @@
 			const auto* lea = reinterpret_cast<const uint8_t*>(b + cbuf_exec_lea_rva);
 			if (!readable(lea, 7) || std::memcmp(lea, cbuf_exec_lea_head, sizeof(cbuf_exec_lea_head)) != 0)
 			{
-				cbuf34_result = "command buffers 2/3: NOT installed - Cbuf_ExecuteInternal lea differs";
+				note("[splitscreen] command buffers 2/3: NOT installed - Cbuf_ExecuteInternal lea differs\n");
 				return false;
 			}
 			int32_t disp = 0;
@@ -850,19 +822,19 @@
 			auto* records = reinterpret_cast<uint8_t*>(b + cbuf_exec_lea_rva + 7 + static_cast<int64_t>(disp));
 			if (records == reinterpret_cast<uint8_t*>(b + cbuf_old_records_rva))
 			{
-				cbuf34_result = "command buffers 2/3: NOT installed - the cbuf records were not relocated";
+				note("[splitscreen] command buffers 2/3: NOT installed - the cbuf records were not relocated\n");
 				return false;
 			}
 			if (!readable(records, 4 * cbuf_record_stride))
 			{
-				cbuf34_result = "command buffers 2/3: NOT installed - records unreadable";
+				note("[splitscreen] command buffers 2/3: NOT installed - records unreadable\n");
 				return false;
 			}
 			for (size_t i = 2 * cbuf_record_stride; i < 4 * cbuf_record_stride; ++i)
 			{
 				if (records[i] != 0)
 				{
-					cbuf34_result = "command buffers 2/3: NOT installed - records 2/3 are not empty";
+					note("[splitscreen] command buffers 2/3: NOT installed - records 2/3 are not empty\n");
 					return false;
 				}
 			}
@@ -873,14 +845,14 @@
 				|| !readable(bound, sizeof(cbuf_frame_bound_stock))
 				|| std::memcmp(bound, cbuf_frame_bound_stock, sizeof(cbuf_frame_bound_stock)) != 0)
 			{
-				cbuf34_result = "command buffers 2/3: NOT installed - range check or Com_Frame bound bytes differ";
+				note("[splitscreen] command buffers 2/3: NOT installed - range check or Com_Frame bound bytes differ\n");
 				return false;
 			}
 			auto* text = static_cast<uint8_t*>(
 				VirtualAlloc(nullptr, 2 * cbuf_text_size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
 			if (!text)
 			{
-				cbuf34_result = "command buffers 2/3: NOT installed - allocation failed";
+				note("[splitscreen] command buffers 2/3: NOT installed - allocation failed\n");
 				return false;
 			}
 			for (size_t lc = 2; lc < 4; ++lc)
@@ -897,18 +869,17 @@
 			if (!write_bytes(range + 3, &four, 1))
 			{
 				std::memset(records + 2 * cbuf_record_stride, 0, 2 * cbuf_record_stride);
-				cbuf34_result = "command buffers 2/3: NOT installed - range check write failed";
+				note("[splitscreen] command buffers 2/3: NOT installed - range check write failed\n");
 				return false;
 			}
 			if (!write_bytes(bound + 2, &four, 1))
 			{
 				write_bytes(range + 3, &two, 1);
 				std::memset(records + 2 * cbuf_record_stride, 0, 2 * cbuf_record_stride);
-				cbuf34_result = "command buffers 2/3: NOT installed - Com_Frame bound write failed (rolled back)";
+				note("[splitscreen] command buffers 2/3: NOT installed - Com_Frame bound write failed (rolled back)\n");
 				return false;
 			}
 			cbuf_range_resting = 0x04;
-			cbuf34_result = "command buffers 2/3: 64 KB each, Cbuf_Execute range 2 -> 4, Com_Frame Cbuf loop 2 -> 4";
 			return true;
 		}
 
@@ -943,7 +914,6 @@
 		constexpr uint8_t lobbymsg_bound_stock[] = {0x83, 0xFB, 0x02, 0x7C, 0xC5};   // cmp ebx,2 / jl
 		constexpr uint32_t netchan_get_lea_rva = 0x0211BF51;                          // lea rax,[s_netchan]
 		constexpr uint32_t netchan_old_base = 0x16DEAEB0;
-		const char* joinclient_result = "lobby join clients: not attempted";
 		size_t joinclient_new = 0;
 
 		bool relocate_join_clients()
@@ -957,7 +927,7 @@
 			if (!readable(bound, sizeof(lobbymsg_bound_stock))
 				|| std::memcmp(bound, lobbymsg_bound_stock, sizeof(lobbymsg_bound_stock)) != 0)
 			{
-				joinclient_result = "lobby join clients: NOT moved - LobbyMsgTransport_Update bytes differ";
+				note("[splitscreen] lobby join clients: NOT moved - LobbyMsgTransport_Update bytes differ\n");
 				return false;
 			}
 			// The widened loop reads controllers 2/3 through the netchan table, so
@@ -966,19 +936,19 @@
 			int32_t nd = 0;
 			if (!readable(nlea, 7))
 			{
-				joinclient_result = "lobby join clients: NOT moved - netchan lea unreadable";
+				note("[splitscreen] lobby join clients: NOT moved - netchan lea unreadable\n");
 				return false;
 			}
 			std::memcpy(&nd, nlea + 3, sizeof(nd));
 			if (netchan_get_lea_rva + 7 + static_cast<int64_t>(nd) == netchan_old_base)
 			{
-				joinclient_result = "lobby join clients: NOT moved - the netchan table is still [2]";
+				note("[splitscreen] lobby join clients: NOT moved - the netchan table is still [2]\n");
 				return false;
 			}
 			auto* fresh = static_cast<uint8_t*>(allocate_near_module(joinclient_new_count * joinclient_stride));
 			if (!fresh)
 			{
-				joinclient_result = "lobby join clients: NOT moved - allocation failed";
+				note("[splitscreen] lobby join clients: NOT moved - allocation failed\n");
 				return false;
 			}
 			const auto* old = reinterpret_cast<const uint8_t*>(b + joinclient_base);
@@ -996,7 +966,7 @@
 			static int32_t saved_end[std::size(joinclient_end_sites)]{};
 			if (!rewrite_entcoll(joinclient_sites, std::size(joinclient_sites), joinclient_base, fresh_abs, saved))
 			{
-				joinclient_result = "lobby join clients: NOT moved - a reference did not match";
+				note("[splitscreen] lobby join clients: NOT moved - a reference did not match\n");
 				return false;
 			}
 			// end markers: target_off is 2*stride past their start; the new end is 4*stride
@@ -1008,20 +978,17 @@
 					auto* insn = reinterpret_cast<uint8_t*>(b + joinclient_sites[j].rva);
 					write_bytes(insn + joinclient_sites[j].disp_off, &saved[j], sizeof(int32_t));
 				}
-				joinclient_result = "lobby join clients: NOT moved - an end marker did not match (rolled back)";
+				note("[splitscreen] lobby join clients: NOT moved - an end marker did not match (rolled back)\n");
 				return false;
 			}
 			const uint8_t four = 0x04;
 			if (!write_bytes(bound + 2, &four, 1))
 			{
-				joinclient_result = "lobby join clients [2] -> [4] moved, but the message loop widen FAILED";
+				note("[splitscreen] lobby join clients [2] -> [4] moved, but the message loop widen FAILED\n");
 				joinclient_new = fresh_abs;
 				return false;
 			}
 			joinclient_new = fresh_abs;
-			joinclient_result = "lobby join clients [2] -> [4] (9 sites + 2 end markers), LobbyMsgTransport_Update 2 -> 4";
-			note("[splitscreen] lobby join clients [2] -> [4] at RVA 0x%08X, lobby message loop 2 -> 4\n",
-			     static_cast<uint32_t>(fresh_abs - b));
 			return true;
 		}
 
@@ -1040,7 +1007,6 @@
 			{0x01F427FE, {0x83, 0xF9, 0x01, 0x0F, 0x87, 0x12, 0x18, 0x00, 0x00}, "Engine.GetClientNum"},
 			{0x01F4FC2E, {0x83, 0xF9, 0x01, 0x0F, 0x87, 0x17, 0x18, 0x00, 0x00}, "Engine.GetPredictedClientNum"},
 		};
-		const char* lua_ctrl_result = "lua controller checks: not attempted";
 
 		bool widen_lua_controller_checks()
 		{
@@ -1050,7 +1016,7 @@
 				const auto* site = reinterpret_cast<const uint8_t*>(b + p.rva);
 				if (!readable(site, sizeof(p.stock)) || std::memcmp(site, p.stock, sizeof(p.stock)) != 0)
 				{
-					lua_ctrl_result = "lua controller checks: NOT widened - bytes differ";
+					note("[splitscreen] lua controller checks: NOT widened - bytes differ\n");
 					return false;
 				}
 			}
@@ -1063,10 +1029,12 @@
 					++done;
 				}
 			}
-			lua_ctrl_result = done == std::size(lua_ctrl_checks)
-				                  ? "lua controller checks 1 -> 3: Engine.GetClientNum, GetPredictedClientNum"
-				                  : "lua controller checks: a write FAILED";
-			return done == std::size(lua_ctrl_checks);
+			if (done != std::size(lua_ctrl_checks))
+			{
+				note("[splitscreen] lua controller checks: a write FAILED\n");
+				return false;
+			}
+			return true;
 		}
 
 		// UI model string hunk "UIModelAllocator" 0xC0000 -> 4 MB (PS4 0x80000). With
@@ -1083,7 +1051,6 @@
 		constexpr size_t model_string_new_size = 0x400000;
 		utils::hook::detour hunk_create_hook;
 		void* model_string_buffer = nullptr;
-		const char* model_string_result = "ui model string hunk: not installed";
 
 		// "ClientCache_ClientPool" hunk 0x3880 -> 0x7100. Each player centity takes
 		// two blocks per local client from it; with four players it ran full and the
@@ -1092,7 +1059,6 @@
 		constexpr size_t client_cache_stock_size = 0x3880;
 		constexpr size_t client_cache_new_size = 0x7100;
 		void* client_cache_buffer = nullptr;
-		const char* client_cache_result = "client cache pool: not seen";
 
 		void* hunk_create_stub(void* buffer, size_t size, int scheme, int flags, void* arg5,
 		                       const char* name, int arg7)
@@ -1109,12 +1075,10 @@
 				{
 					buffer = client_cache_buffer;
 					size = client_cache_new_size;
-					client_cache_result = "client cache pool 0x3880 -> 0x7100 (ClientCache_ClientPool)";
-					note("[splitscreen] client cache pool 0x3880 -> 0x7100 (ClientCache_ClientPool)\n");
 				}
 				else
 				{
-					client_cache_result = "client cache pool: allocation failed - stock 0x3880 kept";
+					note("[splitscreen] client cache pool: allocation failed - stock 0x3880 kept\n");
 				}
 			}
 			if (!model_string_buffer && name && size == model_string_stock_size
@@ -1126,11 +1090,10 @@
 					model_string_buffer = bigger;
 					buffer = bigger;
 					size = model_string_new_size;
-					model_string_result = "ui model string hunk 0xC0000 -> 0x400000 (UIModelAllocator)";
 				}
 				else
 				{
-					model_string_result = "ui model string hunk: allocation failed - stock 0xC0000 kept";
+					note("[splitscreen] ui model string hunk: allocation failed - stock 0xC0000 kept\n");
 				}
 			}
 			return hunk_create_hook.invoke<void*>(buffer, size, scheme, flags, arg5, name, arg7);
@@ -1142,18 +1105,16 @@
 			if (!readable(p, sizeof(hunk_create_prologue))
 				|| std::memcmp(p, hunk_create_prologue, sizeof(hunk_create_prologue)) != 0)
 			{
-				model_string_result = "ui model string hunk: NOT hooked - Hunk_UserCreateFromBuffer bytes differ";
+				note("[splitscreen] ui model string hunk: NOT hooked - Hunk_UserCreateFromBuffer bytes differ\n");
 				return false;
 			}
 			hunk_create_hook.create(reinterpret_cast<void*>(base() + hunk_create_rva), hunk_create_stub);
-			model_string_result = "ui model string hunk: hooked, waiting for UI_Model_Init";
 			return true;
 		}
 
 		constexpr uint32_t model_pool_bound_rva = 0x0200D40E;
 		constexpr uint8_t model_pool_bound_stock[] = {0xBE, 0x00, 0x90, 0x00, 0x00};   // mov esi,0x9000
 		constexpr uint8_t model_pool_bound_new[] = {0xBE, 0xFF, 0xFF, 0x00, 0x00};     // mov esi,0xFFFF
-		const char* model_pool_result = "ui model pool: not attempted";
 		size_t model_pool_new = 0;
 
 		bool relocate_ui_model_pool()
@@ -1167,7 +1128,8 @@
 			if (!readable(bound, sizeof(model_pool_bound_stock))
 				|| std::memcmp(bound, model_pool_bound_stock, sizeof(model_pool_bound_stock)) != 0)
 			{
-				model_pool_result = "ui model pool: NOT moved - reset bound bytes differ at 0x0200DACE";
+				note("[splitscreen] ui model pool: NOT moved - reset bound bytes differ at 0x%08X\n",
+				     model_pool_bound_rva);
 				return false;
 			}
 			// The old array must still be all zero: if UI_Model_Init had already
@@ -1175,14 +1137,14 @@
 			const auto* old_nodes = reinterpret_cast<const uint8_t*>(b + model_pool_base);
 			if (!readable(old_nodes, 16 * model_pool_stride))
 			{
-				model_pool_result = "ui model pool: NOT moved - old array unreadable";
+				note("[splitscreen] ui model pool: NOT moved - old array unreadable\n");
 				return false;
 			}
 			for (size_t i = 0; i < 16 * model_pool_stride; ++i)
 			{
 				if (old_nodes[i] != 0)
 				{
-					model_pool_result = "ui model pool: NOT moved - old array already initialised";
+					note("[splitscreen] ui model pool: NOT moved - old array already initialised\n");
 					return false;
 				}
 			}
@@ -1190,7 +1152,7 @@
 				allocate_near_module(static_cast<size_t>(model_pool_new_count) * model_pool_stride));
 			if (!fresh)
 			{
-				model_pool_result = "ui model pool: NOT moved - allocation failed";
+				note("[splitscreen] ui model pool: NOT moved - allocation failed\n");
 				return false;
 			}
 			std::memset(fresh, 0, static_cast<size_t>(model_pool_new_count) * model_pool_stride);
@@ -1216,7 +1178,7 @@
 			static int32_t saved[std::size(model_pool_sites)]{};
 			if (!rewrite_entcoll(model_pool_sites, std::size(model_pool_sites), model_pool_base, fresh_abs, saved))
 			{
-				model_pool_result = "ui model pool: NOT moved - a reference did not match";
+				note("[splitscreen] ui model pool: NOT moved - a reference did not match\n");
 				return false;
 			}
 			if (!write_bytes(bound, model_pool_bound_new, sizeof(model_pool_bound_new)))
@@ -1226,14 +1188,11 @@
 					auto* insn = reinterpret_cast<uint8_t*>(b + model_pool_sites[j].rva);
 					write_bytes(insn + model_pool_sites[j].disp_off, &saved[j], sizeof(int32_t));
 				}
-				model_pool_result = "ui model pool: NOT moved - reset bound write failed (rolled back)";
+				note("[splitscreen] ui model pool: NOT moved - reset bound write failed (rolled back)\n");
 				return false;
 			}
 			model_pool_new = fresh_abs;
-			model_pool_result = "ui model pool 0x9000 -> 0xFFFF nodes (28 sites, reset bound, 0x9000 kept as end sentinel)";
 			install_model_string_hunk();
-			note("[splitscreen] ui model pool 0x9000 -> 0xFFFF nodes at RVA 0x%08X\n",
-			     static_cast<uint32_t>(fresh_abs - b));
 			return true;
 		}
 
@@ -1263,7 +1222,6 @@
 			{0x01D0DF11, 2, 4, 4, sst_new_count},       // mov r14d,4 -> 8
 			{0x02E8A841, 1, 4, 3, sst_new_count - 1},   // mov edi,3 (dec/jns) -> 7
 		};
-		const char* sst_result = "sun-shadow ring: not attempted";
 		size_t sst_new = 0;
 
 		bool relocate_sst_ring()
@@ -1279,20 +1237,20 @@
 				uint32_t cur = 0;
 				if (!readable(at, s.size))
 				{
-					sst_result = "sun-shadow ring: NOT moved - immediate unreadable";
+					note("[splitscreen] sun-shadow ring: NOT moved - immediate unreadable\n");
 					return false;
 				}
 				std::memcpy(&cur, at, s.size);
 				if (cur != s.was)
 				{
-					sst_result = "sun-shadow ring: NOT moved - an immediate differs";
+					note("[splitscreen] sun-shadow ring: NOT moved - an immediate differs\n");
 					return false;
 				}
 			}
 			auto* fresh = static_cast<uint8_t*>(allocate_near_module(sst_new_count * sst_stride));
 			if (!fresh)
 			{
-				sst_result = "sun-shadow ring: NOT moved - allocation failed";
+				note("[splitscreen] sun-shadow ring: NOT moved - allocation failed\n");
 				return false;
 			}
 			std::memset(fresh, 0, sst_new_count * sst_stride);
@@ -1302,7 +1260,7 @@
 			static int32_t saved_end[std::size(sst_end_site)]{};
 			if (!rewrite_entcoll(sst_sites, std::size(sst_sites), sst_base, fresh_abs, saved))
 			{
-				sst_result = "sun-shadow ring: NOT moved - a base lea did not match";
+				note("[splitscreen] sun-shadow ring: NOT moved - a base lea did not match\n");
 				return false;
 			}
 			const auto undo_sites = [&]
@@ -1318,7 +1276,7 @@
 			                     fresh_abs + (sst_new_count - sst_old_count) * sst_stride, saved_end))
 			{
 				undo_sites();
-				sst_result = "sun-shadow ring: NOT moved - the end lea did not match";
+				note("[splitscreen] sun-shadow ring: NOT moved - the end lea did not match\n");
 				return false;
 			}
 			size_t done = 0;
@@ -1335,13 +1293,12 @@
 					auto* insn = reinterpret_cast<uint8_t*>(b + sst_end_site[0].rva);
 					write_bytes(insn + sst_end_site[0].disp_off, &saved_end[0], sizeof(int32_t));
 					undo_sites();
-					sst_result = "sun-shadow ring: NOT moved - an immediate write failed (rolled back)";
+					note("[splitscreen] sun-shadow ring: NOT moved - an immediate write failed (rolled back)\n");
 					return false;
 				}
 				++done;
 			}
 			sst_new = fresh_abs;
-			sst_result = "sun-shadow ring [4] -> [8] (per-view records, 5 leas + 3 immediates)";
 			return true;
 		}
 
@@ -1356,34 +1313,12 @@
 
 		// DWARF-map batch 1: PS4 LOCAL_CLIENT_COUNT globals on the cgame path, found
 		// on the PC by stride, sites from tools/gen_reloc_sites.py (data/reloc_sites/).
-		// Slots 2..3 are foreign, so each is relocated. Gated on BO3_CG_FRAME.
-		// cgDC - the per-client display context (CG_Init memsets cgDC[lc])
-		constexpr uint32_t cgdc_base = 0x049B2CD0;
-		constexpr uint32_t cgdc_stride = 0x1838;
+		// Slots 2..3 are foreign, so each is relocated.
+		// cgDC - the per-client display context (CG_Init memsets cgDC[lc]), [2] x 0x1838.
 		constexpr entcoll_site cgdc_sites[] = {
 			{0x008F0ABC, 3, 7, false, 0x0000}, // lea rbx, [rbx + 0x4a31cd0]
 			{0x010AAC43, 5, 9, false, 0x002C}, // movss xmm0, dword ptr [rax + rcx + 0x4a31cfc]
 		};
-		bool cgdc_relocated = false;
-
-		bool relocate_cgdc()
-		{
-			if (cgdc_relocated) { return true; }
-			const auto b = base();
-			auto* fresh = static_cast<uint8_t*>(allocate_near_module(4 * cgdc_stride));
-			if (!fresh) { return false; }
-			std::memset(fresh, 0, 4 * cgdc_stride);
-			std::memcpy(fresh, reinterpret_cast<const void*>(b + cgdc_base), 2 * cgdc_stride);
-			static int32_t saved[std::size(cgdc_sites)]{};
-			if (!rewrite_entcoll(cgdc_sites, std::size(cgdc_sites), cgdc_base, reinterpret_cast<size_t>(fresh), saved))
-			{
-				return false;
-			}
-			cgdc_relocated = true;
-			note("[splitscreen] cgdc [2]->[4] at RVA 0x%08X (%zu sites)\n",
-			     static_cast<uint32_t>(reinterpret_cast<size_t>(fresh) - b), std::size(cgdc_sites));
-			return true;
-		}
 
 		// Not relocated: a stride-0x1660 array of 18 per-client elements and a
 		// stride-0x188 pool of handle-indexed entries. A stride match is not enough,
@@ -1512,8 +1447,6 @@
 				return false;
 			}
 			playerkeys_relocated = true;
-			note("[splitscreen] playerKeys [2]->[4] at RVA 0x%08X (%zu sites)\n",
-			     static_cast<uint32_t>(reinterpret_cast<size_t>(fresh) - b), std::size(playerkeys_sites));
 			return true;
 		}
 
@@ -1521,9 +1454,7 @@
 		// 0x13C6A0), [2] on PC. For lc 2, CG_UpdateNotetrackLerps read an entity number
 		// from foreign memory and wrote through a wild pointer. 34 sites (5 RIP,
 		// 29 ABS32), data/reloc_sites/sites_notetracklerps.txt.
-		// CG_InitNotetrackLerps(2) initializes the new row.
-		constexpr uint32_t notetracklerps_base = 0x0474B130;
-		constexpr uint32_t notetracklerps_stride = 0x340;
+		// CG_InitNotetrackLerps(2) initializes the new row. PC [2] x 0x340.
 		constexpr entcoll_site notetracklerps_sites[] = {
 			{0x00248E3F, 3, 7, true , 0x0000}, // lea rdx, [rip + 0x45812ea]
 			{0x00249355, 3, 7, true , 0x0034}, // lea rcx, [rip + 0x4580e08]
@@ -1560,27 +1491,6 @@
 			{0x0027A22C, 4, 8, false, 0x0014}, // mov eax, dword ptr [rdi + r10 + 0x47ca144]
 			{0x0027A273, 4, 12, false, 0x0000}, // mov dword ptr [rdi + r10 + 0x47ca130], 3
 		};
-		bool notetracklerps_relocated = false;
-
-		bool relocate_notetracklerps()
-		{
-			if (notetracklerps_relocated) { return true; }
-			const auto b = base();
-			auto* fresh = static_cast<uint8_t*>(allocate_near_module(4 * notetracklerps_stride));
-			if (!fresh) { return false; }
-			std::memset(fresh, 0, 4 * notetracklerps_stride);
-			std::memcpy(fresh, reinterpret_cast<const void*>(b + notetracklerps_base), 2 * notetracklerps_stride);
-			static int32_t saved[std::size(notetracklerps_sites)]{};
-			if (!rewrite_entcoll(notetracklerps_sites, std::size(notetracklerps_sites),
-			                     notetracklerps_base, reinterpret_cast<size_t>(fresh), saved))
-			{
-				return false;
-			}
-			notetracklerps_relocated = true;
-			note("[splitscreen] g_notetrackLerps [2]->[4] at RVA 0x%08X (%zu sites)\n",
-			     static_cast<uint32_t>(reinterpret_cast<size_t>(fresh) - b), std::size(notetracklerps_sites));
-			return true;
-		}
 
 		// DWARF-map batch 1b: PS4 [4] globals the cgame frame touches, matched to the
 		// PC by stride and confirmed by the index register (lc, or the cg_t index).
@@ -1595,6 +1505,17 @@
 			size_t count;
 			uint32_t ctor_rva;          // 0: zero-fill IS the initial state
 			uint8_t ctor_sig[8];        // the constructor's first bytes, verified
+		};
+
+		// One step of perclient_rows (10_relocations_b.inl), run in order by
+		// relocate_perclient_rows(). A plain row moves `array` with relocate_perclient;
+		// an `own` row is a relocation with a layout of its own and is called instead.
+		struct perclient_row
+		{
+			perclient_array array;                                  // own rows: the name only
+			bool (*pre)(const perclient_array&) = nullptr;          // false: skipped, nothing written
+			bool (*post)(const perclient_array&, size_t) = nullptr; // after a move, gets the new block
+			bool (*own)() = nullptr;
 		};
 
 		// cg_pmove - pmove_t[LOCAL_CLIENT_COUNT] (PS4 0x0451EFE0, 0x1660), used every
@@ -1729,19 +1650,6 @@
 			{0x004616C4, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x4369225]
 		};
 
-		constexpr perclient_array batch1b[] = {
-			{"cg_pmove", 0x04C99740, 0x1660, cg_pmove_sites, std::size(cg_pmove_sites), 0x009B4720, {0x33, 0xD2, 0x0F, 0x57, 0xC0, 0x48, 0x8D, 0x05}},
-			{"camerashake", 0x04764990, 0x104, camerashake_sites, std::size(camerashake_sites), 0x00000000, {}},
-			{"moverinfos", 0x047641B0, 0x390, moverinfos_sites, std::size(moverinfos_sites), 0x00000000, {}},
-			{"moveinfoentnum", 0x04764140, 0x4, moveinfoentnum_sites, std::size(moveinfoentnum_sites), 0x00000000, {}},
-			{"rumble", 0x04C9E470, 0x410, rumble_sites, std::size(rumble_sites), 0x00000000, {}},
-			{"atglob", 0x036007C0, 0x1604, atglob_sites, std::size(atglob_sites), 0x00000000, {}},
-			{"aimtargetcmd", 0x03600780, 0x10, aimtargetcmd_sites, std::size(aimtargetcmd_sites), 0x00000000, {}},
-			{"arcdata", 0x047992B0, 0xEEC, arcdata_sites, std::size(arcdata_sites), 0x00000000, {}},
-			{"zbarriers", 0x0474B8F0, 0xC400, zbarriers_sites, std::size(zbarriers_sites), 0x00000000, {}},
-		};
-		size_t batch1b_new[std::size(batch1b)] = {};
-
 		// Per-local-client [2][18] x 0x132 array: the game session's 18 member slots
 		// for each local client. lc 2 ran past it into a static cmd_function_t node.
 		// Moved to [4]; its clear (memset 0x2B08) widens to four rows.
@@ -1834,8 +1742,6 @@
 			{
 				return 0;
 			}
-			note("[splitscreen] %s [2]->[4] at RVA 0x%08X (%zu sites)\n", a.name,
-			     static_cast<uint32_t>(reinterpret_cast<size_t>(fresh) - b), a.count);
 			return reinterpret_cast<size_t>(fresh);
 		}
 
@@ -1903,8 +1809,8 @@
 		// four counts. Widen the memset 0x18800 -> 0x31000, and turn the 11-byte
 		// qword store to numcgZBarriers into xorps/movups/nop, a 16-byte store
 		// (its slots 2..3 are padding; xmm0 is volatile). Otherwise player 3's
-		// count never resets and passes 128 on the next map.
-		bool widen_zbarrier_clear(const size_t zb_new)
+		// count never resets and passes 128 on the next map. Post-step of the zbarriers row.
+		bool widen_zbarrier_clear(const perclient_array&, const size_t zb_new)
 		{
 			const auto b = base();
 			auto* imm = reinterpret_cast<uint8_t*>(b + 0x004616CD);
@@ -1936,21 +1842,6 @@
 				return false;
 			}
 			return true;
-		}
-
-		void relocate_batch1b()
-		{
-			for (size_t i = 0; i < std::size(batch1b); ++i)
-			{
-				if (!batch1b_new[i])
-				{
-					batch1b_new[i] = relocate_perclient(batch1b[i]);
-				}
-				if (batch1b_new[i] && std::strcmp(batch1b[i].name, "zbarriers") == 0)
-				{
-					widen_zbarrier_clear(batch1b_new[i]);
-				}
-			}
 		}
 
 		// DWARF-map batch 2.
@@ -2056,13 +1947,6 @@
 			return true;
 		}
 
-		constexpr perclient_array batch2[] = {
-			{"totalcoverage", 0x04CC3420, 0x360, totalcoverage_sites, std::size(totalcoverage_sites), 0, {}},
-			{"rightstick", 0x0531C760, 0xA, rightstick_sites, std::size(rightstick_sites), 0, {}},
-			{"gamepadbuttons", 0x0531C780, 0x2E, gamepadbuttons_sites, std::size(gamepadbuttons_sites), 0, {}},
-		};
-		size_t batch2_new[std::size(batch2)] = {};
-
 		// cgExploderTriggers (1000 x 0x30 per client, row 0xBB80) and cgExploderTriggerCount
 		// (int per client): [4] on PS4 (0x03E9C550), [2] on PC. Trigger row 2 is foreign data
 		// and count slot 3 is written by a static initializer. CG_ExplodersInit clears the
@@ -2147,22 +2031,7 @@
 				return false;
 			}
 			exploder_trig_new = reinterpret_cast<size_t>(fresh);
-			note("[splitscreen] cgExploderTriggers + counts [2]->[4] at RVA 0x%08X\n",
-			     static_cast<uint32_t>(exploder_trig_new - b));
 			return true;
-		}
-
-		void relocate_batch2()
-		{
-			for (size_t i = 0; i < std::size(batch2); ++i)
-			{
-				if (!batch2_new[i])
-				{
-					batch2_new[i] = relocate_perclient(batch2[i]);
-				}
-			}
-			relocate_exploder_triggers();
-			relocate_gaglobs();
 		}
 
 		// ---- Batch 3: screen effects and compass ----
@@ -2170,7 +2039,7 @@
 		// packed back to back (PS4 0x04001E50 / EC0 / EF0), so each slot 2 is the next base.
 		// CG_CompassUpdateActors(lc) runs every frame, so player 3 wrote 0x2C00 bytes past
 		// s_compassActors across the other compass tables. CG_ClearCompassPingData clears each
-		// table with a two-row length (batch3_clear_len); it becomes four rows only for a table
+		// table with a two-row length (compass_clear_*); it becomes four rows only for a table
 		// that actually moved.
 		constexpr entcoll_site screenblur_sites[] = {
 			{0x0060136E, 3, 7, true , 0x0000}, // lea rax, [rip + 0x421c09b]
@@ -2255,67 +2124,33 @@
 			{0x005A2083, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x426d566]
 			{0x005D94A5, 3, 7, true , 0x0000}, // lea rsi, [rip + 0x4236144]
 		};
-		constexpr perclient_array batch3[] = {
-			{"screenblur", 0x0479E410, 0x1C, screenblur_sites, std::size(screenblur_sites), 0, {}},
-			{"screenelec", 0x0479E448, 0xC, screenelec_sites, std::size(screenelec_sites), 0, {}},
-			{"screenburn", 0x0479E460, 0xC, screenburn_sites, std::size(screenburn_sites), 0, {}},
-			{"compass_actors", 0x04785580, 0x2C00, compass_actors_sites, std::size(compass_actors_sites), 0, {}},
-			{"compass_vehicles", 0x0478CE80, 0x900, compass_vehicles_sites, std::size(compass_vehicles_sites), 0, {}},
-			{"compass_artillery", 0x0478E280, 0x78, compass_artillery_sites, std::size(compass_artillery_sites), 0, {}},
-			{"compass_heli", 0x0478E370, 0xE0, compass_heli_sites, std::size(compass_heli_sites), 0, {}},
-			{"compass_0240", 0x0478E530, 0x240, compass_0240_sites, std::size(compass_0240_sites), 0, {}},
-			{"compass_0120", 0x0478E9B0, 0x120, compass_0120_sites, std::size(compass_0120_sites), 0, {}},
-			{"compass_0500", 0x0478FBF0, 0x500, compass_0500_sites, std::size(compass_0500_sites), 0, {}},
-			{"compass_0400", 0x047905F0, 0x400, compass_0400_sites, std::size(compass_0400_sites), 0, {}},
-		};
-		constexpr uint32_t batch3_clear_len[] = {
-			0x00000000, // screenblur (no clear site)
-			0x00000000, // screenelec (no clear site)
-			0x00000000, // screenburn (no clear site)
-			0x0059888D, // compass_actors
-			0x005988B5, // compass_vehicles
-			0x005988F1, // compass_artillery
-			0x00598905, // compass_heli
-			0x00598919, // compass_0240
-			0x0059892D, // compass_0120
-			0x00598941, // compass_0500
-			0x00598955, // compass_0400
-		};
-		size_t batch3_new[std::size(batch3)] = {};
 
-		void relocate_batch3()
+		// Pre-step of a compass row: the table's clear, `mov r8d, imm32` at Len, must
+		// still be two rows long (the screen-effect arrays have no clear site).
+		template <uint32_t Len>
+		bool compass_clear_is_two_rows(const perclient_array& a)
 		{
-			const auto b = base();
-			for (size_t i = 0; i < std::size(batch3); ++i)
+			const auto* len = reinterpret_cast<const uint8_t*>(base() + Len);
+			uint32_t cur = 0;
+			if (!readable(len, 6) || len[0] != 0x41 || len[1] != 0xB8)
 			{
-				if (batch3_new[i])
-				{
-					continue;
-				}
-				const auto& a = batch3[i];
-				auto* len = batch3_clear_len[i] ? reinterpret_cast<uint8_t*>(b + batch3_clear_len[i]) : nullptr;
-				const uint32_t len_old = 2 * a.stride;
-				const uint32_t len_new = 4 * a.stride;
-				if (len)
-				{
-					uint32_t cur = 0;
-					if (!readable(len, 6) || len[0] != 0x41 || len[1] != 0xB8)
-					{
-						continue;
-					}
-					std::memcpy(&cur, len + 2, sizeof(cur));
-					if (cur != len_old)
-					{
-						note("[splitscreen] %s: clear length differs - not moved\n", a.name);
-						continue;
-					}
-				}
-				batch3_new[i] = relocate_perclient(a);
-				if (batch3_new[i] && len)
-				{
-					write_bytes(len + 2, &len_new, sizeof(len_new));
-				}
+				return false;
 			}
+			std::memcpy(&cur, len + 2, sizeof(cur));
+			if (cur != 2 * a.stride)
+			{
+				note("[splitscreen] %s: clear length differs - not moved\n", a.name);
+				return false;
+			}
+			return true;
+		}
+
+		// Post-step of a compass row: the same clear now covers four rows.
+		template <uint32_t Len>
+		bool compass_clear_to_four_rows(const perclient_array& a, size_t)
+		{
+			const uint32_t len_new = 4 * a.stride;
+			return write_bytes(reinterpret_cast<uint8_t*>(base() + Len) + 2, &len_new, sizeof(len_new));
 		}
 
 		// ---- Batch 4: CG_AllocateClientMemory's pointer tables and the destructibles ----
@@ -2343,7 +2178,7 @@
 			{0x00843B03, 4, 8, false, 0x0000}, // mov qword ptr [rsi + r13 + 0x4a315c0], rax
 			{0x00853DC0, 4, 8, false, 0x0000}, // mov rdx, qword ptr [r14 + rdi*8 + 0x4a315c0]
 		};
-		// ikStates is not in this batch: see relocate_ikstates and relocate_batch4.
+		// ikStates is not in this batch: see relocate_ikstates and ikstates_step.
 		constexpr entcoll_site cg_destructibles_sites[] = {
 			{0x00843AF1, 4, 8, false, 0x0000}, // mov qword ptr [rsi + r13 + 0x17f00ff0], rax
 			{0x00853DD9, 4, 8, false, 0x0000}, // mov rdx, qword ptr [r14 + rdi*8 + 0x17f00ff0]
@@ -2408,16 +2243,6 @@
 			{0x02302BA1, 4, 8, false, 0x0000}, // mov r9d, dword ptr [r11 + r10*4 + 0x17f03100]
 			{0x02302BF1, 4, 8, false, 0x0000}, // mov dword ptr [r11 + r10*4 + 0x17f03100], eax
 		};
-		constexpr perclient_array batch4[] = {
-			{"cg_weaponsarray", 0x0495A410, 0x8, cg_weaponsarray_sites, std::size(cg_weaponsarray_sites), 0, {}},
-			{"cg_ikbuf", 0x049B25C0, 0x8, cg_ikbuf_sites, std::size(cg_ikbuf_sites), 0, {}},
-			{"cg_destructibles", 0x17E820C0, 0x8, cg_destructibles_sites, std::size(cg_destructibles_sites), 0, {}},
-			{"numdestructibles", 0x17EC11B0, 0x4, numdestructibles_sites, std::size(numdestructibles_sites), 0, {}},
-			{"cg_updatetime", 0x17EC11B8, 0x4, cg_updatetime_sites, std::size(cg_updatetime_sites), 0, {}},
-			{"destr_gamestates", 0x17E820D0, 0x1080, destr_gamestates_sites, std::size(destr_gamestates_sites), 0, {}},
-			{"destr_numgamestates", 0x17E841D0, 0x4, destr_numgamestates_sites, std::size(destr_numgamestates_sites), 0, {}},
-		};
-		size_t batch4_new[std::size(batch4)] = {};
 
 		bool ik_reset_widened = false;
 
@@ -2476,25 +2301,6 @@
 			return true;
 		}
 
-		void relocate_batch4()
-		{
-			for (size_t i = 0; i < std::size(batch4); ++i)
-			{
-				if (!batch4_new[i])
-				{
-					batch4_new[i] = relocate_perclient(batch4[i]);
-				}
-			}
-			// Move ikStates to [5]. If a reference fails to verify, fall back to moving the reset
-			// loop's end marker one slot, which covers client 2 (three players); with two players
-			// that slot is NULL and the loop skips it.
-			if (!ik_reset_widened)
-			{
-				ik_reset_widened = relocate_ikstates()
-					|| retarget_end_marker(0x023F84B3, 3, 7, 0x17F297D8, base() + 0x17F297E0);
-			}
-		}
-
 		// ---- Batch 5: two unnamed per-client cgame arrays (no PS4 [4] global has either shape) ----
 		// cg_clientents30: 30 entries of 0x11E0 per client (stride 0x21840). Row 2 holds foreign
 		// pointer globals, so player 3's entity interpolation read a NULL pointer and crashed.
@@ -2523,22 +2329,6 @@
 			{0x0065785F, 3, 7, false, 0x0000}, // lea rcx, [rcx + 0x481cc80]
 			{0x00662085, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x41babf4]
 		};
-		constexpr perclient_array batch5[] = {
-			{"cg_clientents30", 0x041DC500, 0x21840, cg_clientents30_sites, std::size(cg_clientents30_sites), 0, {}},
-			{"cg_perclient_3c0", 0x0479DC80, 0x3C0, cg_perclient_3c0_sites, std::size(cg_perclient_3c0_sites), 0, {}},
-		};
-		size_t batch5_new[std::size(batch5)] = {};
-
-		void relocate_batch5()
-		{
-			for (size_t i = 0; i < std::size(batch5); ++i)
-			{
-				if (!batch5_new[i])
-				{
-					batch5_new[i] = relocate_perclient(batch5[i]);
-				}
-			}
-		}
 
 		// ---- Batch 6: cgame threaded-notify queues ----
 		// PS4 CG_ThreadedNotifyList_* (Init 0x2956D0): per local client 100 items plus
@@ -2546,7 +2336,6 @@
 		// four are [2] and packed back to back, so CG_Init(2) at map load linked 100 items over
 		// player 1's queue pointers and ~8 KB of live globals: a wild writer consistent with the
 		// Arxan faults, the lost default_aitype and "Data is corrupt" in 3-player rounds.
-		// Runs with CG_FRAME on and off, so it is not gated on BO3_CG_FRAME.
 		constexpr entcoll_site tnotify_list_sites[] = {
 			{0x00A18777, 3, 7, true , 0x0044}, // lea rcx, [rip + 0x430c0e6]
 			{0x00A2179C, 3, 7, true , 0x0000}, // lea rax, [rip + 0x430307d]
@@ -2584,17 +2373,10 @@
 			{0x00A21EEE, 4, 8, false, 0x0000}, // mov rax, qword ptr [rcx + rax*8 + 0x4d286e0]
 			{0x00A21F02, 4, 8, false, 0x0000}, // mov qword ptr [r12 + rdi*8 + 0x4d286e0], rsi
 		};
-		constexpr perclient_array batch6[] = {
-			{"tnotify_list", 0x04CA5820, 0x1F40, tnotify_list_sites, std::size(tnotify_list_sites), 0, {}},
-			{"tnotify_head", 0x04CA96C0, 0x8, tnotify_head_sites, std::size(tnotify_head_sites), 0, {}},
-			{"tnotify_tail", 0x04CA96D0, 0x8, tnotify_tail_sites, std::size(tnotify_tail_sites), 0, {}},
-			{"tnotify_free", 0x04CA96E0, 0x8, tnotify_free_sites, std::size(tnotify_free_sites), 0, {}},
-		};
-		size_t batch6_new[std::size(batch6)] = {};
 
 		// The engine's static initializer sets every item of both clients to zero except
 		// +0x04 = 0x3FF. Its lea is in the site table, so it fills slots 0/1 of the new block;
-		// relocate_batch6 gives slots 2/3 the same values. If its bytes differ, nothing moves.
+		// tnotify_init_items gives slots 2/3 the same values. If its bytes differ, nothing moves.
 		constexpr uint8_t tnotify_static_init[] = {
 			0xB9, 0xC7, 0x00, 0x00, 0x00,                         // mov ecx, 0xC7
 			0x48, 0x8D, 0x05,                                     // lea rax, [rip+..]
@@ -2604,7 +2386,8 @@
 			0xC7, 0x40, 0xC4, 0xFF, 0x03, 0x00, 0x00,             // mov dword [rax-0x3C], 0x3FF
 		};
 
-		void relocate_batch6()
+		// Pre-step of the tnotify_list row.
+		bool tnotify_init_matches(const perclient_array&)
 		{
 			const auto b = base();
 			const auto bytes_at = [b](const uint32_t rva, const uint8_t* expect, const size_t n)
@@ -2612,36 +2395,32 @@
 				const auto* p = reinterpret_cast<const void*>(b + rva);
 				return readable(p, n) && std::memcmp(p, expect, n) == 0;
 			};
-			if (!batch6_new[0])
+			if (!bytes_at(0x02D2C850, tnotify_static_init, sizeof(tnotify_static_init))
+				|| !bytes_at(0x02D2C862, tnotify_static_init_body, sizeof(tnotify_static_init_body)))
 			{
-				if (!bytes_at(0x02D2C850, tnotify_static_init, sizeof(tnotify_static_init))
-					|| !bytes_at(0x02D2C862, tnotify_static_init_body, sizeof(tnotify_static_init_body)))
-				{
-					note("[splitscreen] tnotify: static initializer differs - queues not moved\n");
-					return;
-				}
-				batch6_new[0] = relocate_perclient(batch6[0]);
-				if (!batch6_new[0])
-				{
-					return;   // the pointer arrays only make sense with the list moved
-				}
-				auto* items = reinterpret_cast<uint8_t*>(batch6_new[0]);
-				for (size_t lc = 2; lc < 4; ++lc)
-				{
-					for (size_t i = 0; i < 100; ++i)
-					{
-						*reinterpret_cast<uint32_t*>(items + lc * 0x1F40 + i * 0x50 + 0x04) = 0x3FF;
-					}
-				}
+				note("[splitscreen] tnotify: static initializer differs - queues not moved\n");
+				return false;
 			}
-			for (size_t i = 1; i < std::size(batch6); ++i)
-			{
-				if (!batch6_new[i])
-				{
-					batch6_new[i] = relocate_perclient(batch6[i]);
-				}
-			}
+			return true;
 		}
+
+		// Post-step of the tnotify_list row.
+		bool tnotify_init_items(const perclient_array&, const size_t fresh)
+		{
+			auto* items = reinterpret_cast<uint8_t*>(fresh);
+			for (size_t lc = 2; lc < 4; ++lc)
+			{
+				for (size_t i = 0; i < 100; ++i)
+				{
+					*reinterpret_cast<uint32_t*>(items + lc * 0x1F40 + i * 0x50 + 0x04) = 0x3FF;
+				}
+			}
+			return true;
+		}
+
+		// Pre-step of the head/tail/free rows: the pointer arrays only make sense
+		// with the list moved. Defined after perclient_rows.
+		bool tnotify_list_moved(const perclient_array&);
 
 		// ---- Batch 7: renderer [2] x 0x240 array that slid the image by 8 bytes ----
 		// An element holds 16 {int id, int age} entries, a qword count at +0x80, an id bitmask
@@ -2653,21 +2432,6 @@
 			{0x01CBD588, 3, 7, true , 0x0000}, // lea rax, [rip + 0xd841ea1]
 			{0x02E89DB4, 3, 7, true , 0x00C0}, // lea rbx, [rip + 0xc608505]
 		};
-		constexpr perclient_array batch7[] = {
-			{"view_idsets_240", 0x0F48C880, 0x240, fxgpu_client_sites, std::size(fxgpu_client_sites), 0, {}},
-		};
-		size_t batch7_new[std::size(batch7)] = {};
-
-		void relocate_batch7()
-		{
-			for (size_t i = 0; i < std::size(batch7); ++i)
-			{
-				if (!batch7_new[i])
-				{
-					batch7_new[i] = relocate_perclient(batch7[i]);
-				}
-			}
-		}
 
 		// ---- Batch 8: renderer scene buffers ----
 		// scene_pc480: 4 entries of 0x120 per client, sized for two. Client 2's slot lies over
@@ -2704,22 +2468,13 @@
 			{0x01C8745D, 4, 8, false, 0x0000}, // mov qword ptr [rbx + rsi + 0x10615a60], rax
 			{0x01C8752F, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rbx + rdi + 0x10615a60]
 		};
-		constexpr perclient_array batch8[] = {
-			{"scene_pc480", 0x0AE134A0, 0x480, scene_pc480_sites, std::size(scene_pc480_sites), 0, {}},
-			{"scene_c", 0x10596AE0, 0x8, scene_c_sites, std::size(scene_c_sites), 0, {}},
-		};
-		size_t batch8_new[std::size(batch8)] = {};
 
-		void relocate_batch8()
+		// Post-step of the scene_c row. install_perclient_buffer_guard() bakes this
+		// base into its cave, so it runs after the move.
+		bool publish_scene_c(const perclient_array&, const size_t fresh)
 		{
-			for (size_t i = 0; i < std::size(batch8); ++i)
-			{
-				if (!batch8_new[i])
-				{
-					batch8_new[i] = relocate_perclient(batch8[i]);
-				}
-			}
-			scene_c_new = batch8_new[1];
+			scene_c_new = fresh;
+			return true;
 		}
 
 		// ---- Batch 9: renderer per-client array (x 0xA24) ----
@@ -2752,21 +2507,6 @@
 			{0x01C9CB0F, 3, 7, true , 0x0000}, // lea rax, [rip + 0xd83b066]
 			{0x02E89C1A, 3, 7, true , 0x0000}, // lea rbx, [rip + 0xc5e0d2b]
 		};
-		constexpr perclient_array batch9[] = {
-			{"rview_a24", 0x0F464FCC, 0xA24, rview_a24_sites, std::size(rview_a24_sites), 0, {}},
-		};
-		size_t batch9_new[std::size(batch9)] = {};
-
-		void relocate_batch9()
-		{
-			for (size_t i = 0; i < std::size(batch9); ++i)
-			{
-				if (!batch9_new[i])
-				{
-					batch9_new[i] = relocate_perclient(batch9[i]);
-				}
-			}
-		}
 
 		// ---- Batch 10: frame-limiter stall (renderer per-view array, x 0x30) ----
 		// With three views the main thread sat in the frame limiter (`while (Sys_Milliseconds()
@@ -2790,21 +2530,6 @@
 			{0x01CB2BC5, 3, 7, true , 0x0000}, // lea rax, [rip + 0xd826414]
 			{0x01CDD3EC, 3, 7, true , 0x0000}, // lea rax, [rip + 0xd7fbbed]
 		};
-		constexpr perclient_array batch10[] = {
-			{"rview_org30", 0x0F466430, 0x30, rview_org30_sites, std::size(rview_org30_sites), 0, {}},
-		};
-		size_t batch10_new[std::size(batch10)] = {};
-
-		void relocate_batch10()
-		{
-			for (size_t i = 0; i < std::size(batch10); ++i)
-			{
-				if (!batch10_new[i])
-				{
-					batch10_new[i] = relocate_perclient(batch10[i]);
-				}
-			}
-		}
 
 		// ---- Batch 11: aim-target actor lists ----
 		// PS4 aim_target_actors [4]: 64 centity pointers per client (base + lc*0x200), built by
@@ -2815,18 +2540,3 @@
 			{0x0007A998, 3, 7, true , 0x0000}, // lea rax, [rip + 0x36049e1]
 			{0x000897A8, 4, 8, false, 0x0000}, // mov qword ptr [rax + rcx*8 + 0x367f380], r8
 		};
-		constexpr perclient_array batch11[] = {
-			{"aimactors", 0x03600380, 0x200, aimactors_sites, std::size(aimactors_sites), 0, {}},
-		};
-		size_t batch11_new[std::size(batch11)] = {};
-
-		void relocate_batch11()
-		{
-			for (size_t i = 0; i < std::size(batch11); ++i)
-			{
-				if (!batch11_new[i])
-				{
-					batch11_new[i] = relocate_perclient(batch11[i]);
-				}
-			}
-		}

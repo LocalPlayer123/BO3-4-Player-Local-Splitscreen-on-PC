@@ -1,4 +1,5 @@
-// Relocations, part B: batches 12-18, light queue, Umbra, lens flares, controller UI models, lobby max players.
+// Relocations, part B: batches 12-18, light queue, the per-client relocation table (perclient_rows),
+// Umbra, lens flares, controller UI models, lobby max players.
 // Part of splitscreen.cpp, included in order inside namespace splitscreen::{anon}.
 
 		// ---- Batch 12: zombies HUD player list ----
@@ -46,50 +47,18 @@
 			{0x026A42DB, 4, 8, false, 0x0000}, // mov dword ptr [rsi + r11*4 + 0x1a875b50], eax
 			{0x026CC08D, 3, 7, false, 0x0000}, // lea rax, [rdx + 0x1a875b50]
 		};
-		constexpr perclient_array batch12[] = {
-			{"hudpl_score", 0x1A7F6A50, 0x20, hudpl_score_sites, std::size(hudpl_score_sites), 0, {}},
-			{"hudpl_gap", 0x1A7F6A90, 0x20, hudpl_gap_sites, std::size(hudpl_gap_sites), 0, {}},
-			{"hudpl_flags", 0x1A7F6AD0, 0x20, hudpl_flags_sites, std::size(hudpl_flags_sites), 0, {}},
-			{"hudpl_ids", 0x1A7F6B10, 0x20, hudpl_ids_sites, std::size(hudpl_ids_sites), 0, {}},
-			{"hudpl_icons", 0x1A7F6B50, 0x40, hudpl_icons_sites, std::size(hudpl_icons_sites), 0, {}},
-			{"hudpl_self", 0x1A7F6BD0, 0x4, hudpl_self_sites, std::size(hudpl_self_sites), 0, {}},
-		};
-		size_t batch12_new[std::size(batch12)] = {};
 
-		void relocate_batch12()
-		{
-			for (size_t i = 0; i < std::size(batch12); ++i)
-			{
-				if (!batch12_new[i])
-				{
-					batch12_new[i] = relocate_perclient(batch12[i]);
-				}
-			}
-		}
-
-		// ---- Batch 13: view 2's lighting and previous-frame view ----
+		// ---- Batch 13: previous-frame view ----
 		// Pane 3 drew a white void: two [2] per-view renderer arrays have a foreign slot 2.
-		// s_sunVolumeTransitions (PS4 SunVolumeTransition[4] at 0x04546CE0; PC x 0x2BB8), used by
-		// CG_SetLightingState(lc) and CG_InitView: slot 2 overwrote s_testEffect. The static
-		// initializer stores 0xFFFFFFFF at +0x2BB0; slots 2/3 get the same state after the move.
+		// The other one, s_sunVolumeTransitions (PS4 [4] x 0x2A28), is moved by
+		// relocate_percg_context (same six sites). Slots 2/3 need no static init: the
+		// per-client view init resets each element, -1 at +0x2BB0 included (store at
+		// 0x010CD118, after FX_SetNextUpdateCamera(lc, 2) as in PS4 CG_InitView 0x2CB240).
 		// g_prevFrameViewParmsDraw (PS4 GfxViewParms[4] x 0x290): R_RenderScene copies each
 		// frame's view parms to prev[localClientNum]; slot 2 covered another renderer object.
-		constexpr entcoll_site sunvol_sites[] = {
-			{0x010CD118, 4, 12, false, 0x2BB0}, // mov dword ptr [rax + r14 + 0x4d2f6f0], 0xffffffff
-			{0x010CD124, 4, 8, false, 0x2BA0}, // mov qword ptr [rax + r14 + 0x4d2f6e0], rcx
-			{0x010CD12C, 4, 8, false, 0x2BA8}, // mov qword ptr [rax + r14 + 0x4d2f6e8], rcx
-			{0x010EB4F0, 3, 7, true , 0x0000}, // lea rdx, [rip + 0x3c41669]  (reset leaf, no .pdata)
-			{0x010F30C2, 3, 7, true , 0x0000}, // lea rax, [rip + 0x3c39a97]
-			{0x02D2CC1F, 3, 7, true , 0x0830}, // lea rbx, [rip + 0x1f8714a]  (static initializer)
-		};
 		constexpr entcoll_site prevview_sites[] = {
 			{0x01CDF3D5, 3, 7, true , 0x0000}, // lea rax, [rip + 0xe15ffd4]
 		};
-		constexpr perclient_array batch13[] = {
-			{"sunvol", 0x04CADB40, 0x2BB8, sunvol_sites, std::size(sunvol_sites), 0, {}},
-			{"prevview", 0x0FDCC800, 0x290, prevview_sites, std::size(prevview_sites), 0, {}},
-		};
-		size_t batch13_new[std::size(batch13)] = {};
 
 		// ---- Batch 14: LiveStats per-controller stat-change cache ----
 		// PS4 LiveStats_SetStatChanged (0xC63D00) decodes change messages into
@@ -109,10 +78,6 @@
 			{0x01E989AD, 3, 7, true , 0x4400}, // mov dword ptr [rip + 0xf57978c], r15d
 			{0x01E9952B, 3, 7, true , 0x0000}, // lea rax, [rip + 0xf57480e]  (LiveStats_SetStatChanged)
 		};
-		constexpr perclient_array batch14[] = {
-			{"statscache", 0x1139B860, 0x4404, statscache_sites, std::size(statscache_sites), 0, {}},
-		};
-		size_t batch14_new[std::size(batch14)] = {};
 
 		// ---- Batch 15: per-client UI visibility bits ----
 		// The zombie HUD shows its widgets through the "UIVisibilityBit.<n>" models. PS4 keeps
@@ -224,33 +189,19 @@
 			{0x026EF0C3, 4, 8, false, 0x0000}, // mov eax, dword ptr [rax + r13*8 + 0x179dbdc8]
 			{0x026EF10A, 4, 8, false, 0x0000}, // mov eax, dword ptr [rax + r13*8 + 0x179dbdc8]
 		};
-		constexpr perclient_array batch15[] = {
-			{"visbits", 0x1795CEC8, 0x8, visbits_sites, std::size(visbits_sites), 0, {}},
-		};
-		size_t batch15_new[std::size(batch15)] = {};
 
-		void relocate_batch15()
+		// Post-step of the visbits row: widen the per-client reset loop that zeroes
+		// bits[lc] from 2 to 4.
+		bool widen_visbits_reset(const perclient_array&, size_t)
 		{
-			for (size_t i = 0; i < std::size(batch15); ++i)
+			auto* bound = reinterpret_cast<uint8_t*>(base() + 0x01F26750);
+			constexpr uint8_t bound_old[] = {0x83, 0xFF, 0x02};
+			if (readable(bound, sizeof(bound_old)) && std::memcmp(bound, bound_old, sizeof(bound_old)) == 0)
 			{
-				if (batch15_new[i])
-				{
-					continue;
-				}
-				batch15_new[i] = relocate_perclient(batch15[i]);
-				if (!batch15_new[i])
-				{
-					continue;
-				}
-				// Widen the per-client reset loop that zeroes bits[lc] from 2 to 4.
-				auto* bound = reinterpret_cast<uint8_t*>(base() + 0x01F26750);
-				constexpr uint8_t bound_old[] = {0x83, 0xFF, 0x02};
-				if (readable(bound, sizeof(bound_old)) && std::memcmp(bound, bound_old, sizeof(bound_old)) == 0)
-				{
-					const uint8_t four = 0x04;
-					write_bytes(bound + 2, &four, 1);
-				}
+				const uint8_t four = 0x04;
+				return write_bytes(bound + 2, &four, 1);
 			}
+			return false;
 		}
 
 		// ---- Batch 16: console message buffers, con.messageBuffer [2] -> [4] ----
@@ -322,17 +273,10 @@
 		constexpr uint32_t conmsgbuf_end_marker_rva = 0x0133AB7E; // lea rcx, [&messageBuffer[2]+0x2B10]
 		constexpr uint32_t conmsgbuf_end_field = 0x2B10;
 
-		constexpr perclient_array batch16[] = {
-			{"conmsgbuf", conmsgbuf_base, conmsgbuf_stride, conmsgbuf_sites, std::size(conmsgbuf_sites), 0, {}},
-		};
-		size_t batch16_new[std::size(batch16)] = {};
-
-		void relocate_batch16()
+		// Pre-step of the conmsgbuf row: every con-relative value and the end marker
+		// still hold the stock offsets.
+		bool conmsgbuf_refs_match(const perclient_array&)
 		{
-			if (batch16_new[0])
-			{
-				return;
-			}
 			const auto b = base();
 			for (const auto& s : conmsgbuf_con_rel)
 			{
@@ -340,13 +284,13 @@
 				const auto* at = reinterpret_cast<const uint8_t*>(b + s.rva + s.off);
 				if (!readable(at, sizeof(have)))
 				{
-					return;
+					return false;
 				}
 				std::memcpy(&have, at, sizeof(have));
 				if (have != s.old_value)
 				{
 					note("[splitscreen] conmsgbuf: 0x%08X holds 0x%X - nothing moved\n", s.rva, have);
-					return;
+					return false;
 				}
 			}
 			{
@@ -354,24 +298,23 @@
 				int32_t d32 = 0;
 				if (!readable(at, sizeof(d32)))
 				{
-					return;
+					return false;
 				}
 				std::memcpy(&d32, at, sizeof(d32));
 				if (conmsgbuf_end_marker_rva + 7 + d32
 				    != conmsgbuf_base + 2 * conmsgbuf_stride + conmsgbuf_end_field)
 				{
 					note("[splitscreen] conmsgbuf: end marker differs - nothing moved\n");
-					return;
+					return false;
 				}
 			}
+			return true;
+		}
 
-			const auto fresh = relocate_perclient(batch16[0]);
-			if (!fresh)
-			{
-				return;
-			}
-			batch16_new[0] = fresh;
-
+		// Post-step of the conmsgbuf row: the con-relative values and the end marker.
+		bool retarget_conmsgbuf_refs(const perclient_array&, const size_t fresh)
+		{
+			const auto b = base();
 			// allocate_near_module keeps every new value within 32 bits; checked anyway.
 			const auto delta = static_cast<int64_t>(fresh) - static_cast<int64_t>(b + conmsgbuf_base);
 			uint32_t rewritten = 0;
@@ -392,17 +335,12 @@
 			const bool marker = retarget_end_marker(conmsgbuf_end_marker_rva, 3, 7,
 				conmsgbuf_base + 2 * conmsgbuf_stride + conmsgbuf_end_field,
 				fresh + 4 * conmsgbuf_stride + conmsgbuf_end_field);
-
-			trace_line l;
-			l.str("conmsgbuf [2]->[4]: ");
-			l.dec(std::size(conmsgbuf_sites));
-			l.str(" array sites, ");
-			l.dec(rewritten);
-			l.str("/");
-			l.dec(std::size(conmsgbuf_con_rel));
-			l.str(" con-relative, end marker ");
-			l.str(marker ? "moved" : "FAILED");
-			trace_write(l);
+			if (!marker || rewritten != std::size(conmsgbuf_con_rel))
+			{
+				note("[splitscreen] conmsgbuf [2]->[4]: %u/%zu con-relative, end marker %s\n",
+				     rewritten, std::size(conmsgbuf_con_rel), marker ? "moved" : "FAILED");
+			}
+			return marker && rewritten == std::size(conmsgbuf_con_rel);
 		}
 
 		// ---- uiInfoArray [2] -> [4] ---------------------------------------------
@@ -422,10 +360,34 @@
 			{0x022328F5, 3, 7, true , 0x0000},
 			{0x022329A0, 3, 7, true , 0x0000},
 		};
-		constexpr perclient_array batch17[] = {
-			{"uiinfo", 0x1795D270, 0x1B68, uiinfo_sites, std::size(uiinfo_sites), 0, {}},
-		};
-		size_t batch17_new[std::size(batch17)] = {};
+		constexpr uint32_t uiinfo_init_bound_rva = 0x02231110;
+		constexpr uint8_t uiinfo_init_bound_old[] = {0x83, 0xFD, 0x02};   // cmp ebp, 2
+
+		// Pre-step of the uiinfo row.
+		bool uiinfo_bound_matches(const perclient_array&)
+		{
+			const auto* bound = reinterpret_cast<const uint8_t*>(base() + uiinfo_init_bound_rva);
+			if (!readable(bound, sizeof(uiinfo_init_bound_old))
+			    || std::memcmp(bound, uiinfo_init_bound_old, sizeof(uiinfo_init_bound_old)) != 0)
+			{
+				note("[splitscreen] uiinfo: init loop bound differs - nothing moved\n");
+				return false;
+			}
+			return true;
+		}
+
+		// Post-step of the uiinfo row: UI_InitUIInfos' loop runs to 4.
+		bool widen_uiinfo_init(const perclient_array&, size_t)
+		{
+			auto* bound = reinterpret_cast<uint8_t*>(base() + uiinfo_init_bound_rva);
+			const uint8_t four = 0x04;
+			const bool widened = write_bytes(bound + 2, &four, 1);
+			if (!widened)
+			{
+				note("[splitscreen] uiinfo [2]->[4]: init loop FAILED\n");
+			}
+			return widened;
+		}
 
 		// ---- UI3D texture windows per local client [2] -> [4] -------------------
 		// The PC saves 6 UI3D windows (0x438 bytes) per local client in
@@ -439,47 +401,6 @@
 			{0x01D0FF2F, 3, 7, true , 0x0000}, // lea rdx, [saved]         R_UI3D_PerframeInit
 			{0x01D10373, 3, 7, true , 0x0000}, // lea rcx, [saved]         R_UI3D_SetupBackendData
 		};
-		constexpr perclient_array batch18[] = {
-			{"ui3d_windows", 0x10B2F2F0, 0x438, ui3d_windows_sites, std::size(ui3d_windows_sites), 0, {}},
-		};
-		size_t batch18_new[std::size(batch18)] = {};
-
-		void relocate_batch18()
-		{
-			if (!batch18_new[0])
-			{
-				batch18_new[0] = relocate_perclient(batch18[0]);
-			}
-		}
-
-		void relocate_batch17()
-		{
-			if (batch17_new[0])
-			{
-				return;
-			}
-			const auto b = base();
-			auto* bound = reinterpret_cast<uint8_t*>(b + 0x02231110);
-			constexpr uint8_t bound_old[] = {0x83, 0xFD, 0x02};   // cmp ebp, 2
-			if (!readable(bound, sizeof(bound_old)) || std::memcmp(bound, bound_old, sizeof(bound_old)) != 0)
-			{
-				note("[splitscreen] uiinfo: init loop bound differs - nothing moved\n");
-				return;
-			}
-			batch17_new[0] = relocate_perclient(batch17[0]);
-			if (!batch17_new[0])
-			{
-				return;
-			}
-			const uint8_t four = 0x04;
-			const bool widened = write_bytes(bound + 2, &four, 1);
-			trace_line l;
-			l.str("uiinfo [2]->[4]: ");
-			l.dec(std::size(uiinfo_sites));
-			l.str(" sites, init loop ");
-			l.str(widened ? "-> 4" : "FAILED");
-			trace_write(l);
-		}
 
 		// ---- Light queue: records [2][1024] + counters [2] -> [4] ----------------
 		// Per-client ring of light records (1024 x 0x28, stride 0xA000) with
@@ -540,11 +461,11 @@
 		};
 		bool lightq_relocated = false;
 
-		void relocate_lightq()
+		bool relocate_lightq()
 		{
 			if (lightq_relocated)
 			{
-				return;
+				return true;
 			}
 			const auto b = base();
 			struct fixed_bytes { uint32_t rva; uint8_t len; uint8_t old_bytes[6]; uint8_t new_bytes[6]; };
@@ -562,14 +483,14 @@
 				if (!readable(at, e.len) || std::memcmp(at, e.old_bytes, e.len) != 0)
 				{
 					note("[splitscreen] lightq: bytes at 0x%08X differ - nothing moved\n", e.rva);
-					return;
+					return false;
 				}
 			}
 
 			auto* fresh = static_cast<uint8_t*>(allocate_near_module(lightq_records_new + 0x20));
 			if (!fresh)
 			{
-				return;
+				return false;
 			}
 			std::memset(fresh, 0, lightq_records_new + 0x20);
 			std::memcpy(fresh, reinterpret_cast<const void*>(b + lightq_base), 2 * lightq_stride);
@@ -589,37 +510,28 @@
 			const auto fresh_abs = reinterpret_cast<size_t>(fresh);
 			if (!rewrite_entcoll(lightq_sites, std::size(lightq_sites), lightq_base, fresh_abs, saved_r))
 			{
-				return;
+				return false;
 			}
 			if (!rewrite_entcoll(lightq_a_sites, std::size(lightq_a_sites), lightq_a, fresh_abs + lightq_records_new, saved_a))
 			{
 				restore(lightq_sites, std::size(lightq_sites), saved_r);
-				return;
+				return false;
 			}
 			if (!rewrite_entcoll(lightq_b_sites, std::size(lightq_b_sites), lightq_b, fresh_abs + lightq_records_new + 0x10, saved_b))
 			{
 				restore(lightq_a_sites, std::size(lightq_a_sites), saved_a);
 				restore(lightq_sites, std::size(lightq_sites), saved_r);
-				return;
+				return false;
 			}
-			uint32_t extras_done = 0;
 			for (const auto& e : extras)
 			{
-				if (write_bytes(reinterpret_cast<void*>(b + e.rva), e.new_bytes, e.len))
+				if (!write_bytes(reinterpret_cast<void*>(b + e.rva), e.new_bytes, e.len))
 				{
-					++extras_done;
+					note("[splitscreen] lightq [2]->[4]: reset/memset/loop patch at 0x%08X FAILED\n", e.rva);
 				}
 			}
 			lightq_relocated = true;
-			trace_line l;
-			l.str("lightq [2]->[4]: ");
-			l.dec(std::size(lightq_sites) + std::size(lightq_a_sites) + std::size(lightq_b_sites));
-			l.str(" sites, ");
-			l.dec(extras_done);
-			l.str("/");
-			l.dec(std::size(extras));
-			l.str(" reset/memset/loop patches");
-			trace_write(l);
+			return true;
 		}
 
 		// ---- Umbra occlusion culling: per-client state [2] -> [4] ---------------
@@ -778,8 +690,8 @@
 		}
 
 		// LiveStats_ResetCache: memset length `mov r8d, 0x8808` -> 0x11010,
-		// only when its lea already points at the moved array.
-		bool widen_statscache_reset(const size_t cache_new)
+		// only when its lea already points at the moved array. Post-step of the statscache row.
+		bool widen_statscache_reset(const perclient_array&, const size_t cache_new)
 		{
 			const auto b = base();
 			auto* imm = reinterpret_cast<uint8_t*>(b + 0x01E94E98);
@@ -797,40 +709,175 @@
 			return write_bytes(imm, imm_new, sizeof(imm_new));
 		}
 
-		void relocate_batch14()
+		// Own row: ikStates to [5]. If a reference fails to verify, fall back to moving the
+		// reset loop's end marker one slot, which covers client 2 (three players); with two
+		// players that slot is NULL and the loop skips it.
+		bool ikstates_step()
 		{
-			for (size_t i = 0; i < std::size(batch14); ++i)
+			if (!ik_reset_widened)
 			{
-				if (batch14_new[i])
-				{
-					continue;
-				}
-				batch14_new[i] = relocate_perclient(batch14[i]);
-				if (batch14_new[i])
-				{
-					widen_statscache_reset(batch14_new[i]);
-				}
+				ik_reset_widened = relocate_ikstates()
+					|| retarget_end_marker(0x023F84B3, 3, 7, 0x17F297D8, base() + 0x17F297E0);
 			}
+			if (!ikstates_new)
+			{
+				note("[splitscreen] ikStates: NOT moved - reset loop widened one slot (3 players only)\n");
+			}
+			return ik_reset_widened;
 		}
 
-		void relocate_batch13()
+		// Own row: the session member slots. CG_Init(2) runs whenever player 3's cgame
+		// initialises at map load.
+		bool session_members_step()
 		{
-			for (size_t i = 0; i < std::size(batch13); ++i)
+			const bool moved = relocate_session_members();
+			if (!moved)
 			{
-				if (batch13_new[i])
+				note("[splitscreen] session members: NOT moved (bytes differ)\n");
+			}
+			return moved;
+		}
+
+		// ---- Every per-client [2] -> [4] relocation, in the order they run ------
+		// relocate_perclient_rows() walks this once from try_apply(). Sites and the
+		// PS4 names are next to each array's site table (batches 1-11:
+		// 06_relocations_a.inl, 12-18: above). A row that fails stands down alone.
+		constexpr perclient_row perclient_rows[] = {
+			// batch 1 (cl_voiceCommunication is reloc_tables' voice_comm)
+			{{"cgdc", 0x049B2CD0, 0x1838, cgdc_sites, std::size(cgdc_sites), 0, {}}},
+			{.array = {"playerKeys"}, .own = relocate_playerkeys},
+			{{"g_notetrackLerps", 0x0474B130, 0x340, notetracklerps_sites, std::size(notetracklerps_sites), 0, {}}},
+			// batch 1b
+			{{"cg_pmove", 0x04C99740, 0x1660, cg_pmove_sites, std::size(cg_pmove_sites), 0x009B4720, {0x33, 0xD2, 0x0F, 0x57, 0xC0, 0x48, 0x8D, 0x05}}},
+			{{"camerashake", 0x04764990, 0x104, camerashake_sites, std::size(camerashake_sites), 0, {}}},
+			{{"moverinfos", 0x047641B0, 0x390, moverinfos_sites, std::size(moverinfos_sites), 0, {}}},
+			{{"moveinfoentnum", 0x04764140, 0x4, moveinfoentnum_sites, std::size(moveinfoentnum_sites), 0, {}}},
+			{{"rumble", 0x04C9E470, 0x410, rumble_sites, std::size(rumble_sites), 0, {}}},
+			{{"atglob", 0x036007C0, 0x1604, atglob_sites, std::size(atglob_sites), 0, {}}},
+			{{"aimtargetcmd", 0x03600780, 0x10, aimtargetcmd_sites, std::size(aimtargetcmd_sites), 0, {}}},
+			{{"arcdata", 0x047992B0, 0xEEC, arcdata_sites, std::size(arcdata_sites), 0, {}}},
+			{.array = {"zbarriers", 0x0474B8F0, 0xC400, zbarriers_sites, std::size(zbarriers_sites), 0, {}},
+			 .post = widen_zbarrier_clear},
+			// batch 2
+			{{"totalcoverage", 0x04CC3420, 0x360, totalcoverage_sites, std::size(totalcoverage_sites), 0, {}}},
+			{{"rightstick", 0x0531C760, 0xA, rightstick_sites, std::size(rightstick_sites), 0, {}}},
+			{{"gamepadbuttons", 0x0531C780, 0x2E, gamepadbuttons_sites, std::size(gamepadbuttons_sites), 0, {}}},
+			{.array = {"cgExploderTriggers"}, .own = relocate_exploder_triggers},
+			{.array = {"gaGlobs"}, .own = relocate_gaglobs},
+			// batch 3
+			{{"screenblur", 0x0479E410, 0x1C, screenblur_sites, std::size(screenblur_sites), 0, {}}},
+			{{"screenelec", 0x0479E448, 0xC, screenelec_sites, std::size(screenelec_sites), 0, {}}},
+			{{"screenburn", 0x0479E460, 0xC, screenburn_sites, std::size(screenburn_sites), 0, {}}},
+			{.array = {"compass_actors", 0x04785580, 0x2C00, compass_actors_sites, std::size(compass_actors_sites), 0, {}},
+			 .pre = compass_clear_is_two_rows<0x0059888D>, .post = compass_clear_to_four_rows<0x0059888D>},
+			{.array = {"compass_vehicles", 0x0478CE80, 0x900, compass_vehicles_sites, std::size(compass_vehicles_sites), 0, {}},
+			 .pre = compass_clear_is_two_rows<0x005988B5>, .post = compass_clear_to_four_rows<0x005988B5>},
+			{.array = {"compass_artillery", 0x0478E280, 0x78, compass_artillery_sites, std::size(compass_artillery_sites), 0, {}},
+			 .pre = compass_clear_is_two_rows<0x005988F1>, .post = compass_clear_to_four_rows<0x005988F1>},
+			{.array = {"compass_heli", 0x0478E370, 0xE0, compass_heli_sites, std::size(compass_heli_sites), 0, {}},
+			 .pre = compass_clear_is_two_rows<0x00598905>, .post = compass_clear_to_four_rows<0x00598905>},
+			{.array = {"compass_0240", 0x0478E530, 0x240, compass_0240_sites, std::size(compass_0240_sites), 0, {}},
+			 .pre = compass_clear_is_two_rows<0x00598919>, .post = compass_clear_to_four_rows<0x00598919>},
+			{.array = {"compass_0120", 0x0478E9B0, 0x120, compass_0120_sites, std::size(compass_0120_sites), 0, {}},
+			 .pre = compass_clear_is_two_rows<0x0059892D>, .post = compass_clear_to_four_rows<0x0059892D>},
+			{.array = {"compass_0500", 0x0478FBF0, 0x500, compass_0500_sites, std::size(compass_0500_sites), 0, {}},
+			 .pre = compass_clear_is_two_rows<0x00598941>, .post = compass_clear_to_four_rows<0x00598941>},
+			{.array = {"compass_0400", 0x047905F0, 0x400, compass_0400_sites, std::size(compass_0400_sites), 0, {}},
+			 .pre = compass_clear_is_two_rows<0x00598955>, .post = compass_clear_to_four_rows<0x00598955>},
+			// batch 4
+			{{"cg_weaponsarray", 0x0495A410, 0x8, cg_weaponsarray_sites, std::size(cg_weaponsarray_sites), 0, {}}},
+			{{"cg_ikbuf", 0x049B25C0, 0x8, cg_ikbuf_sites, std::size(cg_ikbuf_sites), 0, {}}},
+			{{"cg_destructibles", 0x17E820C0, 0x8, cg_destructibles_sites, std::size(cg_destructibles_sites), 0, {}}},
+			{{"numdestructibles", 0x17EC11B0, 0x4, numdestructibles_sites, std::size(numdestructibles_sites), 0, {}}},
+			{{"cg_updatetime", 0x17EC11B8, 0x4, cg_updatetime_sites, std::size(cg_updatetime_sites), 0, {}}},
+			{{"destr_gamestates", 0x17E820D0, 0x1080, destr_gamestates_sites, std::size(destr_gamestates_sites), 0, {}}},
+			{{"destr_numgamestates", 0x17E841D0, 0x4, destr_numgamestates_sites, std::size(destr_numgamestates_sites), 0, {}}},
+			{.array = {"ikStates"}, .own = ikstates_step},
+			// batch 5
+			{{"cg_clientents30", 0x041DC500, 0x21840, cg_clientents30_sites, std::size(cg_clientents30_sites), 0, {}}},
+			{{"cg_perclient_3c0", 0x0479DC80, 0x3C0, cg_perclient_3c0_sites, std::size(cg_perclient_3c0_sites), 0, {}}},
+			{.array = {"session_members"}, .own = session_members_step},
+			// batch 6
+			{.array = {"tnotify_list", 0x04CA5820, 0x1F40, tnotify_list_sites, std::size(tnotify_list_sites), 0, {}},
+			 .pre = tnotify_init_matches, .post = tnotify_init_items},
+			{.array = {"tnotify_head", 0x04CA96C0, 0x8, tnotify_head_sites, std::size(tnotify_head_sites), 0, {}},
+			 .pre = tnotify_list_moved},
+			{.array = {"tnotify_tail", 0x04CA96D0, 0x8, tnotify_tail_sites, std::size(tnotify_tail_sites), 0, {}},
+			 .pre = tnotify_list_moved},
+			{.array = {"tnotify_free", 0x04CA96E0, 0x8, tnotify_free_sites, std::size(tnotify_free_sites), 0, {}},
+			 .pre = tnotify_list_moved},
+			// batch 7 (ungated: the 190 MB slide happened with the third pane off too)
+			{{"view_idsets_240", 0x0F48C880, 0x240, fxgpu_client_sites, std::size(fxgpu_client_sites), 0, {}}},
+			// batch 8 (scene_c before install_perclient_buffer_guard: its cave bakes C's base)
+			{{"scene_pc480", 0x0AE134A0, 0x480, scene_pc480_sites, std::size(scene_pc480_sites), 0, {}}},
+			{.array = {"scene_c", 0x10596AE0, 0x8, scene_c_sites, std::size(scene_c_sites), 0, {}},
+			 .post = publish_scene_c},
+			// batches 9-13
+			{{"rview_a24", 0x0F464FCC, 0xA24, rview_a24_sites, std::size(rview_a24_sites), 0, {}}},
+			{{"rview_org30", 0x0F466430, 0x30, rview_org30_sites, std::size(rview_org30_sites), 0, {}}},
+			{{"aimactors", 0x03600380, 0x200, aimactors_sites, std::size(aimactors_sites), 0, {}}},
+			{{"hudpl_score", 0x1A7F6A50, 0x20, hudpl_score_sites, std::size(hudpl_score_sites), 0, {}}},
+			{{"hudpl_gap", 0x1A7F6A90, 0x20, hudpl_gap_sites, std::size(hudpl_gap_sites), 0, {}}},
+			{{"hudpl_flags", 0x1A7F6AD0, 0x20, hudpl_flags_sites, std::size(hudpl_flags_sites), 0, {}}},
+			{{"hudpl_ids", 0x1A7F6B10, 0x20, hudpl_ids_sites, std::size(hudpl_ids_sites), 0, {}}},
+			{{"hudpl_icons", 0x1A7F6B50, 0x40, hudpl_icons_sites, std::size(hudpl_icons_sites), 0, {}}},
+			{{"hudpl_self", 0x1A7F6BD0, 0x4, hudpl_self_sites, std::size(hudpl_self_sites), 0, {}}},
+			{{"prevview", 0x0FDCC800, 0x290, prevview_sites, std::size(prevview_sites), 0, {}}},
+			// batches 14-18 and the light queue
+			{.array = {"statscache", 0x1139B860, 0x4404, statscache_sites, std::size(statscache_sites), 0, {}},
+			 .post = widen_statscache_reset},
+			{.array = {"visbits", 0x1795CEC8, 0x8, visbits_sites, std::size(visbits_sites), 0, {}},
+			 .post = widen_visbits_reset},
+			{.array = {"conmsgbuf", conmsgbuf_base, conmsgbuf_stride, conmsgbuf_sites, std::size(conmsgbuf_sites), 0, {}},
+			 .pre = conmsgbuf_refs_match, .post = retarget_conmsgbuf_refs},
+			{.array = {"uiinfo", 0x1795D270, 0x1B68, uiinfo_sites, std::size(uiinfo_sites), 0, {}},
+			 .pre = uiinfo_bound_matches, .post = widen_uiinfo_init},
+			{{"ui3d_windows", 0x10B2F2F0, 0x438, ui3d_windows_sites, std::size(ui3d_windows_sites), 0, {}}},
+			{.array = {"lightq"}, .own = relocate_lightq},
+		};
+
+		// The new block of each plain row, 0 while it is not moved.
+		size_t perclient_new[std::size(perclient_rows)] = {};
+
+		// Row index by name, resolved while compiling: a name missing from the table
+		// does not build, and reordering rows cannot point a reader at another array.
+		consteval size_t perclient_row(const std::string_view name)
+		{
+			for (size_t i = 0; i < std::size(perclient_rows); ++i)
+			{
+				if (name == perclient_rows[i].array.name)
+				{
+					return i;
+				}
+			}
+			throw "perclient_row: no such row";
+		}
+
+		bool tnotify_list_moved(const perclient_array&)
+		{
+			return perclient_new[perclient_row("tnotify_list")] != 0;
+		}
+
+		// Runs every row once, in order. A row whose pre-step refuses or whose move
+		// fails keeps 0; a post-step reports its own failure, the result is unused.
+		void relocate_perclient_rows()
+		{
+			for (size_t i = 0; i < std::size(perclient_rows); ++i)
+			{
+				const auto& r = perclient_rows[i];
+				if (r.own)
+				{
+					r.own();   // guards itself against a second run
+					continue;
+				}
+				if (perclient_new[i] || (r.pre && !r.pre(r.array)))
 				{
 					continue;
 				}
-				batch13_new[i] = relocate_perclient(batch13[i]);
-				if (batch13_new[i] && std::strcmp(batch13[i].name, "sunvol") == 0)
+				perclient_new[i] = relocate_perclient(r.array);
+				if (perclient_new[i] && r.post)
 				{
-					// Match the static initializer: zero except dword +0x2BB0 = -1.
-					for (size_t lc = 2; lc < 4; ++lc)
-					{
-						const uint32_t none = 0xFFFFFFFF;
-						std::memcpy(reinterpret_cast<uint8_t*>(batch13_new[i]) + lc * 0x2BB8 + 0x2BB0,
-						            &none, sizeof(none));
-					}
+					r.post(r.array, perclient_new[i]);
 				}
 			}
 		}
@@ -870,11 +917,7 @@
 				const auto* at = reinterpret_cast<const uint8_t*>(b + g.rva);
 				if (!readable(at, g.len) || std::memcmp(at, g.prologue, g.len) != 0)
 				{
-					trace_line l;
-					l.str("lensflare gate: 0x");
-					l.hex(g.rva);
-					l.str(" prologue not stock - no gate installed");
-					trace_write(l);
+					note("[splitscreen] lensflare gate: 0x%08X prologue not stock - no gate installed\n", g.rva);
 					return;
 				}
 			}
@@ -918,13 +961,11 @@
 				++installed;
 			}
 			lensflare_gated = installed == std::size(lensflare_gates);
-			trace_line l;
-			l.str("lensflare gate: ");
-			l.dec(installed);
-			l.str(" of ");
-			l.dec(std::size(lensflare_gates));
-			l.str(" entry points gated for local clients >= 2");
-			trace_write(l);
+			if (!lensflare_gated)
+			{
+				note("[splitscreen] lensflare gate: %u of %zu entry points gated for local clients >= 2\n",
+				     installed, std::size(lensflare_gates));
+			}
 		}
 
 		// ---- Quit hang: lens-flare manager destructor at process exit ----------
@@ -949,12 +990,7 @@
 				return;
 			}
 			const uint8_t ret = 0xC3;
-			if (write_bytes(at, &ret, 1))
-			{
-				trace_line l;
-				l.str("lensflare exit thunk: returns at process exit (quit hang)");
-				trace_write(l);
-			}
+			write_bytes(at, &ret, 1);
 		}
 
 		// ---- Per-controller UI model roots 2..3 --------------------------------
@@ -1116,9 +1152,6 @@
 				return;
 			}
 			controller_models_hooked = true;
-			trace_line l;
-			l.str("controller models: roots 2/3 created at Com_LocalClient_LastInput_Init");
-			trace_write(l);
 		}
 
 
@@ -1140,27 +1173,20 @@
 
 		void widen_gamepad_button_models()
 		{
-			if (!batch2_new[1] || !batch2_new[2] || !signin_relocated || !controller_models_hooked)
+			const auto rightstick_new = perclient_new[perclient_row("rightstick")];
+			const auto buttons_new = perclient_new[perclient_row("gamepadbuttons")];
+			if (!rightstick_new || !buttons_new || !signin_relocated || !controller_models_hooked)
 			{
-				trace_line l;
-				l.str("gamepad button models: stock, missing rightstick=");
-				l.dec(batch2_new[1] ? 1 : 0);
-				l.str(" buttons=");
-				l.dec(batch2_new[2] ? 1 : 0);
-				l.str(" signin=");
-				l.dec(signin_relocated ? 1 : 0);
-				l.str(" roots=");
-				l.dec(controller_models_hooked ? 1 : 0);
-				trace_write(l);
+				note("[splitscreen] gamepad button models: stock, missing rightstick=%d buttons=%d signin=%d roots=%d\n",
+				     rightstick_new ? 1 : 0, buttons_new ? 1 : 0, signin_relocated ? 1 : 0,
+				     controller_models_hooked ? 1 : 0);
 				return;
 			}
 			auto* p = reinterpret_cast<uint8_t*>(base() + gamepad_models_bound_rva);
 			if (!readable(p, sizeof(gamepad_models_bound_expected))
 				|| std::memcmp(p, gamepad_models_bound_expected, sizeof(gamepad_models_bound_expected)) != 0)
 			{
-				trace_line l;
-				l.str("gamepad button models: stock, bytes differ at 0x01340319");
-				trace_write(l);
+				note("[splitscreen] gamepad button models: stock, bytes differ at 0x%08X\n", gamepad_models_bound_rva);
 				return;
 			}
 			// 4: seat records, model roots and both model arrays exist for lc 0..3.
@@ -1168,9 +1194,6 @@
 			if (write_bytes(p + 2, &four, 1))
 			{
 				gamepad_models_widened = true;
-				trace_line l;
-				l.str("gamepad button models: CL_InitGamepadModels bound 2 -> 4");
-				trace_write(l);
 			}
 		}
 
@@ -1194,18 +1217,12 @@
 				return;   // no stock join for controller 2 - keep the stock range
 			}
 			auto* p = reinterpret_cast<uint8_t*>(base() + lobby_max_local_reg_rva);
-			trace_line l;
 			if (!readable(p, sizeof(lobby_max_local_reg_expected))
 				|| std::memcmp(p, lobby_max_local_reg_expected, sizeof(lobby_max_local_reg_expected)) != 0)
 			{
-				l.str("lobby_maxLocalPlayers: stock, bytes differ at 0x01EE8872");
-				trace_write(l);
+				note("[splitscreen] lobby_maxLocalPlayers: stock, bytes differ at 0x%08X\n", lobby_max_local_reg_rva);
 				return;
 			}
 			const uint8_t four = 0x04;   // PS4's own maximum
-			if (write_bytes(p + lobby_max_local_max_off, &four, 1))
-			{
-				l.str("lobby_maxLocalPlayers: range max 2 -> 4");
-				trace_write(l);
-			}
+			write_bytes(p + lobby_max_local_max_off, &four, 1);
 		}

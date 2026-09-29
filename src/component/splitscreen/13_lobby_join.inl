@@ -139,7 +139,6 @@
 			bool enrolled = false;
 			uint32_t enroll_attempts = 0;
 			bool published = false;
-			uint32_t publish_attempts = 0;
 		};
 		guest_lobby_state guest3_lobby{};
 
@@ -166,7 +165,6 @@
 			}
 			if (!lobby_enrollment_api_matches())
 			{
-				report87(47);
 				return false;
 			}
 
@@ -191,52 +189,40 @@
 				|| *reinterpret_cast<const uint32_t*>(
 					reinterpret_cast<size_t>(session) + 0x40) == 0)
 			{
-				report87(48);
 				return false;
 			}
 
 			if (get_client(session, xuid))
 			{
 				enrolled = true;
-				report87(50);
 				return true;
 			}
 
 			// Never ahead of the host and native guest (join order); waiting costs no attempt.
 			if (!host_and_guest_in_game_lobby(session, controller))
 			{
-				report87(55);
 				return false;
 			}
 
 			const in_progress_guard guard(lobby_enrollment_in_progress);
 			++attempts;
-			report87(49);
 			add_local(0, controller, game_lobby_type);
 
 			enrolled = get_client(session, xuid) != nullptr;
-			if (enrolled)
-			{
-				report87(50);
-			}
 			return enrolled;
 		}
 
 		bool guest2_profile_published = false;
 		bool profile_publish_in_progress = false;
-		uint32_t profile_publish_attempts = 0;
 
-		bool refresh_guest_lobby_profile(int controller, bool enrolled, bool& published,
-		                                 uint32_t& attempts);
+		bool refresh_guest_lobby_profile(int controller, bool enrolled, bool& published);
 
 		bool refresh_guest2_lobby_profile()
 		{
-			return refresh_guest_lobby_profile(2, guest2_lobby_enrolled, guest2_profile_published,
-			                                   profile_publish_attempts);
+			return refresh_guest_lobby_profile(2, guest2_lobby_enrolled, guest2_profile_published);
 		}
 
-		bool refresh_guest_lobby_profile(const int controller, const bool enrolled, bool& published,
-		                                 uint32_t& attempts)
+		bool refresh_guest_lobby_profile(const int controller, const bool enrolled, bool& published)
 		{
 			if (published)
 			{
@@ -246,9 +232,19 @@
 			{
 				return false;
 			}
+			// Throttled: until the CAC is ready this is reached from several per-frame
+			// paths (Storage_Pump for every controller, both guests' update, the lobby
+			// add) - up to six GetMutableClientInfo calls a frame, with no end if the
+			// gum IDs stay zero. One try per 250 ms is enough to catch readiness.
+			static uint64_t next_try[4]{};
+			const auto now = GetTickCount64();
+			if (now < next_try[controller & 3])
+			{
+				return false;
+			}
+			next_try[controller & 3] = now + 250;
 			if (!profile_publish_api_matches())
 			{
-				report87(51);
 				return false;
 			}
 
@@ -259,7 +255,6 @@
 			using update_client_fn = bool (*)(void*, uint64_t, const void*, bool*);
 
 			const in_progress_guard guard(profile_publish_in_progress);
-			++attempts;
 			alignas(16) std::array<uint8_t, 0x410> info{};
 			reinterpret_cast<mutable_info_fn>(base() + mutable_client_info_rva)(
 				controller, info.data());
@@ -273,7 +268,6 @@
 			}
 			if (!gums_ready)
 			{
-				report87(52);
 				return false;
 			}
 
@@ -308,7 +302,6 @@
 			if (updated_any)
 			{
 				published = true;
-				report87(53);
 			}
 			return published;
 		}
@@ -324,7 +317,7 @@
 			if (g.join_done
 				&& ensure_guest_game_lobby(3, g.join_done, g.enrolled, g.enroll_attempts))
 			{
-				refresh_guest_lobby_profile(3, g.enrolled, g.published, g.publish_attempts);
+				refresh_guest_lobby_profile(3, g.enrolled, g.published);
 			}
 		}
 
@@ -385,8 +378,8 @@
 		// only touches controller 1. Now each local player leaves on his own, as on
 		// console: ui_scripts/zz_splitscreen removes every extra player, the LobbyVM
 		// leave below repairs a refused leave, and guest2_input_frame handles player
-		// 3's own controller. The sign-in function stays detoured to log every
-		// splitscreen sign-in/out to splitscreen_ui_trace.txt.
+		// 3's own controller. The sign-in function is detoured (guest_signin_stub) to
+		// follow every splitscreen sign-in/out.
 		// History: LOG.md, DEACTIVATE SPLITSCREEN
 		constexpr uint32_t lobbyvm_local_leave_rva = 0x01EE3B40;
 		constexpr uint8_t lobbyvm_local_leave_prologue[] = {
@@ -422,13 +415,12 @@
 			guest2_lobby_enrolled = false;
 			lobby_enrollment_attempts = 0;
 			guest2_profile_published = false;
-			profile_publish_attempts = 0;
 		}
 
 		// Take a component-seated controller out of every lobby we host. Only when
 		// no lobby lists him may he be signed out: a seat without a lobby entry, or
 		// the reverse, is the "Failed to host lobby" state.
-		bool remove_guest_from_lobbies(const int controller, trace_line& l)
+		bool remove_guest_from_lobbies(const int controller)
 		{
 			const auto* reason = reinterpret_cast<const char*>(
 				base() + local_client_left_reason_rva);
@@ -441,7 +433,8 @@
 				|| std::memcmp(reason, local_client_left_reason,
 				               sizeof(local_client_left_reason)) != 0)
 			{
-				l.str(" lobbies=bytes-mismatch");
+				note("[splitscreen] guest %d leave: lobby bytes mismatch - not removed from lobbies\n",
+				     controller);
 				return false;
 			}
 
@@ -449,12 +442,9 @@
 				base() + lobby_get_network_mode_rva)();
 			const auto xuid = reinterpret_cast<uint64_t (*)(int)>(
 				base() + live_user_get_xuid_rva)(controller);
-			l.str(" mode=");
-			l.dec(static_cast<uint64_t>(network_mode));
 			if ((network_mode != lobby_network_local && network_mode != lobby_network_lan)
 				|| !xuid)
 			{
-				l.str(" lobbies=refused");
 				return false;
 			}
 
@@ -477,20 +467,16 @@
 			{
 				auto* session = get_session(lobby_type);
 				const bool member = session && get_client(session, xuid);
-				l.str(lobby_type == game_lobby_type ? " game=" : " party=");
 				if (!member)
 				{
-					l.str("absent");
 					continue;
 				}
 				if (!is_host(lobby_type))
 				{
-					l.str("not-host");
 					failed = true;
 					continue;
 				}
 				const bool removed = remove(lobby_type, xuid, reason);
-				l.str(removed ? "removed" : "remove-failed");
 				failed = failed || !removed;
 			}
 			return !failed;
@@ -506,22 +492,11 @@
 				return lua_result;
 			}
 
-			trace_line l;
-			l.str("t=");
-			l.dec(GetTickCount64());
-			l.str(" local_leave ci=");
-			l.dec(static_cast<uint64_t>(controller));
-			l.str(" lua=");
-			l.dec(lua_result ? 1 : 0);
-
-			const bool result = lua_result || remove_guest_from_lobbies(controller, l);
+			const bool result = lua_result || remove_guest_from_lobbies(controller);
 			if (result && controller == 2)
 			{
 				reset_guest2_join();
 			}
-			l.str(" signout=");
-			l.dec(result ? 1 : 0);
-			trace_write(l);
 			return result;
 		}
 
@@ -540,23 +515,6 @@
 			const auto before = seat_bits();
 			guest_signin_hook.invoke<void>(controller, signin, arg3);
 			const auto after = seat_bits();
-
-			{
-				trace_line l;
-				trace_head(l, "splitscreen_signin", call_site_of(_ReturnAddress()));
-				l.str(" ci=");
-				l.dec(static_cast<uint64_t>(controller));
-				l.str(" add=");
-				l.dec(signin ? 1 : 0);
-				l.str(" a3=");
-				l.dec(arg3 ? 1 : 0);
-				l.str(" seats=");
-				l.hex(before);
-				l.str("->");
-				l.hex(after);
-				trace_stack(l);
-				trace_write(l);
-			}
 
 			// Controller 2 signed out by any path: the next A press starts afresh.
 			if (!signin && controller == 2 && !controller_seated(2))
@@ -603,9 +561,7 @@
 			}
 		}
 
-		// ---- SwapClients (PS4 0xE356F0): trace and slot-3 guard ----
-		// Logs both indices, cl_maxLocalClients, whether the connection block
-		// exists, and both clients' UI flags before and after.
+		// ---- SwapClients (PS4 0xE356F0): slot-3 guard ----
 		constexpr uint32_t swap_clients_rva = 0x020E39D0;
 		constexpr uint8_t swap_clients_prologue[] = {
 			0x89, 0x54, 0x24, 0x10,                               // mov [rsp+0x10], edx
@@ -616,31 +572,6 @@
 
 		void swap_clients_stub(const int a, const int b)
 		{
-			const auto ui_flags = [](const int lc) -> uint32_t
-			{
-				if (lc < 0 || lc > 3)   // lc 3: the owned head of clientUIActives[3]
-				{
-					return 0xFFFFFFFF;
-				}
-				return *reinterpret_cast<const volatile uint32_t*>(
-					base() + 0x05359BC0 + static_cast<size_t>(lc) * 0x1078);
-			};
-			trace_line l;
-			l.str("t=");
-			l.dec(GetTickCount64());
-			l.str(" SwapClients a=");
-			l.dec(static_cast<uint64_t>(a));
-			l.str(" b=");
-			l.dec(static_cast<uint64_t>(b));
-			l.str(" cl_max=");
-			l.dec(*reinterpret_cast<const volatile uint32_t*>(base() + cl_max_local_clients_rva));
-			l.str(" conn=");
-			l.dec(*reinterpret_cast<const volatile uint64_t*>(base() + 0x05359BB8) ? 1 : 0);
-			l.str(" flags ");
-			l.hex(ui_flags(a));
-			l.str("/");
-			l.hex(ui_flags(b));
-
 			// clientUIActives[3] owns only its first 0x3F0 bytes; the rest overlaps live
 			// client globals and cls, which cannot be moved (CLAUDE.md dead end). On PS4
 			// everything past +0x18 is online host migration data and voice counters, so
@@ -662,13 +593,7 @@
 			{
 				std::memcpy(win_a, keep_a, window_len);
 				std::memcpy(win_b, keep_b, window_len);
-				l.str(" window-held");
 			}
-			l.str(" -> ");
-			l.hex(ui_flags(a));
-			l.str("/");
-			l.hex(ui_flags(b));
-			trace_write(l);
 		}
 
 		// --- Player 3's own controller: A joins, B / unplugging leaves ---------
@@ -716,26 +641,21 @@
 		}
 
 		// Leave every lobby we host, then sign out through the hooked sign-in function.
-		void guest_leave(int controller, const char* why);
+		void guest_leave(int controller);
 
-		void guest2_leave(const char* why)
+		void guest2_leave()
 		{
-			guest_leave(2, why);
+			guest_leave(2);
 		}
 
-		void guest_leave(const int controller, const char* why)
+		void guest_leave(const int controller)
 		{
 			if (guest2_leave_in_progress)
 			{
 				return;
 			}
 			const in_progress_guard guard(guest2_leave_in_progress);
-			trace_line l;
-			l.str("t=");
-			l.dec(GetTickCount64());
-			l.str(controller == 2 ? " guest2_leave why=" : " guest3_leave why=");
-			l.str(why);
-			if (remove_guest_from_lobbies(controller, l))
+			if (remove_guest_from_lobbies(controller))
 			{
 				if (controller_seated(controller))
 				{
@@ -754,15 +674,7 @@
 						guest3_lobby = {};
 					}
 				}
-				l.str(out ? " signout=1" : " signout=seat-still-set");
 			}
-			else
-			{
-				l.str(" signout=0");
-			}
-			l.str(" seats=");
-			l.hex(seat_bits());
-			trace_write(l);
 		}
 
 		void guest2_input_frame()
@@ -789,7 +701,7 @@
 				// Seat lost but still listed: finish the leave (no member without a seat).
 				if (guest2_lobby_enrolled && guest2_listed_in_game_lobby())
 				{
-					guest2_leave("seat-lost");
+					guest2_leave();
 					return;
 				}
 				// Once controller 2's ButtonBits models exist (widen_gamepad_button_models),
@@ -803,11 +715,6 @@
 					guest2_join_requested = true;
 					guest2_join_request_tick = GetTickCount64();
 					guest_join_attempts = 0;
-					trace_line l;
-					l.str("t=");
-					l.dec(guest2_join_request_tick);
-					l.str(" guest2_join_request A");
-					trace_write(l);
 				}
 				if (guest2_join_requested)
 				{
@@ -827,7 +734,7 @@
 			guest2_join_requested = false;
 			if ((pressed & game_button_b) && !gamepad_models_widened)
 			{
-				guest2_leave("B");
+				guest2_leave();
 				return;
 			}
 			if (!connected)
@@ -835,7 +742,7 @@
 				if (++guest2_unplugged_frames >= guest2_unplug_frames)
 				{
 					guest2_unplugged_frames = 0;
-					guest2_leave("unplugged");
+					guest2_leave();
 				}
 				return;
 			}
@@ -858,7 +765,7 @@
 				guest3_unplugged_frames = 0;
 				if (guest3_lobby.enrolled && guest_listed_in_game_lobby(3))
 				{
-					guest_leave(3, "seat-lost");
+					guest_leave(3);
 				}
 				return;
 			}
@@ -867,7 +774,7 @@
 				if (++guest3_unplugged_frames >= guest2_unplug_frames)
 				{
 					guest3_unplugged_frames = 0;
-					guest_leave(3, "unplugged");
+					guest_leave(3);
 				}
 				return;
 			}
@@ -876,23 +783,10 @@
 
 		void cl_init_watch()
 		{
-			patch_probe_once();   // diagnostic, BO3_PATCH_PROBE=1 only
-
 			// Not cl_init2_done alone: the widens are deferred until the allocation is
 			// real, so keep re-entering until both halves are done.
-			if (lc2_fully_done())
+			if (lc2_fully_done() || !signin_relocated || !raise_local_client_count)
 			{
-				return;
-			}
-			// Breadcrumbs in status slot 87, so a run that does nothing says why.
-			if (!signin_relocated)
-			{
-				report87(10);
-				return;
-			}
-			if (!raise_local_client_count)
-			{
-				report87(11);
 				return;
 			}
 
@@ -913,9 +807,7 @@
 			if (seats >= 3)
 			{
 				run_cl_init_for_local_client2();
-				return;
 			}
-			report87(20 + seats);
 		}
 
 		// Trigger for CL_Init(2): CL_LocalClients_SetAllUsedActive. It sets the
@@ -934,17 +826,11 @@
 
 		void run_cl_init_for_local_client2();
 
-
 		// SetAllUsedActive takes no arguments (PS4 0x1517020: for i in 0..3
 		// SetActive(i, IsBeingUsed(i))). Run the engine's pass first, then ours.
 		void set_active_stub()
 		{
 			set_active_hook.invoke<void>();
-
-
-			// Counted before any gate, so the number means "our hook ran".
-			++set_active_calls;
-			report87(0);
 
 			// Seat check: without it the first call at boot ran CL_Init(2) for a client
 			// that did not exist yet and killed startup. Three used seats (bit 0 of each

@@ -1,28 +1,48 @@
-# What ezz BOIII needs for native 4-player local splitscreen
+# ezz BOIII and 4-player local splitscreen - what ezz could change natively
 
-Living list, kept up to date while the mod is migrated to ezz BOIII. Every item
-names the ezz source line (commit `5aa7fac`, `src/client/...`) and the game
-address in exe **0x06531394** (Steam build 24784313, the exe ezz v3.0.0 runs).
-Game addresses are RVAs (image base 0x140000000 subtracted).
+**None of the ezz-side changes below is required for the mod to work.** Every
+point where ezz BOIII affects the mod is already worked around inside the mod
+(`src/component/splitscreen_ezz.hpp`, and the plugin entry for ezz's plugin
+loader, item 13). Doing them natively in ezz would make both sides cleaner:
+most of the mod's workarounds - and much of its reference rewriting - would
+go away. Each item says what ezz does, what the mod does today ("Mod
+workaround") and what ezz could change instead ("Fix in ezz").
 
-Tool: `python tools/ezz_overlap.py <ezz checkout>` lists every ezz hook site and
-every ezz data symbol that overlaps a mod patch → `data/port/2026/ezz_overlap.txt`.
+| item | topic | mod today |
+|---|---|---|
+| 1 | the two constants (`LOCAL_CLIENT_COUNT`, `CONTROLLER_INDEX_COUNT`) | background for items 2-5 |
+| 2 | XUIDs for controllers 2/3 | worked around, verified |
+| 3 | client name map read directly | worked around, verified |
+| 4 | static cgame pools sized for 2 | worked around, verified |
+| 5 | `clientUIActives[lc]` reads | the mod keeps slots 2/3 usable; 4-player matches work; ezz's own reads of slots 2/3 not checked |
+| 6 | hooks on functions both patch | chained / stacked - notes for a merge |
+| 7 | engine globals both name | notes for a merge |
+| 8 | checked, not a problem | - |
+| 9 | players 3/4 need PLAY OFFLINE | usage (engine rule, not ezz) |
+| 10 | guest names "(2)"/"(3)" | cosmetic, not changed |
+| 11 | observations | - |
+| 12 | ClientCommand hook hangs the server (every ezz user) | worked around, verified |
+| 13 | plugin loader: start point, `p_name`, unload at exit | worked around by the plugin |
 
-Status legend: **BLOCKER** stops players 3/4 · **MATCH** breaks once 3-4
-players are in a round · **CLEANUP** needed for a clean merge, not for function.
-"Mod workaround" says what the mod does until ezz changes the item.
+Every item names the ezz source line (ezz commit `5aa7fac`, `src/client/...`)
+and the game address in exe **0x06531394** (Steam build 24784313, the exe ezz
+v3.0.0 runs). Game addresses are RVAs (image base 0x140000000 subtracted).
+Items 6 and 7 come from a development tool that cross-checks every ezz hook
+site and data symbol against every mod patch site.
 
-**Where it stands (2026-09-29, branch port-2026 @ 32975db, ezz v3.0.0):** with
-the mod's workarounds for items 2, 3 and 4 (`component/splitscreen_ezz.hpp`),
-four local players join the offline Zombies lobby and play Der Eisendrache
-under ezz BOIII - two rounds to GAME OVER and back to the lobby, no crash.
-Without them player 3 never joins (item 2) and the first 4-player round
-crashes in cgame (item 4). Everything below is still what a native
-integration should change on ezz's side; the workarounds only bridge it.
+Status in the headings says how the point would show WITHOUT the mod's
+workaround: **BLOCKER** player 3/4 cannot join · **MATCH** breaks once 3-4
+players are in a round · **CLEANUP** matters for a clean merge only.
 
-## 1. The two constants (root of most items below)
+**Where it stands (2026-09-29, mod 2.1 = ezz plugin, ezz v3.0.0):** with the
+mod's workarounds, four local players play offline Zombies (Der Eisendrache,
+two rounds to GAME OVER and back to the lobby) and offline Multiplayer (Rise
+Team Deathmatch, all four players moving and firing until the score limit,
+back to the lobby) under ezz BOIII, no crash.
 
-`game/structs/core.hpp:278, 288, 311`
+## 1. The two constants - raise them for ezz-owned storage ONLY
+
+`game/structs/core.hpp:278, 288, 311, 441`
 
 ```cpp
 CONTROLLER_INDEX_COUNT = 0x2,
@@ -31,10 +51,34 @@ template <typename T> using LocalClientPool = array<T, LOCAL_CLIENT_COUNT>;
 ```
 
 The PS4 build (full DWARF) sizes every per-client array `[4]`
-(`MAX_LOCAL_CLIENTS` 4). Raising both to 4 fixes items 2, 4 and 5 by itself
-wherever the code already loops to the constant. Watch for code that indexes a
-**game** global with the constant: the game's own arrays stay `[2]` unless the
-mod (or ezz) moves them. Also pre-existing: `game/impl/ugc/ugc.cpp:160` loops
+(`MAX_LOCAL_CLIENTS` 4). **Do not simply raise `LOCAL_CLIENT_COUNT` to 4.**
+(An earlier version of this file said to; that was wrong.) `LocalClientPool`
+is used for two different kinds of memory:
+
+* **ezz-owned storage** - arrays ezz defines itself. These must hold 4:
+  `game/symbols/cg/core.cpp:8-15` (`cgArray`, `cgsArray`, `cg_entitiesArray`,
+  `cg_viewModelArray`, `cg_weaponsArray`, `cg_destructibles`, `cg_ikBuf`),
+  `component/currency.cpp:481-484`, and `guids` in item 2.
+* **overlays of game globals** - `symbol<...>` types laid over the game's own
+  `.data`, where the PC build has `[2]`: `cg_fakeEntitiesInuseBitArray`
+  (0x04C98B80), `builtin_cg_entitiesArray` (0x04C98B60),
+  `builtin_cg_weaponsArray` (0x0495A410), `builtin_cg_destructibles`
+  (0x17E820C0), `builtin_cg_ikBuf` (0x049B25C0), `s_userDataForControllerMap`
+  (0x03390190). A `[4]` type over them makes every access to `[2]`/`[3]`, and
+  every loop to the constant, hit the next global.
+
+Concrete case: `CG_ClearCGEnts_Impl` (`game/impl/cg/cg.cpp:27-32`, installed
+at `component/client_patches.cpp:335`) loops
+`localClientNum < LOCAL_CLIENT_COUNT` over `builtin_cg_entitiesArray->pools`,
+two pointers at 0x04C98B60. With the constant at 4 it writes `nullptr` to
+0x04C98B70 - the game's `cgsArray` pointer (ezz's own `builtin_cgsArray`) -
+and 0x04C98B78.
+
+**Native fix:** a separate constant for the new capacity (PS4 name
+`MAX_LOCAL_CLIENTS = 4`) used by ezz-owned storage and loops over it; each
+overlay either stays `[2]` with its accesses bounded to lc 0/1, or its game
+array is moved to `[4]` first (what the mod does, see item 7) and the symbol
+points at the new block. Also pre-existing: `game/impl/ugc/ugc.cpp:161` loops
 `controllerIndex <= CONTROLLER_INDEX_COUNT` (one past the end).
 
 ## 2. XUIDs for controllers 2 and 3 - BLOCKER (worked around, verified)
@@ -115,7 +159,10 @@ CG_ClearCGEnts_Impl in `game/impl/cg/cg.cpp:27-46`) loop to
 `LOCAL_CLIENT_COUNT` too. `game/impl/scr/vm/op.cpp:27` reads
 `cgArray[localClientNum].time` bounded by the game's `cl_maxLocalClients`.
 
-**Fix in ezz:** item 1 (all of them are `LocalClientPool`). Nothing else.
+**Fix in ezz:** grow these ezz-owned pools to 4 (item 1, first list) and
+bound `Hunk_UserAlloc_ReturnStaticAllocation_FirstNull` by the new capacity.
+The free/clear loops that write the game's `[2]` pointer array
+(`builtin_cg_entitiesArray`) must stay at 2 unless that array moves (item 1).
 
 **Measured without a workaround** (2026-09-29 11:39, 4-player ZM round, all
 four clients reached `first_snapshot`): access violation at 0x00FEEE5F
@@ -135,7 +182,7 @@ which the engine no longer writes then - client-script GetTime under that
 handler would see a stale value. Not observed to matter in the two test
 rounds; item 1 removes it.
 
-## 5. clientUIActives indexed by local client - MATCH (verify)
+## 5. clientUIActives indexed by local client - MATCH (mod works; ezz's reads not checked)
 
 ezz reads `cg::clientUIActives->actives[lc]` (0x05359BC0, game array
 `[2]` x 0x1078) in `game/impl/cl/cl.cpp:56, 219, 225, 402`,
@@ -153,6 +200,13 @@ rest of that freed memory, and at +0x458 it runs into ezz's `clients` and at
 keeps slots 2/3 there (and not only in the mod's sidecar) is **unverified**;
 check in a 4-player match before relying on it.
 
+**Mod workaround:** the array stays in place and slots 2/3 are made usable
+around it: slot 2 and most of slot 3 are the block `voice_comm` vacated,
+`CL_LocalClient_IsActive` (0x027C18E0) jumps to a cave that answers for
+lc >= 2 from the mod's seat state, the twelve loops that end at `actives[2]`
+and the end-of-match loops run to 4, and SwapClients guards slot 3's tail.
+4-player Zombies and Multiplayer matches under ezz work with this.
+
 **Fix in ezz (native):** own a `ClientUIActives` with 4 slots and point the
 engine at it, the way ezz already owns the cgame pools; then the mod's
 in-place extension and guards go away.
@@ -169,12 +223,12 @@ patches or calls, and turned the affected feature off when it saw ezz's jump.
 | LiveUser_UserGetXuid | 0x01EBABC0 | auth.cpp:731 | - | chained (item 2) |
 | LiveUser_GetClientName | 0x01EBA850 | live.cpp:200 | - | chained (item 3) |
 | Storage_Pump | 0x0221A680 | live.cpp:228 (lock + invoke) | detours it to pump guest storage | stacked on ezz's detour |
-| Live_LocalClient_StorageAndStats_Ready | 0x01DFEA90 | live.cpp:233 (calls Storage_Pump when not ready) | read-only signin probe (DIAG) | probe skipped when hooked - ezz's hook makes a read-only predicate pump storage, which crashed when called from a worker thread (`va()` TLS) |
+| Live_LocalClient_StorageAndStats_Ready | 0x01DFEA90 | live.cpp:233 (calls Storage_Pump when not ready) | - (a diagnostic probe that called it was removed in the cleanup) | no overlap. Note: ezz's hook gives this read-only predicate a side effect (Storage_Pump); calling it from a worker thread crashed in `va()` (TLS) |
 | Com_FPSLimit | 0x00F7CFD0 | client_patches.cpp:565 (replaced) | moves one reference inside it | harmless (code no longer runs) |
 | CL_CheckForResend | 0x0134B990 | client_patches.cpp:550-557 (replaced) | moves one clientUIActives reference inside it | see item 5 |
 | CG_ClearCGEnts | 0x02CCDE90 | client_patches.cpp:334 (replaced) | widens its bit-array reference | see item 4 |
 | ClientCommand | 0x0193DFC0 | client_command.cpp:46 (detour; `invoke` when no handler matches) | disables the 9 caller range tests inside it | **item 12 - hangs the server without the mod too** |
-| UI_CoD_Init, CL_FirstSnapshot | 0x01F1C890, 0x01320E80 | ui_scripting.cpp | diagnostic trace only | fine |
+| UI_CoD_Init, CL_FirstSnapshot | 0x01F1C890, 0x01320E80 | ui_scripting.cpp | - (a diagnostic trace on their call sites was removed in the cleanup) | no overlap |
 | Hunk_UserAlloc calls in CG_AllocateClientMemory (+0x39, +0x18D3, +0x315F) and CG_InitAndAllocCGEntsArray (+0x65) | 0x00840929, 0x008421C3, 0x00843A4F, 0x0085B9F5 | client_patches.cpp:299-316 (call to a static pool) | re-points each call to its own stub, which forwards to ezz what fits ezz's pool | item 4 |
 
 For a merge: fold the mod's change into ezz's implementation of the same
@@ -198,15 +252,18 @@ reference rewriting for these arrays entirely.
 
 ## 8. Not a problem (checked)
 
-* Loading: ezz resolves the game's imports with plain `LoadLibraryA`, so the
-  mod's `XINPUT9_1_0.dll` loads from the game folder; the mod starts from the
-  host's `SetProcessDPIAware` import exactly as under official BOIII.
+* Loading: since 2.1 the mod is an ezz plugin (`boiii\plugins\`, item 13).
+  (2.0 was an `XINPUT9_1_0.dll` in the game folder; that also loaded, because
+  ezz resolves the game's imports with plain `LoadLibraryA`.)
 * Lua: ezz loads `boiii/ui_scripts` like official BOIII; none of ezz's own
   ui_scripts override the join path (`LobbyAddLocalClient`,
   `CoD.Menu.HandleButtonPress`, `unused_gamepad_button`).
-* ASLR: every relocated array is allocated within 1.5 GB above the image
-  (`allocate_near_module`), so rewritten rip-relative operands stay in rel32
-  range with ASLR on.
+* ASLR: the game image is already loaded at a randomised base in every run,
+  and every relocated array is allocated within 1.5 GB above it
+  (`allocate_near_module`, fails closed if nothing is free), so rewritten
+  rip-relative and image-relative operands stay in range. Every patch checks
+  the live bytes first. The real limit is a different one: the reference
+  tables are specific to exe 0x06531394.
 
 ## 9. Players 3/4 need the offline lobby - usage, not an ezz change
 
@@ -219,21 +276,22 @@ it the mode is 1 (LAN) and players 3/4 join with A as on official BOIII.
 The mod's README for ezz must say: PLAY OFFLINE first, then ZOMBIES (or
 MULTIPLAYER), then the extra players press A.
 
-## 10. Guest names - cosmetic, open
+## 10. Guest names - cosmetic, not changed
 
 ezz's LiveUser_UserGetName (live.cpp:19) names a guest `<Steam name>(<ci+1>)`.
 The mod gives controllers 2/3 an identity copied from controller 1 at boot,
 gamertag text included, and item 3's workaround returns that stored text. In
 the lobby players 3 and 4 showed as "(2)" and "(3)" instead of "(3)" and
-"(4)". Mod-side fix: fill the guests' gamertag through LiveUser_UserGetName
-(ezz's formatting) instead of copying it. Native fix: item 3.
+"(4)". Nothing breaks; only the displayed name is off. Mod-side fix (not done
+yet): fill the guests' gamertag through LiveUser_UserGetName (ezz's
+formatting) instead of copying it. Native fix: item 3.
 
 ## 11. Observed, not explained yet
 
 * In both ezz runs the **first** A press of pad 3 (player 4) did nothing and
   the second joined him (seats 0x7 -> 0xF). Not yet checked whether official
   BOIII behaves the same; the join path is the mod's Lua + engine, not ezz.
-* ~~Multiplayer freezes under ezz~~ - **not ezz, a mod bug, fixed (f6208dc)**.
+* ~~Multiplayer freezes under ezz~~ - **not ezz, a mod bug, fixed in 2.0**.
   The 4-player MP freeze ("Connection Interrupted", clock stuck) and a /GS
   crash during MP load had one cause: Con_ClearNotify (PC 0x01339210) was
   missing from the mod's con.messageBuffer relocation and cleared 16-byte
@@ -288,8 +346,8 @@ Of ezz's other detours only `Com_FPSLimit` has the same entry guard, and ezz
 replaces it without calling the original, so it cannot hang. Official BOIII
 does not hook ClientCommand.
 
-**Mod workaround** (`splitscreen_ezz.hpp`, `install_client_command_guard`,
-status bit 256): each range test ends in `cmova/cmovb edx, r10d` (loads the
+**Mod workaround** (`splitscreen_ezz.hpp`, `install_client_command_guard`):
+each range test ends in `cmova/cmovb edx, r10d` (loads the
 failing state). The mod replaces those nine 4-byte instructions with a 4-byte
 nop, all or none, after checking the bytes:
 0x0193E064, 0x0193E3F6, 0x0193E72E, 0x0193E8DC, 0x0193EA70, 0x0193EFB7,
@@ -310,7 +368,7 @@ so the return address lies in the image. Any future ezz detour that calls
 the original of a guarded function has the same problem - the tool above
 checks a function in seconds.
 
-## 13. The mod as an ezz plugin (2.1) - small asks
+## 13. The mod as an ezz plugin (2.1) - loader behaviours the plugin works around
 
 Since 2.1 the mod ships as `boiii\plugins\bo3_local_splitscreen.dll`
 (`component/plugins.cpp` loads it). Verified 2026-09-29: plugins.log
@@ -326,11 +384,12 @@ items 2-4 and 12 in place).
   `post_unpack` (e.g. `post_start`), so plugins need no import redirect.
 * **p_name is effectively required.** `lib.invoke<const char*>("p_name")`
   returns nullptr for a plugin without it, and `std::string(plugin_name)`
-  in the log line then reads a null pointer. Ask: fall back to the file
-  name when the export is missing (the code already has `fallback_name`
-  for the exception path).
+  in the log line then reads a null pointer. The plugin exports it. Ask:
+  fall back to the file name when the export is missing (the code already
+  has `fallback_name` for the exception path).
 * **Unload at exit.** The component destructor frees every plugin while
   game threads may still run through a plugin's hooks; the mod pins itself.
   Ask: do not `FreeLibrary` plugins, or call `pre_destroy` and wait.
-* **Updater.** Please make sure the updater never removes files from
-  `<game>\boiii\plugins\` (not checked in ezz's updater code yet).
+* **Updater.** A precaution, not a problem seen: please make sure the
+  updater never removes files from `<game>\boiii\plugins\` (not checked in
+  ezz's updater code yet).

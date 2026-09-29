@@ -57,7 +57,6 @@
 		constexpr uint32_t sun_trans_rt = 9;
 		constexpr uint32_t sun_slices_wanted = 12;
 		bool sun_slices_grown = false;
-		const char* sun_grow_result = "sun shadow 12 slices: not attempted";
 		ID3D11RenderTargetView* sun_trans_extra[6] = {};      // RT 9 slices 6..11 (read by the caves)
 		ID3D11RenderTargetView* sun_trans_retired[6] = {};    // released one tick later
 		void* sun_trans_seen_v0 = nullptr;
@@ -81,13 +80,13 @@
 				|| !matches(sun_setter_rva, sun_setter_stock, sizeof(sun_setter_stock))
 				|| !matches(sun_clear_rva, sun_clear_stock, sizeof(sun_clear_stock)))
 			{
-				sun_grow_result = "sun shadow 12 slices: NOT applied - bytes differ";
+				note("[splitscreen] sun shadow 12 slices: NOT applied - bytes differ\n");
 				return false;
 			}
 			auto* cave = static_cast<uint8_t*>(allocate_near_module(0x180));
 			if (!cave)
 			{
-				sun_grow_result = "sun shadow 12 slices: NOT applied - allocation failed";
+				note("[splitscreen] sun shadow 12 slices: NOT applied - allocation failed\n");
 				return false;
 			}
 			const uint8_t n = static_cast<uint8_t>(sun_slices_wanted);
@@ -172,7 +171,7 @@
 				|| !write_bytes(cave + 0x40, s.data(), s.size())
 				|| !write_bytes(cave + 0x100, k.data(), k.size()))
 			{
-				sun_grow_result = "sun shadow 12 slices: NOT applied - cave write failed";
+				note("[splitscreen] sun shadow 12 slices: NOT applied - cave write failed\n");
 				return false;
 			}
 
@@ -224,13 +223,12 @@
 					{
 						write_bytes(reinterpret_cast<void*>(b + writes[k].rva), writes[k].stock, writes[k].n);
 					}
-					sun_grow_result = "sun shadow 12 slices: NOT applied - a site write failed (rolled back)";
+					note("[splitscreen] sun shadow 12 slices: NOT applied - a site write failed (rolled back)\n");
 					return false;
 				}
 				++done_w;
 			}
 			sun_slices_grown = true;
-			sun_grow_result = "sun shadow: RT 5/9 6 -> 12 slices (4 view slots), RT 9 slices 6..11 via sidecar views";
 			return true;
 		}
 
@@ -287,7 +285,6 @@
 			ID3D11Device* dev = nullptr;
 			v0->GetResource(&res);
 			v0->GetDevice(&dev);
-			uint32_t made = 0;
 			if (res && dev)
 			{
 				for (uint32_t sl = 6; sl < slices && sl < 6 + std::size(sun_trans_extra); ++sl)
@@ -298,7 +295,6 @@
 					if (SUCCEEDED(dev->CreateRenderTargetView(res, &d, &v)) && v)
 					{
 						sun_trans_extra[sl - 6] = v;
-						++made;
 					}
 				}
 			}
@@ -310,13 +306,6 @@
 			{
 				dev->Release();
 			}
-			trace_line l;
-			l.str("sun shadow: RT 9 sidecar views for slices 6..");
-			l.dec(slices - 1u);
-			l.str(": ");
-			l.dec(made);
-			l.str(" made");
-			trace_write(l);
 		}
 
 		void clamp_sun_shadow_slot()
@@ -352,18 +341,7 @@
 				     slices, partitions);
 				return;
 			}
-			uint32_t max_slot = slices / partitions - 1;
-			// Debug switch: BO3_SUN_SLOT_MAX=<digit> lowers the bound. 0 puts every
-			// view into slot 0, like PS4 R_DrawSunShadowMapCallback (0x9589B0).
-			{
-				char env[8] = {};
-				GetEnvironmentVariableA("BO3_SUN_SLOT_MAX", env, sizeof(env));
-				if (env[0] >= '0' && env[0] <= '9' && env[1] == 0
-					&& static_cast<uint32_t>(env[0] - '0') < max_slot)
-				{
-					max_slot = static_cast<uint32_t>(env[0] - '0');
-				}
-			}
+			const uint32_t max_slot = slices / partitions - 1;
 
 			auto* cave = static_cast<uint8_t*>(allocate_near_module(0x40));
 			if (!cave)
@@ -399,15 +377,6 @@
 				return;
 			}
 			sun_slot_clamped = true;
-			trace_line l;
-			l.str("sun shadow slot: bounded to 0..");
-			l.dec(max_slot);
-			l.str(" (");
-			l.dec(slices);
-			l.str(" slices / ");
-			l.dec(partitions);
-			l.str(" partitions)");
-			trace_write(l);
 		}
 
 		bool install_pane_counts_and_bounds()

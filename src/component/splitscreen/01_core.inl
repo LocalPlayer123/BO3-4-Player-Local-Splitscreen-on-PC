@@ -43,17 +43,16 @@
 		// target array is still [2] makes per-client loops write slots 2/3 over
 		// adjacent live memory.
 		//
-		// The floor patch's RVA, so BO3_SS_SKIP=floor can leave out exactly this
-		// entry of the table below.
+		// CL_AllocatePerLocalClientMemory (0x0135D650) computes
+		// max(CL_SplitscreenPlayerCount(), 2) (PS4 0x416A32). That floor feeds
+		// CG/FX/CL_AllocateClientMemory and the cl_maxLocalClients store at
+		// 0x0135D489. It is not raised statically - telling the allocator four
+		// while splitscreen_playerCount said one crashed a solo round at start.
+		// splitscreen_player_count_stub() commits it to 3 or 4 once that many
+		// seats have really seated.
 		constexpr size_t alloc_floor_rva = 0x0135D68C;
 
 		constexpr byte_patch local_client_count_patches[] = {
-			// CL_AllocatePerLocalClientMemory (0x0135D650) computes
-			// max(CL_SplitscreenPlayerCount(), 2). This is a floor, not a cap; the
-			// result feeds CG/FX/CL_AllocateClientMemory and the cl_maxLocalClients
-			// store at 0x0135D489, so no further patch is needed there.
-			{0x0135D68C, 0x02, 0x04, "local-client count floor: max(count,2) -> max(count,4)"},
-
 			// The in-game allocation pass (flags bit 2) discards that result and
 			// hard-codes local = 2 with `lea r14d, [rsi-0x10]` (rsi = 18 maxClients).
 			// PS4 (0x416A10) has no such override. NOP the lea; maxClients stays 18.
@@ -307,8 +306,8 @@
 			{0x020ECA5B, 0x02, 0x04, "TaskManager2_ProcessTasks per-controller loop: 2 -> 4"},
 		};
 
-		// s_storageMem.pool: zero until AllocateMemory has run, so it shows whether
-		// the patches got in before Storage_Init.
+		// s_storageMem.pool: zero until AllocateMemory has run, so it tells whether
+		// the patches can still get in before Storage_Init.
 		constexpr size_t storage_pool_rva = 0x1789FD78;
 
 		// --- launch handshake -------------------------------------------------
@@ -367,11 +366,6 @@
 			return true;
 		}
 
-		// Allocator diagnostics, read from outside via the status block.
-		uint32_t alloc_regions_seen = 0;
-		uint32_t alloc_free_seen = 0;
-		uint32_t alloc_last_error = 0;
-
 		// Relocated arrays must land near the module: rip-relative and ABS32
 		// displacements are 32-bit, and a plain VirtualAlloc lands out of reach.
 		// Probe 64 KB steps just past the image, as tools/reloc_range.py does.
@@ -397,7 +391,6 @@
 
 			for (size_t i = 0; i < 0x4000; ++i, candidate += 0x10000)
 			{
-				++alloc_regions_seen;
 				if (candidate - module_base > 0x60000000)
 				{
 					break; // beyond the reach of a 32-bit displacement
@@ -408,26 +401,28 @@
 				                       MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
 				if (p)
 				{
-					++alloc_free_seen;
 					// Hand back the middle. VirtualAlloc zero-fills, so the slack
 					// on both sides reads as null for out-of-range indices.
 					return reinterpret_cast<void*>(
 						reinterpret_cast<size_t>(p) + reloc_padding);
 				}
-				alloc_last_error = GetLastError();
 			}
 
 			return nullptr;
 		}
 
 		// Never call printf from here: it takes post_unpack down. note() formats
-		// into a buffer and goes only to the component's trace file (refused in the
-		// player build), so a patch that stands down on a new build still says so.
+		// into a buffer and goes only to the component's trace file, so a patch
+		// that stands down on a new build still says so. Diagnostic build only.
 		void trace_text(const char* text);   // defined after trace_write
 
 		template <typename... Args>
 		void note(const char* fmt, Args... args)
 		{
+#ifndef SS_DIAG
+			(void)fmt;
+			((void)args, ...);
+#else
 			char buf[512]{};
 			std::snprintf(buf, sizeof(buf), fmt, args...);
 			for (auto* p = buf; *p; ++p)
@@ -438,23 +433,14 @@
 				}
 			}
 			trace_text(buf);
+#endif
 		}
-
-		// Defined next to the status block; declared here for relocate().
-		void set_status(size_t index, uint32_t value);
 
 		// Where each table landed, filled by relocate(). The client-object table
 		// holds absolute pointers into the client-UI array, so once both have
 		// moved, every pointer (entries 0 and 1 too) is recomputed from the new
 		// bases.
 		size_t new_base_rva[8] = {};
-
-		// Per-table breadcrumb in status slot 11 + slot, the last stage reached:
-		// 1 entered, 2 allocated, 3 copied, 4 verified, 5 written, 6 reported.
-		void mark(const size_t slot, const uint32_t stage)
-		{
-			set_status(11 + slot, stage);
-		}
 
 		constexpr size_t gamepads_reserved_size = 0x1C0;
 		size_t gamepads_reserved_rva = 0;
@@ -476,28 +462,18 @@
 
 		bool relocate(const reloc_table& t, const size_t slot)
 		{
-			mark(slot, 1);
-
 			auto* fresh = allocate_near_module(t.new_size);
-
-			// Publish the allocator counters now: they diagnose exactly the case where
-			// a later step fails.
-			set_status(5, alloc_regions_seen);
-			set_status(6, alloc_free_seen);
-			set_status(7, alloc_last_error);
 
 			if (!fresh)
 			{
 				note("[splitscreen] %s: no memory within reach of a 32-bit offset\n", t.name);
 				return false;
 			}
-			mark(slot, 2);
 
 			const auto new_rva = reinterpret_cast<size_t>(fresh) - base();
 
 			std::memcpy(fresh, reinterpret_cast<void*>(base() + t.base_rva), t.old_size);
 			std::memset(static_cast<uint8_t*>(fresh) + t.old_size, 0, t.new_size - t.old_size);
-			mark(slot, 3);
 
 			// Verify every reference against the image before writing any of them, so
 			// a stale table cannot corrupt code.
@@ -537,7 +513,6 @@
 				       "NOTHING written\n", t.name, deviating, t.count);
 				return false;
 			}
-			mark(slot, 4);
 
 			size_t done = 0;
 			for (size_t i = 0; i < t.count; ++i)
@@ -577,10 +552,6 @@
 				}
 			}
 
-			mark(slot, 5);
-			note("[splitscreen] %s: %zu/%zu references moved to RVA 0x%zX (0x%X -> 0x%X bytes)\n",
-			       t.name, done, t.count, new_rva, t.old_size, t.new_size);
-			mark(slot, 6);
 			if (done == t.count && end_done == t.end_count)
 			{
 				if (slot < std::size(new_base_rva))
@@ -589,6 +560,8 @@
 				}
 				return true;
 			}
+			note("[splitscreen] %s: only %zu/%zu references and %zu/%zu end bounds moved to RVA 0x%zX\n",
+			       t.name, done, t.count, end_done, t.end_count, new_rva);
 			return false;
 		}
 
@@ -596,9 +569,6 @@
 		// mov r8d,2`). PS4 clientUIActive_t is 0x1078; strides differ by platform.
 		constexpr size_t client_ui_stride = 0x1170;
 
-		// PC element size of Storage (PS4 0x8658): same layout, but files are
-		// 0x220 here against 0x218; inShutdown is at +0x8850.
-		constexpr size_t storage_stride = 0x8958;
 
 		// Guest identities for controllers 2 and 3 in the relocated userData
 		// array. The client-object table has no writer (it is statically
@@ -705,13 +675,11 @@
 						const auto set_net = reinterpret_cast<void (*)(int)>(
 							base() + set_network_mode_rva);
 						set_net(0);
-						note("[splitscreen] session network mode %u -> 0 (local)\n", net);
 					}
 				}
 			}
 
 			guests_filled = true;
-			set_status(15, donor_signedin);
 		}
 
 		// PC Storage_Pump(ControllerIndex_t) (PS4 0xF7F120). The game runs it only
@@ -721,11 +689,3 @@
 		constexpr uint32_t storage_pump_rva = 0x0221A680;
 		constexpr uint8_t storage_pump_prologue[] = {0x40, 0x57, 0x48, 0x83, 0xEC, 0x40};
 
-		size_t storage_base_rva = 0;
-		bool guests_pumped = false;
-
-		// Tick counters per scheduler pipeline, published to show which pipelines
-		// actually run (main once ticked only once in sixty seconds).
-		uint32_t ticks_main = 0;
-		uint32_t ticks_renderer = 0;
-		uint32_t ticks_async = 0;

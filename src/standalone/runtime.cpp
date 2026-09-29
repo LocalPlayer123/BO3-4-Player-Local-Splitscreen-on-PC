@@ -73,61 +73,15 @@ namespace release_policy
 {
 	DWORD get_environment_variable(const LPCSTR name, const LPSTR buffer, const DWORD size)
 	{
-		// Fixed switches: BO3_CG_FRAME=on (the tested configuration), everything
-		// else reads as not set, including the real environment of the machine.
-		const auto answer = [&](const char* value) -> DWORD
-		{
-			const auto len = static_cast<DWORD>(std::strlen(value));
-			if (!buffer || size <= len)
-			{
-				return len + 1;
-			}
-			std::memcpy(buffer, value, len + 1);
-			return len;
-		};
-		if (name && std::strcmp(name, "BO3_CG_FRAME") == 0)
-		{
-			return answer("on");
-		}
-
+		// The component reads one variable, LOCALAPPDATA, for its trace path. Only
+		// the diagnostic build answers it; the player build writes no files.
 #ifdef SS_DIAG
-		// Diagnostic build only: the trace path is built from LOCALAPPDATA.
 		if (name && std::strcmp(name, "LOCALAPPDATA") == 0)
 		{
 			return ::GetEnvironmentVariableA(name, buffer, size);
 		}
-		// Diagnostic build only: bisecting switches baked in by build.ps1 -Skip
-		// (/DSS_SKIP_<NAME>), for the component's BO3_SKIP_FIX / BO3_SUN4.
-		if (name && std::strcmp(name, "BO3_SKIP_FIX") == 0)
-		{
-			static char skip[128] = "";
-#ifdef SS_SKIP_LUITABLES
-			strcat_s(skip, "luitables,");
-#endif
-#ifdef SS_SKIP_CGMARKS
-			strcat_s(skip, "cgmarks,");
-#endif
-#ifdef SS_SKIP_PERCTRL
-			strcat_s(skip, "perctrl,");
-#endif
-			if (skip[0])
-			{
-				return answer(skip);
-			}
-		}
-#ifdef SS_SKIP_SUN4
-		if (name && std::strcmp(name, "BO3_SUN4") == 0)
-		{
-			return answer("off");
-		}
-#endif
-#ifdef SS_SUN_SLOT_MAX
-		if (name && std::strcmp(name, "BO3_SUN_SLOT_MAX") == 0)
-		{
-			static const char value[2] = {static_cast<char>('0' + SS_SUN_SLOT_MAX), 0};
-			return answer(value);
-		}
-#endif
+#else
+		(void)name; (void)buffer; (void)size;
 #endif
 		SetLastError(ERROR_ENVVAR_NOT_FOUND);
 		return 0;

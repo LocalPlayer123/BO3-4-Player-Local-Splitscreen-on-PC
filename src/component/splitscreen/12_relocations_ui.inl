@@ -37,7 +37,6 @@
 		};
 
 		bool percg_relocated = false;
-		size_t percg_new_base_rva = 0;
 
 		bool relocate_percg_context()
 		{
@@ -146,9 +145,7 @@
 				return false;
 			}
 
-			percg_new_base_rva = new_base;
 			percg_relocated = true;
-			// No status slot free; verify from outside with tools/verify_percg.py.
 			return true;
 		}
 
@@ -379,7 +376,6 @@
 
 			uiroot_new_base_rva = new_base;
 			lui_roots_relocated = true;
-			// No status slot free; verify from outside with tools/verify_uiroot.py.
 			return true;
 		}
 
@@ -411,7 +407,6 @@
 		};
 		constexpr uint32_t perctrl_clear_rva = 0x01F1CA0D;                    // lea r8d,[rdx+0x28]
 		constexpr uint8_t perctrl_clear_stock[] = {0x44, 0x8D, 0x42, 0x28};
-		const char* perctrl_result = "s_perController: not attempted";
 		size_t perctrl_new = 0;
 
 		bool relocate_per_controller()
@@ -425,13 +420,13 @@
 			if (!readable(clear, sizeof(perctrl_clear_stock))
 				|| std::memcmp(clear, perctrl_clear_stock, sizeof(perctrl_clear_stock)) != 0)
 			{
-				perctrl_result = "s_perController: NOT moved - init clear bytes differ";
+				note("[splitscreen] s_perController: NOT moved - init clear bytes differ\n");
 				return false;
 			}
 			auto* fresh = static_cast<uint8_t*>(allocate_near_module(perctrl_new_count * perctrl_stride));
 			if (!fresh)
 			{
-				perctrl_result = "s_perController: NOT moved - allocation failed";
+				note("[splitscreen] s_perController: NOT moved - allocation failed\n");
 				return false;
 			}
 			const auto* old = reinterpret_cast<const uint8_t*>(b + perctrl_base);
@@ -440,7 +435,7 @@
 			static int32_t saved[std::size(perctrl_sites)]{};
 			if (!rewrite_entcoll(perctrl_sites, std::size(perctrl_sites), perctrl_base, fresh_abs, saved))
 			{
-				perctrl_result = "s_perController: NOT moved - a reference did not match";
+				note("[splitscreen] s_perController: NOT moved - a reference did not match\n");
 				return false;
 			}
 			const uint8_t len = static_cast<uint8_t>(perctrl_new_count * perctrl_stride);   // 0x50
@@ -451,13 +446,10 @@
 					auto* insn = reinterpret_cast<uint8_t*>(b + perctrl_sites[j].rva);
 					write_bytes(insn + perctrl_sites[j].disp_off, &saved[j], sizeof(int32_t));
 				}
-				perctrl_result = "s_perController: NOT moved - init clear write failed (rolled back)";
+				note("[splitscreen] s_perController: NOT moved - init clear write failed (rolled back)\n");
 				return false;
 			}
 			perctrl_new = fresh_abs;
-			perctrl_result = "s_perController [2] -> [4] (12 sites, init clear 0x28 -> 0x50)";
-			note("[splitscreen] s_perController [2] -> [4] at RVA 0x%08X\n",
-			     static_cast<uint32_t>(fresh_abs - b));
 			return true;
 		}
 
@@ -517,7 +509,6 @@
 			{0x01FFA01E, {0x48, 0x83, 0xF8, 0x08}, 0x10},   // arm-blade clear: cmp rax,8
 			{0x0200C35C, {0x48, 0x83, 0xF9, 0x02}, 0x04},   // rocket-launcher clear: cmp rcx,2
 		};
-		const char* lui_tables_result = "LUI target tables: not attempted";
 		bool lui_tables_moved = false;
 
 		bool relocate_lui_target_tables()
@@ -532,7 +523,7 @@
 				const auto* p = reinterpret_cast<const uint8_t*>(b + bd.rva);
 				if (!readable(p, sizeof(bd.stock)) || std::memcmp(p, bd.stock, sizeof(bd.stock)) != 0)
 				{
-					lui_tables_result = "LUI target tables: NOT moved - a loop bound differs";
+					note("[splitscreen] LUI target tables: NOT moved - a loop bound differs\n");
 					return false;
 				}
 			}
@@ -557,7 +548,7 @@
 				if (!fresh || t.site_count > 16)
 				{
 					rollback();
-					lui_tables_result = "LUI target tables: NOT moved - allocation failed";
+					note("[splitscreen] LUI target tables: NOT moved - allocation failed\n");
 					return false;
 				}
 				// Start empty; the arm blade marks a free record with entity 0x3FF.
@@ -573,7 +564,7 @@
 				if (!rewrite_entcoll(t.sites, t.site_count, t.base, reinterpret_cast<size_t>(fresh), saved[moved]))
 				{
 					rollback();
-					lui_tables_result = "LUI target tables: NOT moved - a reference did not match (rolled back)";
+					note("[splitscreen] LUI target tables: NOT moved - a reference did not match (rolled back)\n");
 					return false;
 				}
 				++moved;
@@ -588,14 +579,12 @@
 						write_bytes(reinterpret_cast<uint8_t*>(b + lui_bounds[k].rva + 3), &lui_bounds[k].stock[3], 1);
 					}
 					rollback();
-					lui_tables_result = "LUI target tables: NOT moved - a bound write failed (rolled back)";
+					note("[splitscreen] LUI target tables: NOT moved - a bound write failed (rolled back)\n");
 					return false;
 				}
 				++bounds_done;
 			}
 			lui_tables_moved = true;
-			lui_tables_result = "LUI target tables -> [4 clients]: weakpoints 20->40, reticle 2->4, rocket 2->4, "
-			                    "arm blade 8->16 (48 sites, 2 bounds)";
 			return true;
 		}
 
@@ -611,7 +600,6 @@
 			{0x00228883, 3, 7, true, 0x0},    // lea rcx,[base]    find by entity
 			{0x00233BA4, 3, 7, false, 0x0},   // lea rbx,[rax+RVA]
 		};
-		const char* cg_marks_result = "cg marker blocks: not attempted";
 		bool cg_marks_moved = false;
 
 		bool relocate_cg_marker_blocks()
@@ -624,13 +612,13 @@
 			auto* fresh = static_cast<uint8_t*>(allocate_near_module(4 * cg_marks_block));
 			if (!fresh)
 			{
-				cg_marks_result = "cg marker blocks: NOT moved - allocation failed";
+				note("[splitscreen] cg marker blocks: NOT moved - allocation failed\n");
 				return false;
 			}
 			std::memset(fresh, 0, 4 * cg_marks_block);   // blocks 2/3: the per-client init sets them up
 			if (!readable(reinterpret_cast<const void*>(b + cg_marks_base), 2 * cg_marks_block))
 			{
-				cg_marks_result = "cg marker blocks: NOT moved - old blocks unreadable";
+				note("[splitscreen] cg marker blocks: NOT moved - old blocks unreadable\n");
 				return false;
 			}
 			std::memcpy(fresh, reinterpret_cast<const void*>(b + cg_marks_base), 2 * cg_marks_block);
@@ -638,11 +626,10 @@
 			if (!rewrite_entcoll(cg_marks_sites, std::size(cg_marks_sites), cg_marks_base,
 			                     reinterpret_cast<size_t>(fresh), saved))
 			{
-				cg_marks_result = "cg marker blocks: NOT moved - a reference did not match";
+				note("[splitscreen] cg marker blocks: NOT moved - a reference did not match\n");
 				return false;
 			}
 			cg_marks_moved = true;
-			cg_marks_result = "cg marker blocks [2] -> [4] x 0xA00 (5 sites)";
 			return true;
 		}
 
@@ -668,7 +655,6 @@
 			2 * le_entities_per_client * le_entity_size;              // 0xF800
 
 		constexpr uint32_t le_new_active_size = le_clients * le_entity_size; // 0x3E0
-		constexpr uint32_t le_new_free_size = le_clients * 8;                // 0x20
 		constexpr uint32_t le_new_pool_size =
 			le_clients * le_entities_per_client * le_entity_size;            // 0x1F000
 
@@ -712,7 +698,6 @@
 		};
 
 		bool local_entities_relocated = false;
-		size_t le_new_base_rva = 0;
 
 		bool relocate_local_entities()
 		{
@@ -822,9 +807,7 @@
 				}
 			}
 
-			le_new_base_rva = new_base;
 			local_entities_relocated = true;
-			// No status slot is free; tools/verify_localentities.py checks the live bytes.
 			return true;
 		}
 
@@ -835,7 +818,6 @@
 		// No record transform: the array is per-map data and still empty here.
 		// +0x19E8 / +0x19F0 also occur in unrelated structures, so every site is an
 		// explicit address with expected bytes.
-		constexpr uint32_t exploder_base_rva = 0x043016E0;
 		constexpr uint32_t exploder_count_rva = 0x043016C4;
 		constexpr uint32_t exploder_new_size = 0x587800;
 		constexpr uint32_t exploder_new_stride = 0x5878;
@@ -857,7 +839,6 @@
 		constexpr uint8_t exploder_expect_A38[] = {0x48, 0x8D, 0x35, 0xA1, 0x0C, 0x10, 0x04};
 
 		bool exploders_relocated = false;
-		size_t exploder_new_base_rva = 0;
 
 		bool relocate_radiant_exploders()
 		{
@@ -992,9 +973,6 @@
 				}
 			}
 
-			exploder_new_base_rva = new_base;
 			exploders_relocated = true;
-			// No status slot is free. Verify from outside by reading the patched bytes:
-			// 0x00200A49+3 == 0x5878, 0x00200AF7+4 == 0x19F8, 0x00200AC9+3 == 0x10.
 			return true;
 		}

@@ -22,15 +22,11 @@
 			}
 			round4_widened = true;
 			const uint8_t four = 0x04;
-			uint32_t done = 0, skipped = 0;
+			uint32_t skipped = 0;
 			const auto bump = [&](const uint32_t rva)
 			{
 				auto* at = reinterpret_cast<uint8_t*>(b + rva);
-				if (readable(at, 1) && *at == 0x03 && write_bytes(at, &four, 1))
-				{
-					++done;
-				}
-				else
+				if (!readable(at, 1) || *at != 0x03 || !write_bytes(at, &four, 1))
 				{
 					++skipped;
 				}
@@ -43,14 +39,10 @@
 			}
 			// LUI context bound: `41 83 FF 03 90 90 90` (hold_lui_context_count)
 			bump(lui_ctx_bound_rva + 3);
-			trace_line l;
-			l.str("player 4 round: per-frame loops 3 -> 4, written ");
-			l.dec(done);
-			l.str(", not at 3 (left) ");
-			l.dec(skipped);
-			l.str(", cl_max ");
-			l.dec(max_local);
-			trace_write(l);
+			if (skipped)
+			{
+				note("[splitscreen] player 4 round: %u per-frame loop bounds not at 3 - left\n", skipped);
+			}
 		}
 
 		int splitscreen_player_count_stub()
@@ -120,7 +112,6 @@
 						if (*floor_imm == 0x02 || (*floor_imm == 0x03 && target == 0x04))
 						{
 							write_bytes(floor_imm, &target, sizeof(target));
-							note("[splitscreen] allocation floor committed to %u\n", target);
 						}
 						if (n < committed_seats)
 						{
@@ -163,10 +154,6 @@
 				}
 				if (n > 0)
 				{
-					// No set_status here (hot query, VirtualProtect); the async publisher reports it.
-					++player_count_queries;
-					player_count_last = n;
-
 					// The scheduler loops stop after a splitscreen sign-in, so CL_Init(2) is
 					// triggered here: the allocator calls this stub at map load, on the game
 					// thread, before the connect loop. cl_init2_done is set first in the callee,
@@ -185,120 +172,9 @@
 			return splitscreen_player_count_hook.invoke<int>();
 		}
 
-		utils::hook::detour start_op_hook;
-		uint32_t start_op_counts[4] = {};
-
-		void start_op_stub(const int controller, const int operation, void* files)
-		{
-			// clientGameStates is not relocated: moved at post_unpack nothing signs in,
-			// moved at the first StartOp the game crashes at startup. Menu time (chain4)
-			// works but is too late for the boot storage read. History: LOG.md, clientGameStates
-
-			if (controller >= 0 && controller < 4)
-			{
-				set_status(37 + controller, ++start_op_counts[controller]);
-			}
-			else
-			{
-				set_status(41, static_cast<uint32_t>(controller));
-			}
-			start_op_hook.invoke<void>(controller, operation, files);
-		}
-
-		constexpr uint32_t clear_storage_rva = 0x02218F80;
-		constexpr uint8_t clear_storage_prologue[] = {0x48, 0x89, 0x6C, 0x24, 0x20, 0x56};
-		bool clear_storage_ok = false;
-		bool guests_cleared = false;
-
-		void clear_guest_storage()
-		{
-			if (guests_cleared || !clear_storage_ok || !guests_filled)
-			{
-				return;
-			}
-			guests_cleared = true;
-			const auto fn = reinterpret_cast<void(*)(int)>(base() + clear_storage_rva);
-			fn(2);
-			fn(3);
-			set_status(35, 1);
-		}
-
 		constexpr uint32_t per_controller_update_rva = 0x01E19AE0;
 		constexpr uint8_t per_controller_update_prologue[] = {0x48, 0x8B, 0xC4, 0x55, 0x41, 0x54};
 		utils::hook::detour per_controller_update_hook;
-		bool per_controller_update_hooked = false;
-
-		// Task list layout (from TaskIsInProgress and the gamer-profile handlers):
-		//   +0x00 next  +0x08 definition  +0x10 state  +0x48 opData  +0x51 flag
-		//   in progress = state in {2,4,5} && flag == 0
-		// opData points into s_localFileOpData: (opData - base) / 0x1820 = controller.
-		constexpr uint32_t task_head_rva = 0x17A12A30;
-		constexpr uint32_t gamerprofile_def_rva = 0x02FD3E08;
-
-		// Which guest controller has a wedged gamer-profile task, or -1.
-		// Calling ProcessTasks blindly for controllers 2 and 3 crashed startup
-		// intermittently; the game never calls it for a controller with nothing to
-		// process, so look first and act only on the one with a stuck task.
-		int wedged_guest_controller()
-		{
-			if (!storage_base_rva)
-			{
-				return -1;
-			}
-			const auto module_base = base();
-			const auto def = module_base + gamerprofile_def_rva;
-			if (!localfileop_new_rva)
-			{
-				return -1;
-			}
-			const auto lfo = module_base + localfileop_new_rva;
-
-			size_t node = 0;
-			std::memcpy(&node, reinterpret_cast<const void*>(module_base + task_head_rva),
-			            sizeof(node));
-
-			for (int guard = 0; node && guard < 64; ++guard)
-			{
-				size_t next = 0;
-				size_t definition = 0;
-				int32_t state = 0;
-				size_t opdata = 0;
-				uint8_t flag = 0;
-				std::memcpy(&next, reinterpret_cast<const void*>(node), sizeof(next));
-				std::memcpy(&definition, reinterpret_cast<const void*>(node + 0x08),
-				            sizeof(definition));
-				std::memcpy(&state, reinterpret_cast<const void*>(node + 0x10), sizeof(state));
-				std::memcpy(&opdata, reinterpret_cast<const void*>(node + 0x48), sizeof(opdata));
-				std::memcpy(&flag, reinterpret_cast<const void*>(node + 0x51), sizeof(flag));
-
-				const bool in_progress = (state >= 2 && state <= 5 && state != 3 && flag == 0);
-				if (definition == def && in_progress && opdata >= lfo)
-				{
-					const auto index = (opdata - lfo) / localfileop_elem;
-					if (index == 2 || index == 3)
-					{
-						return static_cast<int>(index);
-					}
-				}
-				node = next;
-			}
-			return -1;
-		}
-
-		void reap_guest_tasks()
-		{
-			if (!process_tasks_ok)
-			{
-				return;
-			}
-			const auto who = wedged_guest_controller();
-			if (who < 0)
-			{
-				return;
-			}
-			set_status(32, static_cast<uint32_t>(who));
-			reinterpret_cast<void(*)(int)>(base() + process_tasks_rva)(who);
-		}
 
 		void storage_pump_stub(const int controller)
 		{
@@ -311,23 +187,15 @@
 				refresh_guest2_lobby_profile();
 			}
 
-			// Re-entry guard: pump_guest_storage calls back through here.
-			if (inside_guest_pump || controller != 1)
-			{
-				return;
-			}
-			set_status(21, ++ticks_main); // times the game pumped controller 1
-
 			// No reaping and no guest pumping here: Storage_Pump's caller is still on
 			// the stack holding storage pointers, and completion handlers re-enter
-			// storage. With s_targets widened the game pumps every controller itself;
-			// the reap is in per_controller_update_stub. History: LOG.md, "reaper".
+			// storage. With s_targets widened the game pumps every controller itself.
+			// History: LOG.md, "reaper".
 		}
 
-		// Per-controller update detour: advances the guest joins, then reaps wedged
-		// guest storage tasks. The reap is the loadout fix: controller 2's
-		// gamer-profile task stays DONE, the 'hdd' busy query checks one global
-		// task, so its reads never complete and the lobby draws no loadout.
+		// Per-controller update detour: advances the guest joins on the game's
+		// own thread. (Reaping wedged guest storage tasks here was tried and
+		// disabled: it blacked out the renderer. History: LOG.md, "reaper".)
 		void per_controller_update_stub(const int controller)
 		{
 			per_controller_update_hook.invoke<void>(controller);
@@ -343,20 +211,6 @@
 			{
 				advance_guest3_join();
 			}
-
-			// Reap on the last controller, after the whole sweep's storage work.
-			if (controller != 3)
-			{
-				return;
-			}
-			// Once per frame; set_status is a VirtualProtect pair, so every 256th pass.
-			if ((++update_calls & 0xFF) == 1)
-			{
-				set_status(34, update_calls);
-			}
-
-			// Do not call clear_guest_storage() here: it zeroes the xuid, and the
-			// re-assign never comes while the global 'hdd' task is busy.
 		}
 
 		uint32_t link_client_objects(const size_t table_slot, const size_t array_slot)
@@ -401,7 +255,6 @@
 				if (write_bytes(site, &p.value, 1))
 				{
 					++done;
-					note("[splitscreen] %s\n", p.what);
 				}
 			}
 			return done;
@@ -412,29 +265,13 @@
 			return apply_byte_patches(storage_patches);
 		}
 
-		// BO3_SS_SKIP=floor: leave the allocation floor (the `mov r14d, 2` of
-		// max(CL_SplitscreenPlayerCount(), 2) in CL_AllocatePerLocalClientMemory,
-		// PS4 0x416A32) at 2 while the rest of the count group stays on.
-		bool skip_alloc_floor = false;
-
 		uint32_t apply_local_client_count_patches()
 		{
 			if (!raise_local_client_count)
 			{
 				return 0;
 			}
-			uint32_t done = 0;
-			for (const auto& p : local_client_count_patches)
-			{
-				if (skip_alloc_floor && p.rva == alloc_floor_rva)
-				{
-					note("[splitscreen] allocation floor left at 2 (BO3_SS_SKIP=floor)\n");
-					continue;
-				}
-				const byte_patch one[1] = {p};
-				done += apply_byte_patches(one);
-			}
-			return done;
+			return apply_byte_patches(local_client_count_patches);
 		}
 
 		// clientUIActives walker end-bounds: twelve loops end at
@@ -462,80 +299,6 @@
 			{0x027C1690, {0x48, 0x8D, 0x0D, 0x21, 0xA6, 0xB9, 0x02}},
 		};
 
-		// IsActive tracer (read-only diagnostic): CL_LocalClient_IsActive jumps to a
-		// cave that computes the same answer and records, per local client, the
-		// last caller, the call count and the answer (read by activation_watch.py).
-		constexpr uint32_t is_active_rva = 0x027C18E0;
-		constexpr uint32_t client_ui_actives_rva = 0x05359BC0;
-		constexpr uint8_t is_active_bytes[] = {
-			0x48, 0x63, 0xC1,                         // movsxd rax, ecx
-			0x48, 0x8D, 0x0D,                         // lea rcx, [clientUIActives]
-		};
-
-		// Instrumented at the function, not a call site: IsActive has 93 callers
-		// and Arxan flattening hides which loop really runs.
-		bool install_is_active_tracer()
-		{
-			auto* fn = reinterpret_cast<uint8_t*>(base() + is_active_rva);
-			if (std::memcmp(fn, is_active_bytes, sizeof(is_active_bytes)) != 0)
-			{
-				note("[splitscreen] IsActive tracer: unexpected prologue\n");
-				return false;
-			}
-
-			auto* cave = static_cast<uint8_t*>(allocate_near_module(0x100));
-			if (!cave)
-			{
-				return false;
-			}
-			// per index i: +0 last caller (qword), +8 calls, +12 last answer
-			auto* slots = cave + 0x80;
-			std::memset(slots, 0, 0x40);
-			const auto cave_addr = reinterpret_cast<size_t>(cave);
-
-			std::vector<uint8_t> c;
-			const auto rip32 = [&](const size_t tgt)
-			{
-				const auto v = static_cast<int32_t>(tgt - (cave_addr + c.size() + 4));
-				const auto* p = reinterpret_cast<const uint8_t*>(&v);
-				c.insert(c.end(), p, p + 4);
-			};
-
-			c.insert(c.end(), {0x4C, 0x8B, 0x04, 0x24});             // mov r8, [rsp]
-			c.insert(c.end(), {0x48, 0x63, 0xC1});                   // movsxd rax, ecx
-			c.insert(c.end(), {0x48, 0x69, 0xC0, 0x78, 0x10, 0x00, 0x00}); // imul rax,0x1078
-			c.insert(c.end(), {0x48, 0x8D, 0x15});                   // lea rdx, [uiactives]
-			// Read the array where the engine reads it (relocated or not).
-			rip32(base() + (client_ui_actives_relocated
-				                ? uia_new_base_rva
-				                : client_ui_actives_rva));
-			c.insert(c.end(), {0x8B, 0x04, 0x10});                   // mov eax, [rax+rdx]
-			c.insert(c.end(), {0x83, 0xE0, 0x01});                   // and eax, 1
-			c.insert(c.end(), {0x83, 0xF9, 0x04});                   // cmp ecx, 4
-			c.insert(c.end(), {0x73, 0x1C});                         // jae +28 -> ret
-			c.insert(c.end(), {0x4C, 0x63, 0xC9});                   // movsxd r9, ecx
-			c.insert(c.end(), {0x49, 0xC1, 0xE1, 0x04});             // shl r9, 4
-			c.insert(c.end(), {0x48, 0x8D, 0x15});                   // lea rdx, [slots]
-			rip32(reinterpret_cast<size_t>(slots));
-			c.insert(c.end(), {0x4C, 0x03, 0xCA});                   // add r9, rdx
-			c.insert(c.end(), {0x4D, 0x89, 0x01});                   // mov [r9], r8
-			c.insert(c.end(), {0x41, 0xFF, 0x41, 0x08});             // inc dword [r9+8]
-			c.insert(c.end(), {0x41, 0x89, 0x41, 0x0C});             // mov [r9+12], eax
-			c.insert(c.end(), {0xC3});                               // ret
-
-			if (!write_bytes(cave, c.data(), c.size()))
-			{
-				return false;
-			}
-
-			// Jump the function into the cave; its callers see the same value.
-			uint8_t patch[5] = {0xE9};
-			const auto rel = static_cast<int32_t>(
-				cave_addr - (base() + is_active_rva + 5));
-			std::memcpy(patch + 1, &rel, sizeof(rel));
-			return write_bytes(fn, patch, sizeof(patch));
-		}
-
 		uint32_t widen_client_ui_walker_bounds()
 		{
 			uint32_t done = 0;
@@ -549,22 +312,11 @@
 					continue;
 				}
 				// The leas point at clientUIActives[2], the start of a foreign
-				// array. After a relocation, aim them at the new one-past-the-end.
-				int32_t new_disp = 0;
-				if (client_ui_actives_relocated)
-				{
-					const size_t end = uia_new_base_rva + 4 * uia_stride;
-					new_disp = static_cast<int32_t>(
-						end - (f.insn_rva + sizeof(f.expect)));
-				}
-				else
-				{
-					// Player 4: end at &[4]. Walkers read only +0 (flags) or +8
-					// (connectionState) of an element, never the end address.
-					int32_t disp = 0;
-					std::memcpy(&disp, f.expect + 3, sizeof(disp));
-					new_disp = disp + 2 * 0x1078;
-				}
+				// array. Player 4: end at &[4]. Walkers read only +0 (flags) or +8
+				// (connectionState) of an element, never the end address.
+				int32_t disp = 0;
+				std::memcpy(&disp, f.expect + 3, sizeof(disp));
+				const int32_t new_disp = disp + 2 * 0x1078;
 				if (write_bytes(insn + 3, &new_disp, sizeof(new_disp)))
 				{
 					++done;
@@ -605,7 +357,7 @@
 			// also stopped at two; client 2 then stayed CA_ACTIVE through
 			// CL_FreePerLocalClientMemory and hung the next round at CA_CONNECTED.
 			// Their UI close loops (PS4 UI_CloseAll i < 4) index uiInfoArray, so they
-			// widen only when relocate_batch17 moved it.
+			// widen only when its perclient_rows row moved it.
 			struct shutdown_site { uint32_t rva; uint8_t modrm; const char* what; bool needs_uiinfo; };
 			constexpr shutdown_site com_shutdown_sites[] = {
 				{0x020F11CE, 0xFF, "Com_ShutdownInternal disconnect loop", false},
@@ -615,7 +367,7 @@
 			};
 			for (const auto& s : com_shutdown_sites)
 			{
-				if (s.needs_uiinfo && !batch17_new[0])
+				if (s.needs_uiinfo && !perclient_new[perclient_row("uiinfo")])
 				{
 					note("[splitscreen] %s: uiInfoArray not moved - left at 2\n", s.what);
 					continue;
@@ -661,25 +413,6 @@
 			return done + 1;
 		}
 
-		// Seed cl_maxLocalClients for the frontend: it stays at the static 2 until
-		// CL_AllocatePerLocalClientMemory runs at map load, which blocks a third
-		// controller. Safe before the memory exists: PS4 CG_GetLocalClientGlobals
-		// (0x1D76850) checks cgArray == NULL before the index bound.
-		bool seed_cl_max_local_clients()
-		{
-			auto* v = reinterpret_cast<uint32_t*>(base() + cl_max_local_clients_rva);
-			if (*v != 2)
-			{
-				note("[splitscreen] cl_maxLocalClients holds %u, expected 2 - not seeding\n", *v);
-				return false;
-			}
-			return write_bytes(v, &seed_max_local_clients, sizeof(seed_max_local_clients));
-		}
-
-		// Stride-fix cave counters (status 76..81): +0x00 substitutions,
-		// +0x04 executions, +0x08 last delivered rax, +0x10 last substituted value.
-		uint8_t* stride_slots = nullptr;
-
 		// Active count fix ("only two screens"). PS4 SetAllUsedActive sets
 		// splitscreen_playerCount from CL_LocalClient_GetActiveCount (0x1516A20,
 		// i < 4); the PC inlines it unrolled to two elements, so the dvar and the
@@ -697,22 +430,10 @@
 			0xFF, 0xC0,                               // inc eax
 		};
 
-
 		bool install_active_count_fix()
 		{
 			auto* site = reinterpret_cast<uint8_t*>(base() + active_count_rva);
-			// The clientUIActives relocation rewrites the second displacement
-			// (offset 18), so rebuild the expected bytes from the live target.
-			uint8_t expect[sizeof(active_count_bytes)];
-			std::memcpy(expect, active_count_bytes, sizeof(expect));
-			if (client_ui_actives_relocated)
-			{
-				const size_t tgt = base() + uia_new_base_rva + uia_stride;
-				const int32_t disp = static_cast<int32_t>(
-					tgt - (base() + active_count_rva + 18 + 4 + 1));
-				std::memcpy(expect + 18, &disp, sizeof(disp));
-			}
-			if (std::memcmp(site, expect, sizeof(expect)) != 0)
+			if (std::memcmp(site, active_count_bytes, sizeof(active_count_bytes)) != 0)
 			{
 				note("[splitscreen] active count: unexpected bytes at 0x%zX\n",
 				     active_count_rva);
@@ -784,7 +505,7 @@
 			// mov eax, dword [count]   -> the value the engine then uses
 			c.insert(c.end(), {0x8B, 0x05});
 			rip32(slot(4));
-			// mov dword [last], eax    (publishable)
+			// mov dword [last], eax
 			c.insert(c.end(), {0x89, 0x05});
 			rip32(slot(12));
 			// jmp back, past the 26 replaced bytes
@@ -812,24 +533,7 @@
 			}
 
 			active_count_slots = slots;
-			note("[splitscreen] active count fix installed at 0x%zX\n", active_count_rva);
 			return true;
-		}
-
-		void publish_active_count()
-		{
-			if (!active_count_slots)
-			{
-				return;
-			}
-			uint32_t execs = 0;
-			uint32_t last = 0;
-			std::memcpy(&execs, active_count_slots + 8, sizeof(execs));
-			std::memcpy(&last, active_count_slots + 12, sizeof(last));
-			set_status(86, execs);
-			set_status(87, last);
-			set_status(93, player_count_queries);
-			set_status(94, player_count_last);
 		}
 
 		bool install_stride_fix()
@@ -898,34 +602,7 @@
 				return false;
 			}
 
-			stride_slots = slots;
-			note("[splitscreen] stride fix installed at 0x%zX\n", stride_site_rva);
 			return true;
-		}
-
-		// Copies the stride-fix counters to status 76..81.
-		void publish_stride_counters()
-		{
-			if (!stride_slots)
-			{
-				return;
-			}
-
-			uint32_t substitutions = 0;
-			uint32_t executions = 0;
-			uint64_t delivered = 0;
-			uint64_t substituted = 0;
-			std::memcpy(&substitutions, stride_slots, sizeof(substitutions));
-			std::memcpy(&executions, stride_slots + 4, sizeof(executions));
-			std::memcpy(&delivered, stride_slots + 8, sizeof(delivered));
-			std::memcpy(&substituted, stride_slots + 16, sizeof(substituted));
-
-			set_status(76, executions);
-			set_status(77, substitutions);
-			set_status(78, static_cast<uint32_t>(delivered));
-			set_status(79, static_cast<uint32_t>(delivered >> 32));
-			set_status(80, static_cast<uint32_t>(substituted));
-			set_status(81, static_cast<uint32_t>(substituted >> 32));
 		}
 
 		// The injected local client has no message channel, so the launch stalls

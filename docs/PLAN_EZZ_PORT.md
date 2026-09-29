@@ -1,10 +1,33 @@
 # Plan: move the 4-player splitscreen mod into ezz BOIII, rebuilt to be maintainable
 
-Status: draft 1, 2026-09-29. Iterative - each phase ends with something that
-works and is tested, so the project can stop after any phase without leaving a
-broken mod behind.
+Status: draft 1, 2026-09-29; progress section updated the same evening.
+Iterative - each phase ends with something that works and is tested, so the
+project can stop after any phase without leaving a broken mod behind.
 
-## 1. Where we start
+## 0. Progress (2026-09-29 evening)
+
+* **Phase 3 done** - ported to the ezz exe `0x06531394` (mod 2.0); 4 players
+  in Zombies and offline Multiplayer under ezz BOIII 3.0.
+* **Phase 4 done** - shipped as an ezz plugin (`boiii\plugins\`, mod 2.1).
+* **Phase 2 in progress** (every step either proven byte-identical or checked
+  with the regression test below):
+  * comments cut by ~73 %; the one file split into 14 topic parts
+    (`src/component/splitscreen/*.inl`, one translation unit, same order);
+  * the development switches and all test instrumentation removed - one
+    fixed behaviour, no status counters, no trace hooks in the player build;
+  * dead code removed; the twelve detour installs use one helper; the
+    per-client array relocations (62 of them) are one ordered table
+    (`perclient_rows`) with one driver instead of ~17 hand-written functions;
+  * regression test without gameplay built and used: dump the patched game
+    image twice per build and compare (differences allowed only in the
+    addresses of moved arrays and detour relays). The cleanup build matched
+    2.1 except the one intended change, then passed a 4-player MP match.
+* **Phase 1** (a generated manifest of every fix) not started.
+* **Phase 5** candidates measured: of 98 relocated arrays, 44 are touched by
+  only 1-3 engine functions - those are the first to replace by
+  re-implemented functions (see phase 5).
+
+## 1. Where we started (first draft)
 
 * The mod works today on official BOIII (game exe checksum `0x06517980`,
   Steam build 21201493). 4 players verified in Zombies and offline Multiplayer.
@@ -82,9 +105,13 @@ is the reference for sizes and logic.
 **Phase 5 - replace patches by re-implemented functions (ongoing)**
 * Per subsystem: decompile every function that touches a per-player array,
   re-implement it for 4 players in C++, route the engine call to it, delete the
-  byte patches it made unnecessary. Start where patch density is highest
-  (entity visibility 101 sites, player keys 81, cg_pmove 47) and where the
-  review flagged risk.
+  byte patches it made unnecessary. Start with the arrays touched by the
+  FEWEST engine functions (44 of 98 are touched by 1-3: e.g. scrPlaceView,
+  uiElemHandles, prevview, the HUD player tables) - each is a small, testable
+  step. The densest by function count (fps_ctx 90 functions, visbits 48,
+  playerKeys 37, playersKb 34) stay relocated, or become ezz-owned `[4]`
+  storage the engine is pointed at (the design ezz already uses for its
+  cgame pools).
 * Each replacement is A/B tested against the patched version.
 
 ## 5. Known bugs (fixed along the way, not blockers for the port)

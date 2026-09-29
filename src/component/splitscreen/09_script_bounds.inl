@@ -67,11 +67,7 @@
 				const auto* at = reinterpret_cast<const uint8_t*>(b + rva);
 				if (!readable(at, 1) || *at != 0x01)
 				{
-					trace_line l;
-					l.str("csc lc bound: 0x");
-					l.hex(rva);
-					l.str(" is not stock - nothing written");
-					trace_write(l);
+					note("[splitscreen] csc lc bound: 0x%X is not stock - nothing written\n", rva);
 					return;
 				}
 			}
@@ -94,10 +90,10 @@
 			auto* at = reinterpret_cast<uint8_t*>(base() + filter_pass_check_rva);
 			filter_pass_owned = readable(at, sizeof(stock)) && std::memcmp(at, stock, sizeof(stock)) == 0
 				&& write_bytes(at + 3, cmp_eax_1, sizeof(cmp_eax_1));
-			trace_line l;
-			l.str(filter_pass_owned ? "SetFilterPassEnabled: local-client bound follows cl_maxLocalClients"
-			                        : "SetFilterPassEnabled: bytes differ - not widened");
-			trace_write(l);
+			if (!filter_pass_owned)
+			{
+				note("[splitscreen] SetFilterPassEnabled: bytes differ - not widened\n");
+			}
 		}
 
 		uint8_t csc_lc_bound_applied = 1;
@@ -123,15 +119,6 @@
 			{
 				write_bytes(reinterpret_cast<uint8_t*>(b + filter_pass_check_rva + 5), &bound, 1);
 			}
-			trace_line l;
-			l.str("csc lc bound: ");
-			l.dec(csc_lc_bound_applied);
-			l.str(" -> ");
-			l.dec(bound);
-			l.str(" (cl_maxLocalClients ");
-			l.dec(max_local);
-			l.str(")");
-			trace_write(l);
 			csc_lc_bound_applied = bound;
 		}
 
@@ -171,15 +158,10 @@
 				|| std::memcmp(reinterpret_cast<const void*>(b + 0x0135DC20), free_head, sizeof(free_head)) != 0)
 			{
 				csc_lc_widened = false;   // no trigger - the bound stays stock
-				trace_line l;
-				l.str("csc lc bound: allocator prologues differ - not widened");
-				trace_write(l);
+				note("[splitscreen] csc lc bound: allocator prologues differ - not widened\n");
 				return;
 			}
 			alloc_per_lc_hook.create(b + 0x0135D330, reinterpret_cast<void*>(&alloc_per_lc_stub));
 			free_per_lc_hook.create(b + 0x0135DC20, reinterpret_cast<void*>(&free_per_lc_stub));
 			sync_csc_lc_bound();
-			trace_line l;
-			l.str("csc lc bound: follows cl_maxLocalClients (allocator hooks)");
-			trace_write(l);
 		}
