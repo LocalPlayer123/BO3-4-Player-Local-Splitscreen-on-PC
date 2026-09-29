@@ -9,16 +9,11 @@
 		// descriptors). The hook runs just before it and, for controllers 1..3, copies player 1's
 		// <name>_0.cgp over <name>_N.cgp for the loadout and stats files; the game then reads a
 		// real file through its own path.
-		constexpr uint32_t save_read_callsite = 0x0221806E;
-		constexpr uint32_t save_read_rva = 0x01C144B0;
 		constexpr size_t save_desc_stride = 0x58;
 		constexpr size_t save_desc_name_max = 0x40;
 		constexpr size_t save_desc_other_dir = 0x4C;
-		// Branch on the descriptor's "other directory" byte. BOIII (patch_players_folder_name)
+		// save_dir_branch_rva: the branch on the descriptor's "other directory" byte. BOIII (patch_players_folder_name)
 		// makes it a jmp (0xEB), so every file goes to boiii_players whatever the byte says.
-		constexpr uint32_t save_dir_branch_rva = 0x01C1451E;
-		constexpr uint32_t save_base_dvar_rva = 0x179E63E0;
-		constexpr uint32_t dvar_get_string_rva = 0x02262A70;
 		constexpr const char* sponsor_copy_names[] = {
 			"loadouts_zm_offline", "loadouts_mp_offline", "loadouts_cp_offline",
 			"stats_zm_offline", "stats_mp_offline", "stats_cp_offline",
@@ -100,7 +95,7 @@
 			}
 			if (!call_site_targets(save_read_callsite, save_read_rva))
 			{
-				note("guest copy: NOT installed - 0x02274B9E is not call 0x01C20880");
+				note("guest copy: NOT installed - 0x%08X is not call 0x%08X", save_read_callsite, save_read_rva);
 				return;
 			}
 			try

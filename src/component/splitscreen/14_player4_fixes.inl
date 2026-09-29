@@ -192,8 +192,6 @@
 			return stock_splitscreen_player_count();
 		}
 
-		constexpr uint32_t per_controller_update_rva = 0x01E19AE0;
-		constexpr uint8_t per_controller_update_prologue[] = {0x48, 0x8B, 0xC4, 0x55, 0x41, 0x54};
 		utils::hook::detour per_controller_update_hook;
 
 		void storage_pump_stub(const int controller)
@@ -294,31 +292,6 @@
 			return apply_byte_patches(local_client_count_patches);
 		}
 
-		// clientUIActives walker end-bounds: twelve loops end at
-		// `lea reg, [clientUIActives[2]]` (four at field +8), among them the inlined
-		// CL_AnyLocalClientsRunning. Unwidened, clients 2/3 miss the per-frame
-		// upkeep. A thirteenth reference is an Arxan code copy and is left alone.
-		struct end_bound_fix
-		{
-			uint32_t insn_rva;
-			uint8_t expect[7];
-		};
-
-		constexpr end_bound_fix client_ui_end_bounds[] = {
-			{0x0134B907, {0x48, 0x8D, 0x15, 0xA2, 0x03, 0x01, 0x04}},
-			{0x0135950F, {0x48, 0x8D, 0x0D, 0x9A, 0x27, 0x00, 0x04}},
-			{0x01359B92, {0x48, 0x8D, 0x0D, 0x17, 0x21, 0x00, 0x04}},
-			{0x0135A27B, {0x48, 0x8D, 0x15, 0x2E, 0x1A, 0x00, 0x04}},
-			{0x0135D1BB, {0x48, 0x8D, 0x15, 0xEE, 0xEA, 0xFF, 0x03}},
-			{0x027C171E, {0x4C, 0x8D, 0x0D, 0x8B, 0xA5, 0xB9, 0x02}},
-			{0x027C1789, {0x48, 0x8D, 0x15, 0x20, 0xA5, 0xB9, 0x02}},
-			{0x027C1890, {0x48, 0x8D, 0x0D, 0x19, 0xA4, 0xB9, 0x02}},
-			{0x020ECA0F, {0x48, 0x8D, 0x15, 0xA2, 0xF2, 0x26, 0x03}},
-			{0x027C1617, {0x48, 0x8D, 0x0D, 0x9A, 0xA6, 0xB9, 0x02}},
-			{0x027C1650, {0x48, 0x8D, 0x0D, 0x61, 0xA6, 0xB9, 0x02}},
-			{0x027C1690, {0x48, 0x8D, 0x0D, 0x21, 0xA6, 0xB9, 0x02}},
-		};
-
 		uint32_t widen_client_ui_walker_bounds()
 		{
 			uint32_t done = 0;
@@ -356,8 +329,8 @@
 			uint32_t done = 0;
 			const auto b = base();
 
-			auto* disconnect_bound = reinterpret_cast<uint8_t*>(b + 0x020F0797);
-			constexpr uint8_t disconnect_old[] = {0x83, 0xFF, 0x02};
+			auto* disconnect_bound = reinterpret_cast<uint8_t*>(b + disconnect_loop_bound_rva);
+			const auto& disconnect_old = disconnect_loop_bound_bytes;
 			if (readable(disconnect_bound, sizeof(disconnect_old))
 			    && std::memcmp(disconnect_bound, disconnect_old, sizeof(disconnect_old)) == 0)
 			{
@@ -378,13 +351,6 @@
 			// CL_FreePerLocalClientMemory and hung the next round at CA_CONNECTED.
 			// Their UI close loops (PS4 UI_CloseAll i < 4) index uiInfoArray, so they
 			// widen only when its perclient_rows row moved it.
-			struct shutdown_site { uint32_t rva; uint8_t modrm; const char* what; bool needs_uiinfo; };
-			constexpr shutdown_site com_shutdown_sites[] = {
-				{0x020F11CE, 0xFF, "Com_ShutdownInternal disconnect loop", false},
-				{0x020F188B, 0xFB, "inlined Com_ShutdownInternal disconnect loop", false},
-				{0x020F1219, 0xFB, "Com_ShutdownInternal UI close loop", true},
-				{0x020F18DC, 0xFB, "inlined Com_ShutdownInternal UI close loop", true},
-			};
 			for (const auto& s : com_shutdown_sites)
 			{
 				if (s.needs_uiinfo && !perclient_new[perclient_row("uiinfo")])
@@ -406,12 +372,12 @@
 				}
 			}
 
-			auto* start = reinterpret_cast<uint8_t*>(b + 0x0132E31A);
-			constexpr uint8_t start_old[] = {0xBF, 0x01, 0x00, 0x00, 0x00};
+			auto* start = reinterpret_cast<uint8_t*>(b + cgame_shutdown_start_rva);
+			const auto& start_old = cgame_shutdown_start_bytes;
 			// Player 4: start at client 3; the walk tests flags & 0x10 (cgame up).
-			constexpr uint8_t start_new[] = {0xBF, 0x03, 0x00, 0x00, 0x00};
-			auto* cursor = reinterpret_cast<uint8_t*>(b + 0x0132E31F);
-			constexpr uint8_t cursor_old[] = {0x48, 0x8D, 0x1D, 0x12, 0xC9, 0x02, 0x04};
+			const auto& start_new = cgame_shutdown_start_new;
+			auto* cursor = reinterpret_cast<uint8_t*>(b + cgame_shutdown_cursor_rva);
+			const auto& cursor_old = cgame_shutdown_cursor_bytes;
 			if (!readable(start, sizeof(start_old)) || std::memcmp(start, start_old, sizeof(start_old)) != 0
 			    || !readable(cursor, sizeof(cursor_old)) || std::memcmp(cursor, cursor_old, sizeof(cursor_old)) != 0)
 			{
@@ -420,7 +386,7 @@
 			}
 			int32_t disp = 0;
 			std::memcpy(&disp, cursor_old + 3, sizeof(disp));
-			disp += 2 * 0x1078;   // clientUIActives[1] -> clientUIActives[3]
+			disp += 2 * uia_stride;   // clientUIActives[1] -> clientUIActives[3]
 			if (!write_bytes(cursor + 3, &disp, sizeof(disp)))
 			{
 				return done;
@@ -440,15 +406,6 @@
 		// Com_LocalClient_IsBeingUsed(lc) for lc = 0..3 and returns into the
 		// engine's own Dvar_SetInt. The activation loop bound stays at 2: widening
 		// it would write into clientUIActives[2].
-		constexpr size_t active_count_rva = 0x027C1A0D;
-		constexpr uint8_t active_count_bytes[] = {
-			0x40, 0x84, 0x35, 0xAC, 0x81, 0xB9, 0x02, // test byte [rip+..], sil
-			0xB8, 0x00, 0x00, 0x00, 0x00,             // mov eax, 0
-			0x0F, 0x45, 0xC6,                         // cmovne eax, esi
-			0x40, 0x84, 0x35, 0x15, 0x92, 0xB9, 0x02, // test byte [rip+..], sil
-			0x74, 0x02,                               // je +2
-			0xFF, 0xC0,                               // inc eax
-		};
 
 		bool install_active_count_fix()
 		{
@@ -678,7 +635,6 @@
 			}
 		}
 
-		// Status block for external readers (there is no console), in the reserved
-		// .data window (LOG.md, "RESERVED `.data`").
-		constexpr size_t status_rva = 0x1A828D00;
+		// Status block for external readers (there is no console) at status_rva, in the
+		// reserved .data window (LOG.md, "RESERVED `.data`").
 		constexpr uint32_t status_magic = 0xB03C0FFE;

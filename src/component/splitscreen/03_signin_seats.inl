@@ -8,7 +8,6 @@
 		// parseEntities, the 0x1E940 block).
 		// Raise the dvar, not the allocator's floor of 2: patching only the floor made
 		// the allocator disagree with every other reader and was the round-start crash.
-		constexpr uint32_t splitscreen_player_count_dvar_rva = 0x05355A00;
 		constexpr uint32_t dvar_current_offset = 0x28;
 
 		uint8_t* active_count_slots = nullptr;
@@ -41,9 +40,6 @@
 		// Com_LocalClient_IsBeingUsed, the local client's controller index and
 		// LiveUser_IsSignedIn: the conditions PS4 GetCountUsedAndSignedInLocalClients
 		// (0xD2EE40) counts over lc 0..3. The PC bounds that loop at 2.
-		constexpr uint32_t is_being_used_rva = 0x020E3210;
-		constexpr uint32_t lc_controller_index_rva = 0x020E31B0;
-		constexpr uint32_t live_user_is_signed_in_rva = 0x01EBA5A0;
 
 		uint32_t true_local_client_count()
 		{
@@ -247,9 +243,6 @@
 		// and blacked out the renderer.
 		// The file still becomes ready: the storage completion (PS4 0xF7DF1A) marks it
 		// ready before calling this callback and clears that only if it returns false.
-		constexpr uint32_t settings_read_result_rva = 0x0164DC50;
-		constexpr uint8_t settings_read_result_prologue[] = {0x40, 0x57, 0x48, 0x83, 0xEC, 0x20};
-		constexpr uint32_t storage_reset_rva = 0x0221AB10;
 
 		utils::hook::detour settings_read_result_hook;
 
@@ -283,9 +276,7 @@
 		// ShoutcasterSettingsReadResult (PS4 0x6F7180, with ShoutcasterResetSettings
 		// 0x6F71F0) does nothing on success. On failure it runs Storage_Reset(ci, 1, 0),
 		// execs default_shoutcaster_settings.cfg and saves; guests keep only the reset.
-		constexpr uint32_t shoutcaster_read_result_rva = 0x01650640;
 		// 0x40 is a redundant REX prefix on push rbx.
-		constexpr uint8_t shoutcaster_read_result_prologue[] = {0x40, 0x53, 0x48, 0x83, 0xEC, 0x20};
 
 		utils::hook::detour shoutcaster_read_result_hook;
 		bool shoutcaster_result_neutered = false;
@@ -365,9 +356,6 @@
 			}
 			return storage_read_hook.invoke<bool>(controller, file_type, index);
 		}
-
-		constexpr uint32_t storage_read_rva = 0x0221AA70;
-		constexpr uint8_t storage_read_prologue[] = {0x48, 0x89, 0x5C, 0x24, 0x08};
 
 		// clientGameStates relocation. Com_ControllerIndex_GetLocalClientNum scans two
 		// slots, so it returned -1 for controller 2, and the guest's settings read then
@@ -458,7 +446,6 @@
 			}
 			return n;
 		}
-
 
 		// Write seat i the way the game writes a fresh seat: i in all four index
 		// fields, flags 0 (the in-use bit is set by the sign-in, not by us).
@@ -578,11 +565,6 @@
 		// whenever it asks. A plain memory read: no engine call, no dvar system, no
 		// thread hazard. Falls back to the original while the seat table is not
 		// relocated or reads zero.
-		constexpr uint32_t splitscreen_player_count_rva = 0x027C1AB0;
-		constexpr uint8_t splitscreen_player_count_prologue[] = {
-			0x48, 0x8B, 0x0D, 0x49, 0x3F, 0xB9, 0x02, // mov rcx, [rip -> splitscreen_playerCount]
-			0x48, 0x85, 0xC9,                         // test rcx, rcx
-		};
 
 		utils::hook::detour splitscreen_player_count_hook;
 
@@ -595,9 +577,6 @@
 		// Called from the count detour, which runs on the game thread whenever the
 		// count is asked (per Lua command, and by the map-load allocator), not from
 		// per_controller_update_stub, which stops running after a splitscreen sign-in.
-		constexpr uint32_t cl_init_rva = 0x01359410;
-		constexpr uint32_t cl_init_range_imm_rva = 0x0135948B;
-		constexpr uint32_t cbuf_execute_range_imm_rva = 0x020DFA30;
 		// Resting value of the Cbuf_Execute range check: 0x02 stock, 0x04 once
 		// install_cbuf_for_players34() has given local clients 2/3 their own command
 		// buffers. The scoped CL_Init widens then leave it alone.
@@ -605,8 +584,6 @@
 		// Defined with the IsActive cave further down. The cgame frame-loop widen
 		// below may only run when the cave is installed.
 		extern bool isactive_caved;
-		constexpr uint32_t cl_frame_pump_imm_rva = 0x020ECE5E;
-		constexpr uint32_t netchan_poll_imm_rva = 0x020EB424;
 
 		bool cl_init2_done = false;
 
@@ -636,13 +613,6 @@
 		};
 
 		// The five SCR_UpdateFrame bound immediates, widened as one group.
-		constexpr uint32_t cg_frame_imms[] = {
-			0x013E10D4,   // cmp r13d,2 - the r_num_viewports counting loop
-			0x013E11D2,   // cmp ebx,2  - cgame frame loop, copy A exit 1
-			0x013E11DF,   // cmp ebx,2  - cgame frame loop, copy A exit 2
-			0x013E1264,   // cmp ebx,2  - cgame frame loop, copy B tail
-			0x013E12A6,   // cmp ebx,2  - the loading-screen scan
-		};
 
 		void run_cl_init_for_local_client2()
 		{
@@ -673,7 +643,7 @@
 
 			// clientUIActives[2] flags. Slot 2 is the block voice_comm vacated.
 			auto* flags = reinterpret_cast<volatile uint32_t*>(
-				base() + 0x05359BC0 + 2 * 0x1078);
+				base() + uia_base_rva + 2 * uia_stride);
 			if ((*flags & 0x2) == 0)
 			{
 				const uint8_t open = 0x03, shut = 0x02;
@@ -814,7 +784,7 @@
 			{
 				return;
 			}
-			auto* flags = reinterpret_cast<volatile uint32_t*>(base() + 0x05359BC0 + 3 * 0x1078);
+			auto* flags = reinterpret_cast<volatile uint32_t*>(base() + uia_base_rva + 3 * uia_stride);
 			if ((*flags & 0x2) == 0)
 			{
 				const uint8_t open = 0x04, shut = 0x02;
@@ -847,8 +817,6 @@
 		// Requires the LiveUser_IsUserGuest bound widen (is_user_guest_imm_rva):
 		// without it controller 2 is "not a guest" and the call jumps straight to the
 		// seat write, so the patch is verified in memory before calling.
-		constexpr uint32_t guest_signin_rva = 0x01DFFED0;
-		constexpr uint32_t is_user_guest_imm_rva = 0x01EBA642;
 		constexpr size_t userdata_is_guest = 0x29;
 		constexpr uint32_t guest_join_max_attempts = 8;
 		uint32_t guest_join_attempts = 0;
@@ -891,14 +859,6 @@
 		// tools/prepare_gamepad_join.py proved in a live lobby.
 		// gamepad_bound_rvas: the six widened loop bounds (poll, per-frame update,
 		// assign, connected-unused count, GetUsedControllerCount); none needs a seat.
-		constexpr uint32_t gamepad_bound_rvas[] = {
-			0x02284ADB,
-			0x02284BCB,
-			0x02285981,
-			0x02285D89,
-			0x01FD6E79,
-			0x01FD7B0E,
-		};
 		constexpr size_t expected_gamepad_refs = 38;
 		bool gamepads_activated = false;
 		bool gamepads_activation_in_progress = false;
@@ -913,14 +873,6 @@
 		constexpr int32_t gamepad_no_device = 8;
 		static_assert(gamepads_reloc_table.old_size == 2 * gamepad_stride);
 		static_assert(gamepads_reloc_table.new_size == 4 * gamepad_stride);
-		constexpr uint32_t gamepad_rescan_rva = 0x02286010;
-		constexpr uint8_t gamepad_rescan_bytes[] = {
-			0x48, 0x83, 0xEC, 0x28,                      // sub rsp, 28h
-			0xE8, 0xE7, 0xEF, 0xFF, 0xFF,                // call enumerate
-			0xE8, 0xD2, 0xE9, 0xFF, 0xFF,                // call assign
-			0x48, 0x83, 0xC4, 0x28,                      // add rsp, 28h
-			0xE9, 0x49, 0xD1, 0xE5, 0xFF,                // jmp seat-model refresh
-		};
 
 		// Does controller slot `slot` have a connected device right now? Only
 		// meaningful once the table is relocated (the stock array has 2 slots).
@@ -933,30 +885,6 @@
 			return *reinterpret_cast<const volatile uint8_t*>(
 				base() + gamepads_reserved_rva + slot * gamepad_stride) != 0;
 		}
-
-		// Device-type selector. Both gamepad loops (poll, per-frame update) reuse the
-		// loop-bound register as the constant 2 of the device-type selector, so the
-		// widened bound 4 made devices 4..7 (the non-XInput API) type 4, which nothing
-		// handles. The same 11 bytes, rewritten without the register:
-		//     lea eax,[rdx-4]; cmp eax,4; sbb ecx,ecx; and ecx,2
-		// give 2 for devices 4..7, else 0, whatever the bound. The length must not
-		// change (both ends are jump targets). Valid with the stock bound too, so it
-		// is applied at startup.
-		struct type_selector_site
-		{
-			uint32_t rva;
-			uint8_t expected[11];
-		};
-		constexpr type_selector_site gamepad_type_selector_sites[] = {
-			{0x022859A6, {0x33, 0xC9, 0x8D, 0x42, 0xFC, 0x83, 0xF8, 0x03, 0x0F, 0x46, 0xCD}},
-			{0x02285DAA, {0x33, 0xC9, 0x8D, 0x42, 0xFC, 0x83, 0xF8, 0x03, 0x0F, 0x46, 0xCE}},
-		};
-		constexpr uint8_t gamepad_type_selector_fixed[11] = {
-			0x8D, 0x42, 0xFC,                            // lea eax, [rdx-4]
-			0x83, 0xF8, 0x04,                            // cmp eax, 4
-			0x1B, 0xC9,                                  // sbb ecx, ecx
-			0x83, 0xE1, 0x02,                            // and ecx, 2
-		};
 
 		void fix_gamepad_type_selectors()
 		{

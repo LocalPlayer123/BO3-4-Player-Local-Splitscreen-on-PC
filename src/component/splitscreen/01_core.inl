@@ -3,28 +3,16 @@
 
 		// --- the per-client base that arrives mangled ---
 		//
-		// This table holds the correct per-client base, but with a third player the
+		// The table at base_table_rva holds the correct per-client base, but with a third player the
 		// value reaching the consumer is corrupted: it travels through
 		// mov rax,[rsp+0x50] / ror rax,0x20 behind an Arxan integrity compare.
 		// Re-reading it from the table restores it. This is a repair, not a null
 		// guard: the value is neither null nor missing.
-		constexpr size_t base_table_rva = 0x17ADC958;
 
 		// imul rcx, rcx, 0x1e940   - displaced into the cave
-		constexpr size_t stride_site_rva = 0x01F23651;
-		constexpr uint8_t stride_site_bytes[] = {0x48, 0x69, 0xC9, 0x40, 0xE9, 0x01, 0x00};
 
 		// Do not repair the second consumer of this value at 0x00F7E918: doing so
 		// kills the process with no minidump, with or without a guard.
-
-		// A one-byte code patch: `expect` is the original byte, `value` the new one.
-		struct byte_patch
-		{
-			size_t rva;
-			uint8_t expect;
-			uint8_t value;
-			const char* what;
-		};
 
 		// --- the local-client count ---
 		//
@@ -50,200 +38,6 @@
 		// while splitscreen_playerCount said one crashed a solo round at start.
 		// splitscreen_player_count_stub() commits it to 3 or 4 once that many
 		// seats have really seated.
-		constexpr size_t alloc_floor_rva = 0x0135D68C;
-
-		constexpr byte_patch local_client_count_patches[] = {
-			// The in-game allocation pass (flags bit 2) discards that result and
-			// hard-codes local = 2 with `lea r14d, [rsi-0x10]` (rsi = 18 maxClients).
-			// PS4 (0x416A10) has no such override. NOP the lea; maxClients stays 18.
-			{0x0135D6A4, 0x44, 0x90, "flag-4 alloc: drop the hard local=2 (1/4)"},
-			{0x0135D6A5, 0x8D, 0x90, "flag-4 alloc: drop the hard local=2 (2/4)"},
-			{0x0135D6A6, 0x76, 0x90, "flag-4 alloc: drop the hard local=2 (3/4)"},
-			{0x0135D6A7, 0xF0, 0x90, "flag-4 alloc: drop the hard local=2 (4/4)"},
-
-			// Boot bind loop 0x0135DDC8..0x0135DE24: the only boot code that sets a
-			// slot's controllerIndex and beingUsed flag.
-			{0x0135DE43, 0x02, 0x04, "boot bind loop: local clients 2 -> 4"},
-
-			// ...and its controllerIndex clamp min(i, 1); PS4 clamps min(i, 3)
-			// (0xE49DC5). Otherwise slots 2 and 3 would bind controllerIndex 1 too.
-			{0x0135DE2F, 0x01, 0x03, "boot bind clamp: controllerIndex min(i,1) -> min(i,3)"},
-
-			// Lua GetCountUsedAndSignedInLocalClients (0x01FC73E0) counts local
-			// clients 0..1; PS4 (0xD2EE40) counts 0..3. The body only calls
-			// predicates, so widening it cannot write anywhere.
-			{0x01FBAC99, 0x02, 0x04, "GetCountUsedAndSignedInLocalClients: 2 -> 4"},
-
-			// The lobby panel draws its rows from Engine.GetUsedControllerCount() and
-			// Engine.IsControllerBeingUsed(i). GetUsedControllerCount (0x01FE4260) and
-			// GetNonUsedControllerCount (0x01FE35C0) loop over two controllers; PS4
-			// (0xD5B970, 0xD5BBA0) loops over four.
-			// Disabled: suspected in a crash on the third sign-in (CRT fastfail in
-			// WndProc 0x02334790, Dvar_GetInt on a NULL dvar). They only feed Lua
-			// counters. History: LOG.md, "GetUsedControllerCount".
-			// {0x01FE428E, 0x02, 0x04, "GetUsedControllerCount: 2 -> 4"},
-			// {0x01FE35F9, 0x02, 0x04, "GetNonUsedControllerCount: 2 -> 4"},
-
-			// GetMaxControllerCount (0x01FE3370) returns the constant 2.0f; PS4
-			// (0xD5BCF0) returns 4. The stock datasources.lua creates per-controller
-			// UI models (scriptNotify, hudItems.*, ...) for 0..GetMaxControllerCount()-1
-			// at UI init, so at 2 player 3's HUD never received a script notify.
-			// Never raise it past the controllers that have seats: once that let Lua
-			// touch a seatless controller and killed the boot with
-			// __report_rangecheckfailure (0xC0000409 subcode 8).
-			// One byte: 2.0f = 0x40000000, 4.0f = 0x40800000.
-			{0x01FD6BFD, 0x00, 0x80, "GetMaxControllerCount: 2.0f -> 4.0f (controllers with seats; 4 since player 4)"},
-
-			// GetMaxLocalControllers (0x01FE3390), same shape and value. It caps
-			// lobby_maxLocalPlayers (Lobby_SetMaxLocalPlayers: 4 offline, capped here),
-			// which LobbyAddLocalClient checks when an unused controller presses its
-			// join button. CoDMenu also subscribes the button models of controllers
-			// 0..GetMaxLocalControllers()-1.
-			{0x01FD6C1D, 0x00, 0x80, "GetMaxLocalControllers: 2.0f -> 4.0f (controllers with seats; 4 since player 4)"},
-
-			// Engine.GetPlayerStats (0x01FCAD00), which the gobblegum row is built from,
-			// returned nil for controller 2 because of its first gate `cmp r14d, 1 / ja`.
-			// PS4 (0xD36D20) bounds the same argument at 4. The second gate, the stats
-			// walk 0x01EA9A30, passes for controller 2.
-			{0x01FBE6DE, 0x01, 0x03, "Engine.GetPlayerStats: controller bound 1 -> 3"},
-
-			// LobbyHost_AddLocalClients (0x01ED7560) decides who is in the lobby. PS4
-			// (0xCA5CA0) loops ci 0..3 and adds every controller that passes
-			// ShouldAddController (seat in use; offline, or signed in to Demonware).
-			// Controller 2 passes that; only the PC bound `cmp ebx, 2` kept it out.
-			// Needs the netchan relocation first: without it, adding controller 2
-			// crashed at 0x02173AD0 reading past a per-index array (0x16E69E20, stride
-			// 0x128). This table is only applied when every relocation succeeded,
-			// netchan included.
-			{0x01ECACEB, 0x02, 0x04, "LobbyHost_AddLocalClients: controllers 2 -> 4"},
-
-			// Activation loop, the PC twin (inlined at 0x0283AB30) of PS4
-			// CL_LocalClients_SetAllUsedActive (0x1517020): at every launch,
-			// SetActive(i, IsBeingUsed(i)). With a bound of two, client 2 stayed
-			// used-but-inactive. Three, not four: clientUIActives slot 2 is real once
-			// voice_comm has moved, slot 3 is still foreign.
-			{0x027C1A45, 0x02, 0x03, "SetAllUsedActive loop: local clients 2 -> 3"},
-
-			// Connect loop of PS4 CL_MapLoading (0x40CB40): for each active local
-			// client, CL_Disconnect, SetActive, connectionState 5/6 and the connected
-			// flag. The PC twin ends at 0x01359DB9 and walks clientUIActives by byte
-			// offset, so its bound is a size: `cmp rsi, 0x20F0` (2 * 0x1078). Without
-			// it client 2 was activated but never connected.
-			// Index 3 only touches the owned head of clientUIActives[3], seat record 3
-			// and [4] arrays; the body skips a client that is not in use.
-			{0x01359DDC, 0xF0, 0xE0, "connect loop end: 2*0x1078 -> 4*0x1078 (low)"},
-			{0x01359DDD, 0x20, 0x41, "connect loop end: 2*0x1078 -> 4*0x1078 (high)"},
-
-			// The same loop's counter (`cmp ebx, 2` at 0x01359DDA) is a second bound
-			// and the one that actually ends it. Both must move.
-			{0x01359DFC, 0x02, 0x04, "connect loop counter: local clients 2 -> 4"},
-
-			// Per-client reset loop in the same function (clears flag bit 6 and
-			// keyCatchers). Must cover the same clients, or client 2 carries a stale
-			// keyCatcher state into the round.
-			{0x01359BF8, 0x02, 0x04, "map-load reset loop: local clients 2 -> 4"},
-
-			// /GS range check on the per-client byte array 0x052F29C4 (index >= 2 ->
-			// __report_rangecheckfailure, 0xC0000409), hit via CL_ClearKeys. Widened in
-			// place: slots 2 and 3 (0x052F29C6/7) have no code references, they are
-			// padding.
-			{0x012F351D, 0x02, 0x04, "per-client byte array 0x052F29C4 range check: 2 -> 4"},
-
-			// IN_Attack_Up (0x0131B260; PS4 0x3E0D00) clears gAttackEdgeDetected[lc]
-			// (the byte array above) and releases two kbuttons in playersKb[lc].
-			// Player 3 firing hit this /GS check. playersKb is already [4].
-			{0x0131B28A, 0x02, 0x04, "IN_Attack_Up range check: local clients 2 -> 4"},
-			// 0x0131C050: per-frame analog-trigger edge; on release it clears byte
-			// 0x052F3360[lc] behind `cmp rbx, 2`. Slots 2/3 are unreferenced padding.
-			{0x0131C0CA, 0x02, 0x04, "trigger-edge byte array 0x052F3360 range check: 2 -> 4"},
-
-			// The CG frame function (0x00A129A9) guards a per-client byte array at
-			// 0x04D1DC94 with `cmp r15, 2 / jae __report_rangecheckfailure`. That
-			// fail-fast bypasses SEH: no dialog and no BOIII dump, only a WER dump.
-			// Slots 2/3 have no references (padding), so it widens in place.
-			{0x00A15B68, 0x02, 0x04, "CG frame per-client byte array 0x04D1DC94 range check: 2 -> 4"},
-
-			// Netchan poll: not applied from this table. PS4 Com_ClientPacketEvent
-			// (0xE491A0) polls each local client's own netchan for all four clients;
-			// the PC twin (0x020F7AC7..) stops at two (`cmp ebx, 2` at 0x020F7BA2), so
-			// client 2's replies were never read and it parked at CA_CONFIRMLOADING.
-			// It is written at map load (netchan_poll_imm_rva): in the frontend
-			// cl_maxLocalClients is 2, the clientConnection array (stride 0x25780) is
-			// carved for two only, and polling index 2 there crashed the lobby.
-			// {0x020F7BA4, 0x02, 0x03, "netchan poll"},   applied dynamically
-
-			// CL_Frame pump, also not in this table. Com_Frame calls CL_Frame(lc) only
-			// for lc < 2 (`cmp ebx, 2` at 0x020F95DA; PS4 0xE4D38D loops to 4), so
-			// client 2's handshake is never advanced. run_cl_init_for_local_client2()
-			// writes that bound only after CL_Init has run for client 2: CL_Frame runs
-			// per-client code (error popup, pending-error slot) before its own gate,
-			// and IsBeingUsed(2) is true as soon as player 3 signs in.
-
-			// CL_Init's range check (0x01359468, guarding cl_waitingOnServerToLoadMap
-			// at 0x053D4988) and Cbuf_Execute's are widened by
-			// run_cl_init_for_local_client2() only around its own CL_Init(2) call.
-			// A permanently widened /GS check leaves the stock engine running against a
-			// bound that no longer matches its array.
-			// {0x0135946B, 0x02, 0x03, "CL_Init range check"},   scoped instead
-
-			// Cbuf_Execute's range check (0x020EC1AD). For client 2 that call is
-			// inert: every per-client byte and dword it reads for lc 2 is unreferenced.
-			// {0x020EC1B0, 0x02, 0x03, "Cbuf_Execute range check"},  scoped too
-
-			// GetLobbyLocalClientCount (count loop 0x01EFF910, `cmp ebx, 2`). A
-			// three-player lobby listed client 2 in the roster but counted two local
-			// clients, so its row had no loadout data and DEACTIVATE SPLITSCREEN could
-			// not release it. The body only indexes client_objs (0x0340F180), which
-			// this component relocates to [4]; an empty slot returns false.
-			{0x01EF31FA, 0x02, 0x04, "GetLobbyLocalClientCount loop: 2 -> 4"},
-
-			// DEACTIVATE SPLITSCREEN: LobbyRemoveAllLocalSplitscreenClient (0x01F16D60),
-			// `cmp ebx, 2` at 0x01F16E02. The body reaches the index only through
-			// client_objs (relocated) and the seat lookup 0x020EF7C0, which already
-			// covers index 2. Effect not confirmed. The seat table must stay
-			// contiguous: the engine never produces a gap such as 0 and 2 in use.
-			{0x01F0A684, 0x02, 0x04, "LobbyRemoveAllLocalSplitscreenClient loop: 2 -> 4"},
-
-			// LiveUser_IsUserGuest (0x01EC70C0) returns false for every ci >= 2 before
-			// it reads the isGuest byte. Storage_Pump's guest branch (0x02277376) lets
-			// a guest inherit its loadout files from the primary, so this bound left
-			// player 3 without gobblegums. The only array it indexes,
-			// s_UserDataForControllerMap (0x0340F180), is relocated to four entries.
-			{0x01EBA642, 0x01, 0x03, "LiveUser_IsUserGuest bound: ci<=1 -> ci<=3"},
-
-			// Console commands disableallbutprimaryclients (0x0134C300),
-			// disableallclients (0x0134C340) and a provisional variant (0x0134C390)
-			// loop over two clients; PS4 CL_Command_DisableAllButPrimaryClients
-			// (0x40B550) loops over four. They drop the guests on the way back to the
-			// frontend; after game over client 2 stayed active and the frontend hung.
-			// The bodies write only clientUIActives and the relocated seat table.
-			{0x0134C352, 0x02, 0x04, "disableallbutprimaryclients loop: local clients 2 -> 4"},
-			{0x0134C396, 0x02, 0x04, "disableallclients loop: local clients 2 -> 4"},
-			{0x0134C3EF, 0x02, 0x04, "provisional disable-all loop: local clients 2 -> 4"},
-
-			// IN_GamepadsMove (0x022F3EF0) polls pads for ci < 2 (`cmp edi, 2` at
-			// 0x022F40F2); PS4 (0xDBA1F0) polls four. It feeds sticks, triggers and
-			// buttons to usercmds and also to the menus (PS4: ->
-			// CL_GamepadButtonEventForPort -> UI_CoD_KeyEvent), so without it players
-			// 3/4 cannot move or press A. Per-client targets: gaGlobs, playerKeys,
-			// s_gamePads (all [4]), the seat table and clientUIActives keyCatchers.
-			{0x02287024, 0x02, 0x04, "IN_GamepadsMove: poll controllers 2 -> 4 (players 3/4 sticks/buttons, menus too)"},
-
-			// Netchan thread (0x02176E80.., `cmp ebx, 2` at 0x02176EE2): transmit,
-			// keepalives, acks and stale-message cleanup ran for controllers 0 and 1
-			// only; PS4 Netchan_Thread (0xE7E650) does four. A stale fragment left for
-			// controller 2 swallowed the host's next message, so player 3 got stuck
-			// loading from the second round on. Indexed arrays: s_netchan rows and
-			// clientGameStates, both four deep.
-			{0x0211E444, 0x02, 0x04, "Netchan_Thread pump: controllers 2 -> 4 (transmit/acks/stale cleanup)"},
-
-			// Client setup for a level load (0x0135DCD0), frontend branch: `cmp ebx, 2`
-			// at 0x0135DD35 (the in-game branch is the boot bind loop row above).
-			// PS4 Com_LocalClients_AssignUIContextsForFrontEnd (0xE35BD0) covers four.
-			// Without it client 2 stayed active on the way back to the frontend. The
-			// body writes userData, the seat table and clientUIActives flags only.
-			{0x0135DD57, 0x02, 0x04, "frontend client setup loop: local clients 2 -> 4"},
-		};
 
 		// --- storage: give controllers 2 and 3 real buffers ---
 		//
@@ -262,62 +56,16 @@
 		// (`cmp esi, 2 / jl ok / xor al, al / ret`) on the file-lookup paths:
 		// without it the new buffers exist but nothing can find them.
 		// All are `cmp r32, imm8`, so every patch is one byte.
-		constexpr byte_patch storage_patches[] = {
-			{0x02218DF5, 0x51, 0x91, "storage pool: SIB scale x2 -> x4"},
-			{0x02218F53, 0x02, 0x04, "AllocateMemory: controllers 2 -> 4"},
-			{0x02219A0E, 0x02, 0x04, "clear-all loop: controllers 2 -> 4"},
-			{0x02219AF3, 0x02, 0x04, "file lookup A: controllers 2 -> 4"},
-			{0x02219B95, 0x02, 0x04, "file lookup B: controllers 2 -> 4"},
-			{0x02219D1A, 0x02, 0x04, "file lookup C: controllers 2 -> 4"},
-			{0x02219FA4, 0x02, 0x04, "file lookup D: controllers 2 -> 4"},
-			{0x0221A1C3, 0x02, 0x04, "file lookup E: controllers 2 -> 4"},
-			{0x0221A30B, 0x02, 0x04, "controller gate 0x02276E30: 2 -> 4"},
-			{0x0221AB16, 0x02, 0x04, "controller gate 0x02277640: 2 -> 4"},
 
-			// The rows below must be applied here at boot: controller 1 gets storage
-			// and stats readiness from the boot pass, and a controller patched later
-			// misses it.
-			//
-			// 0x0135C8AD: the per-controller update loop that drives Storage_Pump
-			// (`call 0x01E26570 / inc ebx / cmp ebx, 2`), outside the storage TU.
-			// Never widen a controller bound past the seats that exist: at 4 with three
-			// seats the engine reached controller 3's uninitialised command buffer and
-			// crashed. Four is safe now that controller 3 has a seat and the Cbuf
-			// records are [4].
-			{0x0135C8CD, 0x02, 0x04, "per-controller update loop (Storage_Pump): 2 -> 4"},
-
-			// Storage_Read refuses every controller >= 2 (`cmp edi, 2 / jge false`),
-			// so no per-controller file was ever read for a guest.
-			{0x0221AA7F, 0x02, 0x04, "Storage_Read controller bound: 2 -> 4"},
-
-			// Two more of the identical shape, found with tools/bound_scan.py.
-			{0x0221AC63, 0x02, 0x04, "storage fn 0x02277780 controller bound: 2 -> 4"},
-			{0x0221AE3F, 0x02, 0x04, "storage fn 0x02277960 controller bound: 2 -> 4"},
-
-			// TaskManager2_ProcessTasks per-controller loop (0x020F91D0, `cmp ebx, 2`).
-			// Finished tasks were reaped only for controllers 0 and 1, so controller
-			// 2's gamer-profile read stayed DONE. The 'hdd' busy query (0x02274D30)
-			// checks one global task, so that unreaped task blocked storage for every
-			// controller. Letting the game reap in its own frames is the fix; forcing
-			// the reap from a detour took the renderer down.
-			// Only safe together with the guest storage read filter: reaping a guest's
-			// SETTINGS read runs autoexec and Settings_RunCallbacks with localClient
-			// -1 and blacks out the client. With the filter, guests only read stats.
-			{0x020ECA5B, 0x02, 0x04, "TaskManager2_ProcessTasks per-controller loop: 2 -> 4"},
-		};
-
-		// s_storageMem.pool: zero until AllocateMemory has run, so it tells whether
-		// the patches can still get in before Storage_Init.
-		constexpr size_t storage_pool_rva = 0x1789FD78;
+		// storage_pool_rva (s_storageMem.pool): zero until AllocateMemory has run, so it
+		// tells whether the patches can still get in before Storage_Init.
 
 		// --- launch handshake -------------------------------------------------
-		constexpr size_t lobby_pool_rva = 0x155FD410;
 		constexpr size_t lobby_pool_stride = 0x66828;
 		constexpr size_t game_lobby_index = 1;
 		constexpr size_t session_clients_offset = 0xF8;
 		constexpr size_t session_client_stride = 0x30;
 		constexpr size_t acks_offset = 0x2780;
-		constexpr size_t launch_sequence_rva = 0x156CA510;
 		constexpr size_t gate_arrays[] = {0x23D0, 0x65FA0};
 		constexpr size_t copy_fields[] = {0x08, 0x0C, 0x10, 0x20};
 		constexpr size_t reference_slot = 1;
@@ -569,7 +317,6 @@
 		// mov r8d,2`). PS4 clientUIActive_t is 0x1078; strides differ by platform.
 		constexpr size_t client_ui_stride = 0x1170;
 
-
 		// Guest identities for controllers 2 and 3 in the relocated userData
 		// array. The client-object table has no writer (it is statically
 		// initialised), so its entries are produced, not moved.
@@ -689,8 +436,6 @@
 			// offline itself). A real fix must run when the lobby is created.
 			if (raise_local_client_count)
 			{
-				constexpr uint32_t session_state_rva = 0x1686E874;
-				constexpr uint32_t set_network_mode_rva = 0x020EAE30;
 				constexpr uint32_t network_mode_mask = 0x3C0;
 				constexpr uint32_t network_mode_shift = 6;
 
@@ -715,6 +460,4 @@
 		// a few times during boot and not again once the menu is up, so a guest
 		// that appears late gets no storage. Calling the game's own function once
 		// more is the same call the boot sequence makes.
-		constexpr uint32_t storage_pump_rva = 0x0221A680;
-		constexpr uint8_t storage_pump_prologue[] = {0x40, 0x57, 0x48, 0x83, 0xEC, 0x40};
 

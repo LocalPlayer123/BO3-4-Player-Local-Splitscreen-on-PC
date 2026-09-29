@@ -52,10 +52,10 @@ measured.
 **Game build:** everything targets `BlackOps3.exe` with PE checksum
 **0x06531394** (the build ezz BOIII 3.0 installs). On any other build the
 component stands down and the game runs unmodified. A new game build needs
-every RVA re-mapped (they are all in the component sources:
-`splitscreen.cpp` and its parts, `splitscreen_reloc.hpp`,
-`splitscreen_ezz.hpp`). Versions up to 1.1 targeted 0x06517980, the build the
-CBServers BOIII client runs.
+every RVA re-mapped - they are all in one file,
+`src/component/splitscreen_addresses.hpp` (the code refers to them by name,
+and the release build refuses an address anywhere else). Versions up to 1.1
+targeted 0x06517980, the build the CBServers BOIII client runs.
 
 ---
 
@@ -67,8 +67,9 @@ src/component/splitscreen.cpp          the component: readiness, try_apply (the 
 src/component/splitscreen/*.inl        the patches by topic (core helpers, guest storage, sign-in,
                                        panes, renderer, relocations, lobby, ...), #included in
                                        order into splitscreen.cpp - one translation unit
-src/component/splitscreen_reloc.hpp    generated reference tables for the relocations
-src/component/splitscreen_signin.hpp   sign-in helpers
+src/component/splitscreen_addresses.hpp  every game address for exe 0x06531394: patch sites,
+                                       expected and patch bytes, the relocations' reference
+                                       tables and the layout values they need
 src/component/splitscreen_ezz.hpp      ezz BOIII bridges (see docs/EZZ_REQUIRED_CHANGES.md)
 src/ui_scripts/zz_splitscreen/         lobby: console join with A / leave with B (the stock
                                        console Lua branch, switched on for PC), fixes the

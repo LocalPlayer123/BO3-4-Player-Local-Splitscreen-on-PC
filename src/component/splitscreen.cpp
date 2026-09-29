@@ -9,8 +9,7 @@
 #include "game/game.hpp"
 #include "game/utils.hpp"
 #include "scheduler.hpp"
-#include "splitscreen_reloc.hpp"
-#include "splitscreen_signin.hpp"
+#include "splitscreen_addresses.hpp"
 
 #include <utils/hook.hpp>
 #include <utils/finally.hpp>
@@ -24,7 +23,7 @@
 // at two: per-client arrays that are [4] on PS4 are [2] here, and loops and
 // range checks stop at 2. This component, applied from post_unpack, does:
 //   1. relocate those arrays so slots 2 and 3 exist instead of overwriting
-//      whatever the linker put next (tables in splitscreen_reloc.hpp)
+//      whatever the linker put next (tables in splitscreen_addresses.hpp)
 //   2. widen the one-byte loop bounds and range checks that stop at two
 //      (local_client_count_patches, storage_patches and the later sections)
 //   3. give guests an identity, storage and a seat the way the game does
@@ -200,10 +199,10 @@ namespace splitscreen
 			relocate_view_params();
 			// The two [2] arrays the pane path indexes at 2 (scrPlaceView overflowed).
 			// The pane bounds refuse without them, so a failure means two panes.
-			relocate_flat24("scrPlaceView", 0x0577B800, 0x7C,
+			relocate_flat24("scrPlaceView", scrplaceview_rva, scrplaceview_stride,
 			                scrplace_sites, std::size(scrplace_sites),
 			                scrplace_relocated, scrplace_new_rva);
-			relocate_flat24("perclient54", 0x04CB32C0, 0x54,
+			relocate_flat24("perclient54", perclient54_rva, perclient54_stride,
 			                perclient54_sites, std::size(perclient54_sites),
 			                perclient54_relocated, perclient54_new_rva);
 			// AimAssist globals: CG_SetView(2) reads and writes slot 2, so this must
@@ -222,7 +221,7 @@ namespace splitscreen
 			}
 			// The UI element-handle word array: prerequisite for widening the
 			// registrar loop below.
-			relocate_flat24("uiElemHandles", 0x1795CED8, 0x2,
+			relocate_flat24("uiElemHandles", uielemhandles_rva, uielemhandles_stride,
 			                uielem_sites, std::size(uielem_sites),
 			                uielem_relocated, uielem_new_rva);
 			retarget_uielem_reader();

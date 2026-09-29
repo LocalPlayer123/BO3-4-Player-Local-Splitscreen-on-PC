@@ -128,67 +128,9 @@
 			scene_buffers_filled = true;
 		}
 
-		// ============ cgEntCollWorld / cgEntCollNodes: entity collision ========
-		// Both are [2] with foreign slots 2/3, cleared for lc 2 by the inlined
-		// CG_ClearEntityCollWorld, so both are relocated. That function (PS4
-		// 0x189890, called from CG_SetInitialSnapshot) builds the free-list, so
-		// the engine initializes slots 2/3 itself.
-		// The site tables come from tools/gen_entcoll_sites.py; never edit them by
-		// hand (a hand-built table missed 8 field accessors and hung the game).
-		// target_off: a site may point at a field of element 0.
-		// History: LOG.md, ae57c92
-		struct entcoll_site
-		{
-			uint32_t rva;         // instruction start
-			uint8_t disp_off;     // byte offset of the disp32 inside it
-			uint8_t insn_len;     // total instruction length
-			bool rip;             // true: disp is rip-relative; false: absolute RVA
-			uint32_t target_off;  // target's offset inside element 0
-		};
-
-		constexpr uint32_t entcoll_world_base = 0x04764BA0;
 		constexpr uint32_t entcoll_world_stride = 0x401C;
-		constexpr uint32_t entcoll_nodes_base = 0x032608B0;
 		constexpr uint32_t entcoll_node_bytes = 0xC400;
 		constexpr size_t entcoll_slots = 4;
-
-		constexpr entcoll_site entcoll_world_sites[] = {
-			{0x0058B173, 3, 7, true,  0x0028}, // lea rcx,[rip+..]
-			{0x0058B1F6, 3, 7, true,  0x0000}, // lea rcx,[rip+..]
-			{0x0058B2DE, 3, 7, false, 0x0000}, // lea rdi,[rsi+0x047E3BA0]
-			{0x0058B445, 3, 7, true,  0x0000}, // lea rcx,[rip+..]
-			{0x0058B60C, 3, 7, false, 0x0000}, // lea rdi,[rsi+0x047E3BA0]
-			{0x0058B710, 3, 7, true,  0x0028}, // lea rax,[rip+..]
-			{0x0058B886, 3, 7, true,  0x0000}, // lea rcx,[rip+..]
-			{0x0129DE34, 3, 7, true,  0x001C}, // lea rcx,[rip+..]
-			{0x0129DF28, 3, 7, true,  0x001C}, // lea rcx,[rip+..]
-			{0x0129E784, 3, 7, true,  0x001C}, // lea r10,[rip+..]
-			{0x0129EA61, 3, 7, true,  0x001C}, // lea r10,[rip+..]
-			{0x012AEC27, 3, 7, true,  0x001C}, // lea rdi,[rip+..]
-			{0x012AEE47, 3, 7, true,  0x001C}, // lea rdi,[rip+..]
-		};
-
-		constexpr entcoll_site entcoll_node_sites[] = {
-			{0x0058B17A, 3, 7, true,  0x0000}, // lea r10,[rip+..]
-			{0x0058B2FD, 4, 8, false, 0x0000}, // mov rcx,[rsi+rbx*8+0x032DF8B0]
-			{0x0058B44F, 3, 7, true,  0x0000}, // lea rcx,[rip+..]
-			{0x0058B660, 4, 8, false, 0x0000}, // mov rsi,[rsi+rdx*8+..]
-			{0x0058B721, 4, 8, false, 0x0000}, // mov r9,[rsi+r9*8+..]
-			{0x0058B853, 4, 8, false, 0x0000}, // lea rdx,[r12+..]
-			{0x0070DE25, 4, 8, false, 0x0000}, // mov rax,[rcx+rax*8+..]
-			{0x0070FB49, 4, 8, false, 0x0000}, // mov rax,[rdx+rax*8+..]
-			{0x0072E424, 4, 8, false, 0x0000}, // mov rax,[r8+r14*8+..]
-			{0x0072E607, 4, 8, false, 0x0000}, // mov rax,[rcx+r14*8+..]
-			{0x00731AA3, 4, 8, false, 0x0000}, // mov rax,[r12+r14*8+..]
-			{0x00FEEED2, 3, 7, true,  0x0000}, // lea rsi,[rip+..]
-			{0x0129DE45, 3, 7, true,  0x0000}, // lea r8,[rip+..]
-			{0x0129DECC, 3, 7, true,  0x0000}, // lea r8,[rip+..]
-			{0x0129DF21, 3, 7, true,  0x0000}, // lea r8,[rip+..]
-			{0x0129E78B, 3, 7, true,  0x0000}, // lea r8,[rip+..]
-			{0x0129E820, 3, 7, true,  0x0000}, // lea r8,[rip+..]
-			{0x0129EA5A, 3, 7, true,  0x0000}, // lea r8,[rip+..]
-			{0x012AEC63, 3, 7, true,  0x0000}, // lea rax,[rip+..]
-		};
 
 		bool entcoll_relocated = false;
 

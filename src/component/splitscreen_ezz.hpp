@@ -23,14 +23,10 @@
 #include <iterator>
 #include <vector>
 
+#include "splitscreen_addresses.hpp"
+
 namespace splitscreen::ezz
 {
-	// Build 0x06531394.
-	constexpr uint32_t get_xuid_rva = 0x01EBA880;          // LiveUser_GetXuid(ci)
-	constexpr uint32_t user_get_xuid_rva = 0x01EBABC0;     // LiveUser_UserGetXuid(ci, xuid*)
-	constexpr uint32_t get_client_name_rva = 0x01EBA850;   // LiveUser_GetClientName(ci)
-	constexpr uint32_t get_user_data_rva = 0x01EBA3F0;     // LiveUser_GetUserDataForController(ci)
-
 	namespace detail
 	{
 		inline bool readable(const void* p, const size_t n)
@@ -227,22 +223,16 @@ namespace splitscreen::ezz
 	{
 		using hunk_alloc_fn = void* (*)(void* user, size_t size, int alignment, const char* name);
 
+		// One allocation site of CG_AllocateClientMemory (cg_alloc_sites) and what
+		// the stub learned about it.
 		struct array_site
 		{
-			uint32_t call_rva;
-			uint32_t imul_rva;       // imul rdx/rdi, <elem> - proves what `size` counts
-			uint8_t imul[7];
-			size_t elem;
+			const array_alloc_site& at;
 			hunk_alloc_fn host = nullptr;
 			uint8_t* own = nullptr;
 		};
 
-		// Build 0x06531394, CG_AllocateClientMemory (0x008408F0).
-		inline array_site array_sites[] = {
-			{0x00840929, 0x00840922, {0x48, 0x69, 0xD2, 0x20, 0x27, 0x34, 0x00}, 0x342720},   // cgArray
-			{0x008421C3, 0x008421AC, {0x48, 0x69, 0xD2, 0x40, 0xE9, 0x01, 0x00}, 0x1E940},    // cgsArray
-			{0x00843A4F, 0x00843A2E, {0x48, 0x69, 0xFF, 0xA0, 0x03, 0x00, 0x00}, 0x3A0},      // cg_viewModelArray
-		};
+		inline array_site array_sites[] = {{cg_alloc_sites[0]}, {cg_alloc_sites[1]}, {cg_alloc_sites[2]}};
 
 		inline void* zeroed(uint8_t*& own, const size_t capacity, const size_t size, const int alignment)
 		{
@@ -265,9 +255,9 @@ namespace splitscreen::ezz
 		void* array_alloc(void* user, const size_t size, const int alignment, const char* name)
 		{
 			auto& s = array_sites[I];
-			if (size > 2 * s.elem)
+			if (size > 2 * s.at.elem)
 			{
-				if (auto* p = zeroed(s.own, 4 * s.elem, size, alignment))
+				if (auto* p = zeroed(s.own, 4 * s.at.elem, size, alignment))
 				{
 					return p;
 				}
@@ -278,10 +268,6 @@ namespace splitscreen::ezz
 		// CG_InitAndAllocCGEntsArray (0x0085B990) allocates one entity pool per
 		// local client in a loop indexed by rsi (xor esi,esi at +0x2B). A cave
 		// stores esi before the call, so the stub knows the client.
-		constexpr uint32_t entity_call_rva = 0x0085B9F5;
-		constexpr uint32_t entity_size_rva = 0x0085B9E7;
-		constexpr uint8_t entity_size_bytes[] = {0xBA, 0x00, 0x00, 0x3F, 0x00};   // mov edx,0x3F0000
-		constexpr size_t entity_pool_size = 0x3F0000;
 		inline hunk_alloc_fn entity_host = nullptr;
 		inline volatile uint32_t* entity_lc = nullptr;
 		inline uint8_t* entity_pools[4] = {};
@@ -350,15 +336,15 @@ namespace splitscreen::ezz
 		for (size_t i = 0; i < std::size(array_sites); ++i)
 		{
 			auto& s = array_sites[i];
-			const size_t host = host_call_target(base, image_size, s.call_rva);
-			if (!host || !bytes_at(base + s.imul_rva, s.imul, sizeof(s.imul)))
+			const size_t host = host_call_target(base, image_size, s.at.call_rva);
+			if (!host || !bytes_at(base + s.at.imul_rva, s.at.imul, sizeof(s.at.imul)))
 			{
 				continue;
 			}
 			s.host = reinterpret_cast<hunk_alloc_fn>(host);
 			try
 			{
-				utils::hook::call(base + s.call_rva, reinterpret_cast<void*>(stubs[i]));
+				utils::hook::call(base + s.at.call_rva, reinterpret_cast<void*>(stubs[i]));
 				chained |= 16u << i;
 			}
 			catch (...)
@@ -421,19 +407,7 @@ namespace splitscreen::ezz
 	// Each range test ends in cmova/cmovb edx,r10d, which loads the failing
 	// state; a 4-byte nop keeps the passing one. The other seven variants check
 	// for a call instruction before the return address, which ezz's `call rax`
-	// passes.
-	namespace detail
-	{
-		constexpr uint32_t client_command_rva = 0x0193DFC0;
-		// mov [rsp+18h],rdi; push rbp; lea rbp,[rsp-340h] - after the host's jump
-		constexpr uint8_t client_command_tail[] = {0x48, 0x89, 0x7C, 0x24, 0x18, 0x55, 0x48, 0x8D, 0xAC, 0x24,
-		                                           0xC0, 0xFC, 0xFF, 0xFF};
-		// variants 0, 2, 4, 5, 6, 9, 11, 12, 14 (jump table at 0x019402E8)
-		constexpr uint32_t client_command_range_tests[] = {
-			0x0193E064, 0x0193E3F6, 0x0193E72E, 0x0193E8DC, 0x0193EA70,
-			0x0193EFB7, 0x0193F38C, 0x0193F531, 0x0193F8F1,
-		};
-	}
+	// passes. Sites: client_command_* (splitscreen_addresses.hpp).
 
 	// Bit 256 in `chained`. All nine tests or none.
 	inline uint32_t install_client_command_guard(const size_t base)

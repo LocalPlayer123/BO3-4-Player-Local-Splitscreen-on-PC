@@ -13,31 +13,14 @@
 		//
 		// Do not touch the SIB scale in `lea rbx,[rbx + r13*2]`: that 2 is
 		// operations per controller (0x410 == 2 * 0x208), not the controller count.
-		constexpr size_t targets_rva = 0x033BCDF0;
 		constexpr size_t targets_types = 4;
 		constexpr size_t targets_old_row = 0x850;
 		constexpr size_t targets_new_row = 0x1070;
-
-		struct targets_lea
-		{
-			uint32_t insn_rva;  // 7-byte rip-relative lea, disp32 at +3
-			uint32_t offset;    // offset into the table it points at
-		};
-
-		constexpr targets_lea targets_leas[] = {
-			{0x0221B146, 0x00}, {0x0221B28F, 0x00}, {0x0221B2E2, 0x00}, {0x0221B50A, 0x00},
-			{0x0221B1A4, 0x08},
-			{0x0221B223, 0x20}, {0x0221B203, 0x28},
-			{0x0221B2BE, 0x30}, {0x0221B5D1, 0x30},
-		};
 
 		// Every imm32 in the storage TU that carries the old row stride 0x850 (six,
 		// found with tools/pe_find.py). One is not an imul but `add rdi, 0x850`
 		// (0x02277CF4) in StorageTarget_GetType (PS4 0xF81890); missing it walks
 		// the new table with the old geometry. The old total 0x2140 appears nowhere.
-		constexpr uint32_t targets_strides[] = {
-			0x0221B152, 0x0221B1C4, 0x0221B20D, 0x0221B22D, 0x0221B28B, 0x0221B5E2,
-		};
 
 		// Needed: once s_storage[2] holds an xuid the game does storage work for
 		// controller 2 by itself, and every such call reads past a two-controller
@@ -111,9 +94,7 @@
 		// on the A/B experiments table, so controller 2's local-file work
 		// corrupted it (crash at 0x02275034). Only the count changes, so it is a
 		// flat copy with one address-taking reference (0x02274BFE).
-		constexpr size_t localfileop_rva = 0x17889DF0;
 		constexpr size_t localfileop_elem = 0x1820;
-		constexpr uint32_t localfileop_lea = 0x022180CE; // 7-byte lea, disp32 at +3
 
 		bool widen_local_file_ops()
 		{
@@ -161,11 +142,9 @@
 		// gobblegum row reaches BG_UnlockablesGetLocalCACRoot (0xE4130), which
 		// asserts that CG_GetLocalClientGlobals(GetLocalClientNum(ci)) is non-null.
 		// Retail PC has no asserts, so a -1 silently draws an empty row.
-		constexpr uint32_t local_client_num_rva = 0x020E3040;
 
 		// cl_maxLocalClients (old RVA 0x053A2720), stored by the allocator at
 		// 0x0135D489.
-		constexpr uint32_t cl_max_local_clients_rva = 0x05323720;
 		// Enables the count patches and the cl_maxLocalClients hold. The caller
 		// applies them only after the container relocations succeeded.
 		bool raise_local_client_count = true;

@@ -22,7 +22,13 @@ project can stop after any phase without leaving a broken mod behind.
     image twice per build and compare (differences allowed only in the
     addresses of moved arrays and detour relays). The cleanup build matched
     2.1 except the one intended change, then passed a 4-player MP match.
-* **Phase 1** (a generated manifest of every fix) not started.
+* **Phase 1 replaced** (roadmap item 10, mod 2.3): instead of a separate manifest,
+  every game address, the stock and patch bytes that go with it and the layout
+  values they need are in ONE header, `src/component/splitscreen_addresses.hpp`;
+  the code holds names only and the release build refuses an address anywhere
+  else. The move was proven line for line (nothing added to the code, the header
+  is exactly what left it) and the patched game image compared at boot. A port
+  rewrites this one file.
 * **Phase 5** candidates measured: of 98 relocated arrays, 44 are touched by
   only 1-3 engine functions - those are the first to replace by
   re-implemented functions (see phase 5).

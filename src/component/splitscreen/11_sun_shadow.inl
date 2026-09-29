@@ -8,15 +8,6 @@
 		// OMSetRenderTargets. The cave caps the slot at slices / partitions - 1,
 		// read from the verified instructions. 15 straight-line bytes become
 		// `jmp cave` + NOPs.
-		constexpr uint32_t sun_slot_site_rva = 0x01D0D920;
-		constexpr uint8_t sun_slot_site_expected[] = {
-			0x41, 0x8B, 0x85, 0x98, 0x03, 0x00, 0x00,   // mov eax, [r13+0x398]
-			0x3B, 0xC8,                                 // cmp ecx, eax
-			0x0F, 0x4D, 0xC8,                           // cmovge ecx, eax
-			0x89, 0x4D, 0x14,                           // mov [rbp+0x14], ecx
-		};
-		constexpr uint32_t sun_slices_rva = 0x01CD12AD;       // mov r8d, <slices>
-		constexpr uint32_t sun_partitions_rva = 0x01C6FFFD;   // cmp ebx, <partitions>
 		bool sun_slot_clamped = false;
 
 		// ---- Sun shadow: 12 slices, one slot per view -----------------------------
@@ -31,28 +22,6 @@
 		//   and slices 6..11 get sidecar views (maintain_sun_trans_views) that the
 		//   setter and the clear pick; the clear has no clamp of its own.
 		// Applied before R_Init, which builds the descriptors. History: LOG.md, 12 slices
-		constexpr uint32_t sun_desc_rt5_rva = 0x01CD1357;
-		constexpr uint8_t sun_desc_rt5_stock[] = {0x4C, 0x89, 0x85, 0x04, 0x0D, 0x00, 0x00};
-		constexpr uint32_t sun_desc_rt9_rva = 0x01CD140A;
-		constexpr uint8_t sun_desc_rt9_stock[] = {0x44, 0x89, 0x85, 0x5C, 0x0D, 0x00, 0x00};
-		constexpr uint32_t sun_view_check_rva = 0x01CD5449;                           // cmp ax,5
-		constexpr uint8_t sun_view_check_stock[] = {0x66, 0x83, 0xF8, 0x05};
-		constexpr uint32_t sun_view_loop_rva = 0x01CD5494;                            // movzx eax,[rsi+0xA86]
-		constexpr uint8_t sun_view_loop_stock[] = {0x0F, 0xB7, 0x86, 0x86, 0x0A, 0x00, 0x00};
-		constexpr uint32_t sun_setter_rva = 0x01CF550D;                               // colour index clamp
-		constexpr uint8_t sun_setter_stock[] = {
-			0xB9, 0x07, 0x00, 0x00, 0x00, 0x3B, 0xD9, 0x44, 0x8B, 0xCB, 0x0F, 0xB7, 0xD6, 0x44, 0x0F,
-			0x4D, 0xC9, 0x33, 0xC9, 0x45, 0x85, 0xC9, 0x44, 0x0F, 0x4E, 0xC9, 0x4E, 0x8B, 0x04, 0xC8,
-		};
-		constexpr uint32_t sun_clear_rva = 0x01CF367D;         // colour clear of the current slice
-		constexpr uint8_t sun_clear_stock[] = {
-			0x8B, 0x93, 0xC8, 0x80, 0x00, 0x00,   // mov edx,[rbx+0x80C8]   current slice
-			0x48, 0x8B, 0x07,                     // mov rax,[rdi]
-			0x4C, 0x8B, 0xC6,                     // mov r8,rsi
-			0x48, 0x8B, 0x54, 0xD5, 0x00,         // mov rdx,[rbp+rdx*8]    inline[slice]
-			0x48, 0x8B, 0xCF,                     // mov rcx,rdi
-		};                                        // then call [rax+0x190] (ClearRenderTargetView)
-		constexpr uint32_t rt_records_ptr_rva = 0x0FBBE758;   // GfxRenderTarget records, stride 0xAE0
 		constexpr uint32_t rt_record_stride = 0xAE0;
 		constexpr uint32_t sun_trans_rt = 9;
 		constexpr uint32_t sun_slices_wanted = 12;

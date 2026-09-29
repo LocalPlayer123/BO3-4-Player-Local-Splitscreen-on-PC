@@ -6,33 +6,7 @@
 		// session+0xF0 again for an existing XUID), so the single-client
 		// LobbyHost_AddLocalClient(actionId, ci, type) is used (PS4 0xCA5C70).
 		// actionId 0 only tags the UI result.
-		constexpr uint32_t lobby_host_add_local_rva = 0x01ECAAF0;
-		constexpr uint32_t lobby_get_session_rva = 0x01ED03E0;
-		constexpr uint32_t lobby_get_client_by_xuid_rva = 0x01EF3920;
-		constexpr uint32_t live_user_get_xuid_rva = 0x01EBA880;
-		constexpr uint32_t mutable_client_info_rva = 0x01EBEB00;
-		constexpr uint32_t lobby_update_client_rva = 0x01EF5590;
 		constexpr int game_lobby_type = 1;
-
-		constexpr uint8_t lobby_host_add_local_bytes[] = {
-			0xE9, 0xDB, 0xC7, 0x00, 0x00,
-		};
-		constexpr uint8_t lobby_get_session_bytes[] = {
-			0x83, 0xF9, 0x01, 0x77, 0x16, 0x48, 0x63, 0xC1,
-		};
-		constexpr uint8_t lobby_get_client_bytes[] = {
-			0x4C, 0x8D, 0x89, 0xF8, 0x00, 0x00, 0x00, 0x33, 0xC0,
-		};
-		constexpr uint8_t live_user_get_xuid_bytes[] = {
-			0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x8B, 0xD9,
-		};
-		constexpr uint8_t mutable_client_info_bytes[] = {
-			0x48, 0x8B, 0xC4, 0x48, 0x89, 0x50, 0x10, 0x55, 0x41, 0x56,
-		};
-		constexpr uint8_t lobby_update_client_bytes[] = {
-			0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x6C,
-			0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57,
-		};
 
 		template <size_t N>
 		bool engine_bytes_match(const uint32_t rva, const uint8_t (&expected)[N])
@@ -59,10 +33,6 @@
 
 		// LobbyBase_GetNetworkMode (PS4 0xCBFB40): 0 LOCAL, 1 LAN, 2 LIVE
 		// (PS4 LobbyTypes_GetLobbyNetworkModeName 0xCC55B0).
-		constexpr uint32_t lobby_get_network_mode_rva = 0x01EDB7F0;
-		constexpr uint8_t lobby_get_network_mode_bytes[] = {
-			0x8B, 0x05, 0x26, 0x2B, 0x7F, 0x13, 0xC3,
-		};
 		constexpr int lobby_network_local = 0;
 		constexpr int lobby_network_lan = 1;
 
@@ -338,11 +308,6 @@
 
 		// Hooked only to sign in as early as possible; a guest the loop misses is
 		// added later by the single-client path above.
-		constexpr uint32_t lobby_add_all_rva = 0x01ECAB00;
-		constexpr uint8_t lobby_add_all_prologue[] = {
-			0x48, 0x8B, 0xC4, 0x57, 0x41, 0x54, 0x41, 0x55,
-			0x41, 0x56, 0x41, 0x57, 0x48, 0x81, 0xEC, 0xB0,
-		};
 		utils::hook::detour lobby_add_all_hook;
 
 		bool lobby_add_all_stub(const int lobby_type)
@@ -381,28 +346,6 @@
 		// 3's own controller. The sign-in function is detoured (guest_signin_stub) to
 		// follow every splitscreen sign-in/out.
 		// History: LOG.md, DEACTIVATE SPLITSCREEN
-		constexpr uint32_t lobbyvm_local_leave_rva = 0x01EE3B40;
-		constexpr uint8_t lobbyvm_local_leave_prologue[] = {
-			0x40, 0x57,                                  // push rdi
-			0x48, 0x81, 0xEC, 0xB0, 0x00, 0x00, 0x00,    // sub rsp, 0xB0
-			0x48, 0xC7, 0x44, 0x24, 0x38, 0xFE, 0xFF, 0xFF, 0xFF,
-		};
-		constexpr uint8_t guest_signin_prologue[] = {
-			0x48, 0x89, 0x5C, 0x24, 0x08,                // mov [rsp+8], rbx
-			0x48, 0x89, 0x6C, 0x24, 0x18,                // mov [rsp+18h], rbp
-			0x48, 0x89, 0x74, 0x24, 0x20,                // mov [rsp+20h], rsi
-			0x57, 0x41, 0x56, 0x41, 0x57,                // push rdi / r14 / r15
-		};
-		constexpr uint32_t lobby_host_is_host_rva = 0x01ECC700;
-		constexpr uint8_t lobby_host_is_host_bytes[] = {
-			0x48, 0x83, 0xEC, 0x28, 0xE8, 0xD7, 0x3C, 0x00, 0x00,   // call 0x01EDCDD0
-		};
-		constexpr uint32_t lobby_host_remove_client_rva = 0x01ECD250;
-		constexpr uint8_t lobby_host_remove_client_bytes[] = {
-			0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74,
-			0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20,
-		};
-		constexpr uint32_t local_client_left_reason_rva = 0x02FB1758;
 		constexpr char local_client_left_reason[] = "Local Client Left.";
 		utils::hook::detour lobbyvm_local_leave_hook;
 		utils::hook::detour guest_signin_hook;
@@ -562,12 +505,6 @@
 		}
 
 		// ---- SwapClients (PS4 0xE356F0): slot-3 guard ----
-		constexpr uint32_t swap_clients_rva = 0x020E39D0;
-		constexpr uint8_t swap_clients_prologue[] = {
-			0x89, 0x54, 0x24, 0x10,                               // mov [rsp+0x10], edx
-			0x89, 0x4C, 0x24, 0x08,                               // mov [rsp+8], ecx
-			0x53, 0x55, 0x56, 0x57, 0x41, 0x54,                   // push rbx/rbp/rsi/rdi/r12
-		};
 		utils::hook::detour swap_clients_hook;
 
 		void swap_clients_stub(const int a, const int b)
@@ -577,12 +514,11 @@
 			// everything past +0x18 is online host migration data and voice counters, so
 			// a swap involving slot 3 keeps the foreign tail [+0x3F0, +0x1078) in place
 			// on both sides.
-			constexpr size_t swap_uia_base = 0x05359BC0, swap_uia_stride = 0x1078;
-			constexpr size_t window_off = 0x3F0, window_len = 0x1078 - 0x3F0;
+			constexpr size_t window_off = 0x3F0, window_len = uia_stride - 0x3F0;
 			const bool guard = (a == 3 || b == 3) && a >= 0 && b >= 0 && a <= 3 && b <= 3;
 			static uint8_t keep_a[window_len], keep_b[window_len];
-			auto* win_a = reinterpret_cast<uint8_t*>(base() + swap_uia_base + a * swap_uia_stride + window_off);
-			auto* win_b = reinterpret_cast<uint8_t*>(base() + swap_uia_base + b * swap_uia_stride + window_off);
+			auto* win_a = reinterpret_cast<uint8_t*>(base() + uia_base_rva + a * uia_stride + window_off);
+			auto* win_b = reinterpret_cast<uint8_t*>(base() + uia_base_rva + b * uia_stride + window_off);
 			if (guard)
 			{
 				std::memcpy(keep_a, win_a, window_len);
@@ -602,8 +538,6 @@
 		// itself, frontend only. Console runs the same join/leave from Lua.
 		// Button bits: gamepad record +0x08; A = 0x100, B = 0x200.
 		constexpr size_t gamepad_buttons = 0x08;
-		constexpr uint32_t game_button_a = 0x00000100;
-		constexpr uint32_t game_button_b = 0x00000200;
 		constexpr uint64_t guest2_join_request_ms = 3000;
 		constexpr uint32_t guest2_unplug_frames = 30;
 		uint32_t guest2_prev_buttons = 0;
@@ -815,13 +749,6 @@
 		// CL_LocalClient_SetActive call never runs before the crash. PS4
 		// CL_SetupClientsForIngame calls it right before the per-client allocation
 		// and the connect loop. History: LOG.md, SetAllUsedActive
-		constexpr uint32_t set_active_rva = 0x027C19C0;
-		constexpr uint8_t set_active_prologue[] = {
-			0x48, 0x89, 0x5C, 0x24, 0x08, // mov [rsp+8], rbx
-			0x48, 0x89, 0x74, 0x24, 0x10, // mov [rsp+0x10], rsi
-			0x57,                         // push rdi
-			0x48, 0x83, 0xEC, 0x20,       // sub rsp, 0x20
-		};
 		utils::hook::detour set_active_hook;
 
 		void run_cl_init_for_local_client2();
