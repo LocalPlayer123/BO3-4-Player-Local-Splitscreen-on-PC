@@ -45,6 +45,25 @@
 			}
 		}
 
+		// The stock answer, computed here - never through invoke(): the original
+		// (0x027C1AB0, PS4 0x01516BE0) is "no dvar -> 1, else jmp to the dvar getter",
+		// and that getter's Arxan check (0x02261DF2: byte before the return address
+		// must be a call) fails for a return address in this DLL and spins forever
+		// (black screen at boot, 2026-09-29). The current integer is at +0x28.
+		int stock_splitscreen_player_count()
+		{
+			uint64_t dvar = 0;
+			std::memcpy(&dvar, reinterpret_cast<const void*>(base() + splitscreen_player_count_dvar_rva),
+			            sizeof(dvar));
+			if (dvar == 0)
+			{
+				return 1;
+			}
+			int32_t value = 1;
+			std::memcpy(&value, reinterpret_cast<const void*>(dvar + dvar_current_offset), sizeof(value));
+			return value;
+		}
+
 		int splitscreen_player_count_stub()
 		{
 			if (signin_relocated)
@@ -141,7 +160,7 @@
 						// Bounded: the engine's updater pushes this back down during the re-seat
 						// window, and pushing on every query cost the frame rate. The allocation
 						// floor guarantees the size anyway. Plain dvar field, no VirtualProtect.
-						if (seats >= 2 && seats > *current && dvar_pushes < 64)
+						if (seats >= first_raised_player_count && seats > *current && dvar_pushes < 64)
 						{
 							*current = seats;
 							++dvar_pushes;
@@ -152,7 +171,8 @@
 						}
 					}
 				}
-				if (n > 0)
+				// 1-2 players: the engine's own answer (see first_raised_player_count).
+				if (n >= first_raised_player_count)
 				{
 					// The scheduler loops stop after a splitscreen sign-in, so CL_Init(2) is
 					// triggered here: the allocator calls this stub at map load, on the game
@@ -169,7 +189,7 @@
 					return static_cast<int>(n);
 				}
 			}
-			return splitscreen_player_count_hook.invoke<int>();
+			return stock_splitscreen_player_count();
 		}
 
 		constexpr uint32_t per_controller_update_rva = 0x01E19AE0;

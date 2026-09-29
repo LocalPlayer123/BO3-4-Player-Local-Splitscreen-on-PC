@@ -70,6 +70,15 @@
 		// Defined next to signin_relocated, which it reads.
 		uint32_t seat_count();
 
+		// The mod raises splitscreen_playerCount only for 3-4 players, which the PC
+		// cannot count. 1-2 players are the engine's own business (stock
+		// CL_LocalClient_SetActive sets 2 when player 2 activates). Raising it at 2
+		// caught a seat the boot marks in use for a moment and left the count at 2 in
+		// the main menu; the game's device assignment (0x022849F0: "count > 1 and
+		// slot 1 empty -> the new device goes to controller 1") then gave a pad
+		// plugged in by a lone player to player 2 (measured 2026-09-29).
+		constexpr uint32_t first_raised_player_count = 3;
+
 		// Hold splitscreen_playerCount at the real number of local clients.
 		// PS4 CL_LocalClient_SetActive (0x15167D0) sets it from
 		// CL_LocalClient_GetActiveCount (0x1516A20, i < 4). The PC unrolls that count
@@ -116,7 +125,7 @@
 			// the map-load reallocation shrank cl_maxLocalClients back to 2.
 			const auto want = std::max(true_local_client_count(), seat_count());
 
-			if (want > 1 && *current < want)
+			if (want >= first_raised_player_count && *current < want)
 			{
 				write_bytes(current, &want, sizeof(want));
 			}
@@ -136,7 +145,7 @@
 			if (active_count_slots != nullptr && max_local >= 2)
 			{
 				const auto live = true_local_client_count();
-				if (live > 1 && live != last_active_refresh
+				if (live >= first_raised_player_count && live != last_active_refresh
 				    && set_splitscreen_player_count(live))
 				{
 					last_active_refresh = live;

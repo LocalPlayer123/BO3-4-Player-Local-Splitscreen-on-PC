@@ -109,6 +109,14 @@ local function console_handle_button_press(menu, controller, button, model)
 			Engine.SetModelValue(model, 0)
 		end
 	else
+		-- Offline lobbies only (PLAY OFFLINE: network mode 0 LOCAL / 1 LAN). In the
+		-- online menus (2 LIVE) an extra controller's press is dropped, as on stock
+		-- PC. Measured 2026-09-29: a controller plugged in at the online main menu
+		-- joined on its first A press, the game stalled ~25 s re-hosting the online
+		-- party and showed a second player. Players 3/4 are offline-only anyway.
+		if Engine.GetLobbyNetworkMode == nil or Engine.GetLobbyNetworkMode() == 2 then
+			return
+		end
 		if IsGameTypeDOA ~= nil and IsGameTypeDOA() and Engine.IsSplitscreen() then
 			menu:setOwner(controller)
 		end

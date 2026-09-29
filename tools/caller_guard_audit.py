@@ -76,24 +76,89 @@ def extent(rva):
     i = bisect.bisect_right(starts, body) - 1
     if i >= 0 and funcs[i][0] <= body < funcs[i][1]:
         return funcs[i]
-    return body, body + 0x200
+    return body, decoded_end(body)
+
+
+def decoded_end(start, limit=0x400):
+    """End of a function without .pdata (a leaf or a thunk like 0x027C1AB0):
+    decode until a ret/jmp with no branch target still pointing past it."""
+    from capstone import CS_ARCH_X86, CS_MODE_64, Cs
+    md = Cs(CS_ARCH_X86, CS_MODE_64)
+    furthest = start
+    for insn in md.disasm(bytes(img[start:start + limit]), start):
+        end = insn.address + insn.size
+        if insn.mnemonic.startswith("j") and insn.op_str.startswith("0x"):
+            t = int(insn.op_str, 16)
+            if start <= t < start + limit:
+                furthest = max(furthest, t)
+        if insn.mnemonic in ("ret", "jmp") and end > furthest:
+            return end
+    return start + limit
 
 def guarded(b, e):
-    above = below = 0
-    for p in range(b, e - 7):
+    """(range tests above, range tests below, call-byte tests) in [b, e).
+    Range test: lea reg,[rip+d] to image+0x20000000 / image base.
+    Call-byte test: cmp byte ptr [rax-5], 0xE8 / [rax-4|-7], 0xFF - the byte in
+    front of the return address must be a call (Dvar getter 0x02261DF2)."""
+    above = below = callbyte = 0
+    for p in range(b, e - 6):          # 7-byte lea ends at p + 7 <= e
         if img[p] in (0x48, 0x4C) and img[p + 1] == 0x8D and (img[p + 2] & 0xC7) == 0x05:
             t = p + 7 + struct.unpack_from("<i", img, p + 3)[0]
             if t == 0x20000000: above += 1
             elif t == 0: below += 1
-    return above, below
+        if img[p] == 0x80 and img[p + 1] == 0x78 and (img[p + 2], img[p + 3]) in ((0xFB, 0xE8), (0xFC, 0xFF), (0xF9, 0xFF)):
+            callbyte += 1
+    return above, below, callbyte
+
+
+def tail_targets(b, e):
+    """Functions the body jumps into (jmp rel32 out of [b, e)): a tail call
+    runs the target with THIS function's return address - the caller's."""
+    out = set()
+    for p in range(b, e - 4):          # E9 + rel32 ends at p + 5 <= e
+        if img[p] == 0xE9:
+            t = p + 5 + struct.unpack_from("<i", img, p + 1)[0]
+            if not b <= t < e and 0x1000 <= t < 0x02EFD600:
+                out.add(t)
+    return out
+
+SMALL = 0x80   # a wrapper this short that ends in a jmp hands on its caller's return address
+
+
+def tail_chain(b, e, depth=0):
+    """Guarded code reached by jmp from a SMALL function, following jmp chains
+    (0x027C1AB0 -> 0x02261D40 -> 0x02261DF2)."""
+    found = []
+    if e - b > SMALL or depth > 3:
+        return found
+    for t in sorted(tail_targets(b, e)):
+        tb, te = extent(t)
+        ta, tbl, tcb = guarded(tb, te)
+        if ta or tcb:
+            found.append("%08X(range %d, call-byte %d)" % (t, ta, tcb))
+        found += tail_chain(tb, te, depth + 1) if (ta == 0 and tcb == 0) else []
+        # a jmp into the middle of a chunk: scan the chunk from the target on
+        if not (ta or tcb) and te - tb <= SMALL:
+            continue
+    # jmp straight into code without its own .pdata entry: scan 0x200 bytes there
+    for t in sorted(tail_targets(b, e)):
+        la, lbl, lcb = guarded(t, t + 0x200)
+        if (la or lcb) and not any(s.startswith("%08X" % t) for s in found):
+            found.append("%08X+0x200(range %d, call-byte %d)" % (t, la, lcb))
+    return found
+
 
 rows = []
 for rva, (name, kind) in sorted(resolved.items()):
     b, e = extent(rva)
-    a, bl = guarded(b, e)
-    rows.append((rva, name, kind, b, e, a, bl))
+    a, bl, cb = guarded(b, e)
+    rows.append((rva, name, kind, b, e, a, bl, cb, tail_chain(b, e)))
 print("%d call/hook targets resolved from the component sources" % len(rows))
-flag = [r for r in rows if r[5]]
-print("%d contain a caller range test (lea -> image+0x20000000):" % len(flag))
-for rva, name, kind, b, e, a, bl in flag:
-    print("  %08X %-38s %-12s func %08X-%08X  above-tests %d  base-tests %d" % (rva, name[:38], kind, b, e, a, bl))
+flag = [r for r in rows if r[5] or r[7] or r[8]]
+print("%d contain a caller check, or jump from a small body into one:" % len(flag))
+for rva, name, kind, b, e, a, bl, cb, tails in flag:
+    print("  %08X %-38s %-12s func %08X-%08X  above %d  base %d  call-byte %d  tail %s"
+          % (rva, name[:38], kind, b, e, a, bl, cb, ", ".join(tails) or "-"))
+print("A hook whose stub calls invoke() on a flagged target, or a direct call of")
+print("one, can hang: compute the answer instead, or call from inside the image.")
+print("(Large functions jump into Arxan chunks everywhere; those are not followed.)")
