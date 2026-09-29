@@ -164,9 +164,6 @@ for 4 class menus, command buffers for clients 2/3.
 * Only game build 0x06531394 (ezz BOIII). Other builds: the component stands
   down; every RVA must be re-mapped. The CBServers client's build 0x06517980
   was supported up to 1.1.
-* ezz: guests 3/4 show "(2)"/"(3)" instead of "(3)"/"(4)" after the name
-  (EZZ_REQUIRED_CHANGES item 10); the 4th controller's first A press in the
-  lobby is sometimes ignored (item 11).
 * Client-script builtins that still reject local clients 2/3 (not seen in
   tests so far; each raises a script error for players 3/4 if a script calls
   it): `CScr_LUIDisable` (`0x004259CF`), `CScr_GetDStat` (`0x00A187C2`),

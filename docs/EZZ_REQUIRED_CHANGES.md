@@ -19,8 +19,8 @@ workaround") and what ezz could change instead ("Fix in ezz").
 | 7 | engine globals both name | notes for a merge |
 | 8 | checked, not a problem | - |
 | 9 | players 3/4 need PLAY OFFLINE | usage (engine rule, not ezz) |
-| 10 | guest names "(2)"/"(3)" | cosmetic, not changed |
-| 11 | observations | - |
+| 10 | guest names | fixed in the mod (2.2.2) |
+| 11 | observations | the ignored A press: fixed in the mod (2.2.3) |
 | 12 | ClientCommand hook hangs the server (every ezz user) | worked around, verified |
 | 13 | plugin loader: start point, `p_name`, unload at exit | worked around by the plugin |
 
@@ -276,21 +276,25 @@ it the mode is 1 (LAN) and players 3/4 join with A as on official BOIII.
 The mod's README for ezz must say: PLAY OFFLINE first, then ZOMBIES (or
 MULTIPLAYER), then the extra players press A.
 
-## 10. Guest names - cosmetic, not changed
+## 10. Guest names - fixed in the mod (2.2.2)
 
 ezz's LiveUser_UserGetName (live.cpp:19) names a guest `<Steam name>(<ci+1>)`.
 The mod gives controllers 2/3 an identity copied from controller 1 at boot,
-gamertag text included, and item 3's workaround returns that stored text. In
-the lobby players 3 and 4 showed as "(2)" and "(3)" instead of "(3)" and
-"(4)". Nothing breaks; only the displayed name is off. Mod-side fix (not done
-yet): fill the guests' gamertag through LiveUser_UserGetName (ezz's
-formatting) instead of copying it. Native fix: item 3.
+and item 3's workaround returns the stored gamertag text. Up to 2.2.1 the
+copy only overwrote one character with the controller digit, so players 3
+and 4 showed as "(2)" and "(3)". Since 2.2.2 the mod builds the whole
+gamertag (char[32] at userData+0x08) the way ezz formats guests: the donor's
+name without its "(n)" plus "(<ci+1>)" (`write_guest_gamertag`,
+src/component/splitscreen/01_core.inl). Native fix: item 3.
 
 ## 11. Observed, not explained yet
 
-* In both ezz runs the **first** A press of pad 3 (player 4) did nothing and
-  the second joined him (seats 0x7 -> 0xF). Not yet checked whether official
-  BOIII behaves the same; the join path is the mod's Lua + engine, not ezz.
+* ~~The first A press of player 4 did nothing~~ - **not ezz, fixed in the
+  mod (2.2.3)**. The stock LobbyAddLocalClient (uieditor/actions.lua) shows
+  the warning MENU_RESTRICTED_TO_LOCAL_GAMES once the third controller is
+  in; the dialog accepts any controller, so player 4's first A only closed
+  it. ui_scripts/zz_splitscreen drops that one message in offline lobbies
+  (wrapper around ShouldOpenMessageDialog).
 * ~~Multiplayer freezes under ezz~~ - **not ezz, a mod bug, fixed in 2.0**.
   The 4-player MP freeze ("Connection Interrupted", clock stuck) and a /GS
   crash during MP load had one cause: Con_ClearNotify (PC 0x01339210) was
