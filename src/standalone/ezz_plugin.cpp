@@ -2,23 +2,21 @@
 //
 // ezz loads every DLL in <game folder>\boiii\plugins\ (and
 // %LOCALAPPDATA%\boiii\plugins\) while it creates its components, before the
-// game is mapped (ezz src/client/component/plugins.cpp). It reads the name
-// from the export p_name - required: without it ezz logs a null string - and
-// calls post_load / post_unpack / pre_destroy if they exist. None of those is
-// used here.
+// game is mapped (ezz src/client/component/plugins.cpp). The export p_name is
+// required (without it ezz logs a null string); the optional post_load /
+// post_unpack / pre_destroy exports are not used.
 //
-// WHEN THE COMPONENT STARTS. ezz runs all components' post_unpack from the
-// stub it puts on the game's SetProcessDPIAware import, and that stub ends by
-// calling SetProcessDPIAware through boiii.exe's own import table (ezz
-// main.cpp set_process_dpi_aware_stub). Redirecting that import here starts
-// the component after every ezz component - ezz's own detours, which
-// splitscreen_ezz.hpp chains onto, exist by then - whatever order ezz gives
-// its components and plugins. The game calls SetProcessDPIAware first thing
-// in WinMain, before the Steam check (0x0231DEC3 vs 0x0231DF11).
+// Start time: ezz runs all components' post_unpack from its stub on the game's
+// SetProcessDPIAware import, and that stub ends by calling SetProcessDPIAware
+// through boiii.exe's own import table (ezz main.cpp). Redirecting that import
+// starts the component after every ezz component, whatever their order, so the
+// ezz detours that splitscreen_ezz.hpp chains onto already exist. The game
+// calls SetProcessDPIAware first thing in WinMain, before the Steam check
+// (0x0231DEC3 vs 0x0231DF11).
 //
 // runtime::start() does nothing outside the supported game build, so the DLL
-// is inert in any other process. It pins itself: ezz frees its plugins at
-// exit, while game threads may still run through the mod's hooks.
+// is inert in any other process. It pins itself: ezz frees its plugins at exit
+// while game threads may still run through the mod's hooks.
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>

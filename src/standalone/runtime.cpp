@@ -30,9 +30,7 @@
 #include "compat/release_policy.hpp"
 #include "runtime.hpp"
 
-// ---------------------------------------------------------------------------
-// game
-// ---------------------------------------------------------------------------
+// --- game -----------------------------------------------------------------
 
 namespace game
 {
@@ -69,18 +67,14 @@ namespace game
 	}
 }
 
-// ---------------------------------------------------------------------------
-// release_policy
-// ---------------------------------------------------------------------------
+// --- release_policy -------------------------------------------------------
 
 namespace release_policy
 {
 	DWORD get_environment_variable(const LPCSTR name, const LPSTR buffer, const DWORD size)
 	{
-		// The configuration every verified three-player round ran with
-		// (tools\launch_detached.ps1 -CgFrame): BO3_CG_FRAME=on, all other
-		// switches unset. Anything else - including the variables of the machine
-		// the mod is installed on - reads as not set.
+		// Fixed switches: BO3_CG_FRAME=on (the tested configuration), everything
+		// else reads as not set, including the real environment of the machine.
 		const auto answer = [&](const char* value) -> DWORD
 		{
 			const auto len = static_cast<DWORD>(std::strlen(value));
@@ -97,12 +91,12 @@ namespace release_policy
 		}
 
 #ifdef SS_DIAG
-		// DIAGNOSTIC BUILD ONLY: the trace path is built from LOCALAPPDATA.
+		// Diagnostic build only: the trace path is built from LOCALAPPDATA.
 		if (name && std::strcmp(name, "LOCALAPPDATA") == 0)
 		{
 			return ::GetEnvironmentVariableA(name, buffer, size);
 		}
-		// DIAGNOSTIC BUILD ONLY: bisecting switches baked in by build.ps1 -Skip
+		// Diagnostic build only: bisecting switches baked in by build.ps1 -Skip
 		// (/DSS_SKIP_<NAME>), for the component's BO3_SKIP_FIX / BO3_SUN4.
 		if (name && std::strcmp(name, "BO3_SKIP_FIX") == 0)
 		{
@@ -143,9 +137,8 @@ namespace release_policy
 	                   const DWORD disposition, const DWORD flags, const HANDLE templ)
 	{
 #ifdef SS_DIAG
-		// DIAGNOSTIC BUILD ONLY (release\build.ps1 -Diag): the component's own
-		// trace files (%LOCALAPPDATA%\boiii\splitscreen_*.txt) may be written,
-		// nothing else. Used to see which patches applied on a new game build.
+		// Diagnostic build only (release\build.ps1 -Diag): allows the component's
+		// trace files (%LOCALAPPDATA%\boiii\splitscreen_*.txt) and nothing else.
 		if (name && std::strstr(name, "\\boiii\\splitscreen_"))
 		{
 			wchar_t wide[MAX_PATH]{};
@@ -162,9 +155,7 @@ namespace release_policy
 	}
 }
 
-// ---------------------------------------------------------------------------
-// component registry
-// ---------------------------------------------------------------------------
+// --- component registry ---------------------------------------------------
 
 namespace component_loader
 {
@@ -216,9 +207,7 @@ namespace component_loader
 	}
 }
 
-// ---------------------------------------------------------------------------
-// utils::hook
-// ---------------------------------------------------------------------------
+// --- utils::hook ----------------------------------------------------------
 
 namespace utils::hook
 {
@@ -373,9 +362,7 @@ namespace utils::hook
 	}
 }
 
-// ---------------------------------------------------------------------------
-// scheduler
-// ---------------------------------------------------------------------------
+// --- scheduler ------------------------------------------------------------
 
 namespace scheduler
 {
@@ -495,9 +482,7 @@ namespace scheduler
 	}
 }
 
-// ---------------------------------------------------------------------------
-// start
-// ---------------------------------------------------------------------------
+// --- start ----------------------------------------------------------------
 
 namespace runtime
 {

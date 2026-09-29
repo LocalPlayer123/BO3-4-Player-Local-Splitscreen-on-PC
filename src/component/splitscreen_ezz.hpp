@@ -2,25 +2,21 @@
 
 // Players 3 and 4 behind ezz BOIII.
 //
-// ezz BOIII 3.0.0 replaces three engine functions with versions that know two
+// ezz BOIII 3.0.0 replaces three engine functions with versions sized for two
 // controllers (docs/EZZ_REQUIRED_CHANGES.md, items 2 and 3):
+//   LiveUser_GetXuid, LiveUser_UserGetXuid  2-entry XUID table: controllers 2/3
+//                                           get controller 0's XUID, so the
+//                                           lobby takes a guest for the host
+//   LiveUser_GetClientName                  reads the game's [2] user-data map,
+//                                           which the mod moved to [4]
+// Until ezz sizes these for four controllers, controllers 2/3 run the engine's
+// own code and 0/1 stay with ezz.
 //
-//   LiveUser_GetXuid, LiveUser_UserGetXuid   a 2-entry XUID table - controllers
-//                                            2/3 get controller 0's XUID, so the
-//                                            lobby takes a guest for the host
-//   LiveUser_GetClientName                   reads the game's [2] user-data map
-//                                            directly - the mod moved it to [4]
-//
-// Until ezz sizes those for four controllers, controllers 2 and 3 run the
-// engine's own code again (the code official BOIII runs) and 0/1 stay with ezz.
-//
-// The engine code is ezz's own MinHook trampoline: MinHook copies the
-// instructions its 5-byte jump replaces into a trampoline, followed by a jump
-// back into the function, and places the relay (the jump's target) directly
-// after it. A function is chained only if that trampoline holds exactly the
-// instructions the official build has at that point and jumps back to the
-// expected address; anything else leaves it alone. On official BOIII nothing
-// is hooked there and nothing is chained.
+// The engine code is ezz's MinHook trampoline (the replaced instructions plus a
+// jump back); MinHook places the relay, its jump's target, right after it. A
+// function is chained only if the trampoline holds exactly the official build's
+// instructions and jumps back to the expected address. On official BOIII
+// nothing is hooked there and nothing is chained.
 
 #include <cstdint>
 #include <cstring>
@@ -161,9 +157,9 @@ namespace splitscreen::ezz
 		}
 		done = true;
 
-		// Official build, first instructions of each function (0x06517980
-		// 0x01EBAF40 / 0x01EBB280 / 0x01EBAF10; PS4 0xC96930 / 0xC96980 /
-		// 0xC96EC0 for what they do).
+		// Expected trampolines: the official build's first instructions of each
+		// function (build 0x06517980: 0x01EBAF40 / 0x01EBB280 / 0x01EBAF10;
+		// PS4: 0xC96930 / 0xC96980 / 0xC96EC0).
 		{
 			// push rbx; sub rsp,20h | mov ebx,ecx; call LiveUser_IsSignedIn ...
 			std::vector<uint8_t> t = {0x40, 0x53, 0x48, 0x83, 0xEC, 0x20};
@@ -219,14 +215,13 @@ namespace splitscreen::ezz
 
 	// ------------------------------------------------------------ cgame pools
 	//
-	// ezz redirects five Hunk_UserAlloc calls to static pools of its own sized
-	// for two local clients (docs/EZZ_REQUIRED_CHANGES.md item 4). With 3-4
-	// local clients the engine writes past them - crash 2026-09-29 11:39,
-	// local client 0's entity at boiii.exe+0x12C00B0 overwritten with floats.
-	// Requests that fit ezz's pool still go to ezz (1-2 players: unchanged);
-	// larger requests, and entity pools for local clients 2/3, get memory of
-	// their own. ezz never frees engine memory (its free hooks only clear its
-	// own pools), so these buffers are kept and zeroed on every allocation.
+	// ezz redirects five Hunk_UserAlloc calls to static pools sized for two
+	// local clients (docs/EZZ_REQUIRED_CHANGES.md item 4). With 3-4 local
+	// clients the engine writes past them and overwrites local client 0's
+	// entities. Requests that fit ezz's pool still go to ezz (1-2 players
+	// unchanged); larger requests, and entity pools for local clients 2/3, get
+	// memory of their own. ezz never frees engine memory, so these buffers are
+	// kept and zeroed on every allocation.
 
 	namespace detail
 	{
@@ -281,9 +276,8 @@ namespace splitscreen::ezz
 		}
 
 		// CG_InitAndAllocCGEntsArray (0x0085B990) allocates one entity pool per
-		// local client in a loop whose index is rsi (xor esi,esi at +0x2B; the
-		// result goes to [base + rsi*8 + 0x4C98B60], then inc rsi / cmp rsi,rbx).
-		// A cave stores esi before the call, so the stub knows the client.
+		// local client in a loop indexed by rsi (xor esi,esi at +0x2B). A cave
+		// stores esi before the call, so the stub knows the client.
 		constexpr uint32_t entity_call_rva = 0x0085B9F5;
 		constexpr uint32_t entity_size_rva = 0x0085B9E7;
 		constexpr uint8_t entity_size_bytes[] = {0xBA, 0x00, 0x00, 0x3F, 0x00};   // mov edx,0x3F0000
@@ -417,18 +411,17 @@ namespace splitscreen::ezz
 	// ezz detours ClientCommand and calls the original from boiii.exe
 	// (client_command.cpp). ClientCommand opens with an Arxan caller check:
 	// bits 12..15 of the PEB address pick one of 16 variants, nine of which
-	// test the return address against the game image (above image+0x20000000,
-	// or below the image base). A caller outside the image sends the check
-	// into an endless two-state loop: the server thread spins, the client
-	// times out ("Connection Interrupted"). boiii.exe lies above the image, so
-	// 6 of 16 launches hang on the first client command that ezz passes on -
-	// with any number of players (hang 2026-09-29: selector 2, loop at
-	// 0x0193E400). docs/EZZ_REQUIRED_CHANGES.md item 12.
+	// test the return address against the game image (above image+0x20000000
+	// or below the image base). A caller outside the image sends the check into
+	// an endless two-state loop: the server thread spins and the client times
+	// out ("Connection Interrupted"). boiii.exe lies above the image, so 6 of 16
+	// launches hang on the first client command ezz passes on, with any number
+	// of players. docs/EZZ_REQUIRED_CHANGES.md item 12.
 	//
 	// Each range test ends in cmova/cmovb edx,r10d, which loads the failing
-	// state; a 4-byte nop keeps the passing one. The other seven variants
-	// check for a call instruction before the return address, which ezz's
-	// `call rax` passes.
+	// state; a 4-byte nop keeps the passing one. The other seven variants check
+	// for a call instruction before the return address, which ezz's `call rax`
+	// passes.
 	namespace detail
 	{
 		constexpr uint32_t client_command_rva = 0x0193DFC0;
