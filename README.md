@@ -2,8 +2,8 @@
 
 Up to **four local splitscreen players** in Call of Duty: Black Ops III on PC
 (the game itself allows two). Built as a component for the BOIII client -
-since 2.0 for **ezz BOIII** - and also shippable as a drop-in DLL next to
-`boiii.exe`.
+since 2.0 for **ezz BOIII** - and shipped as an ezz plugin
+(`boiii\plugins\bo3_local_splitscreen.dll`, since 2.1).
 
 Status: **beta**. 4-player Zombies and 4-player offline Multiplayer (bots too)
 work under ezz BOIII 3.0 (lobby, loadouts, 2x2 screens, HUD per pane,
@@ -71,16 +71,16 @@ src/ui_scripts/zz_table_insert/        table.insert tolerates nil (stock Zombies
                                        raises a full-screen UI error with 3+ players)
 src/ui_scripts/zz_mplan/               enables MULTIPLAYER in the offline menu (retail greys
                                        it out unless a mod is loaded; keeps the ownership check)
-src/standalone/                        the drop-in DLL build (XINPUT9_1_0.dll proxy)
+src/standalone/                        the ezz plugin build (bo3_local_splitscreen.dll)
   compat/                              stand-ins for the few BOIII headers the component uses
   runtime.cpp                          component registry, scheduler, hooks - no BOIII code
-  xinput_proxy.cpp, xinput9_1_0.def    XInput pass-through + start trigger
+  ezz_plugin.cpp, ezz_plugin.def       plugin entry (p_name) + start trigger
   test/smoke.cpp                       offline smoke test of the DLL
-build_standalone.cmd                   builds the drop-in DLL (MSVC + MinHook)
+build_standalone.cmd                   builds the plugin (MSVC + MinHook)
 docs/OPEN_PROBLEMS.md                  what is broken or unverified - start here
 docs/EZZ_REQUIRED_CHANGES.md           what ezz BOIII needs for native 4-player support
 docs/PLAN_EZZ_PORT.md                  the plan for moving the mod into ezz BOIII
-docs/PLAYER_README.txt                 the text players get with the drop-in zip
+docs/PLAYER_README.txt                 the text players get with the zip
 ```
 
 ---
@@ -95,21 +95,21 @@ docs/PLAYER_README.txt                 the text players get with the drop-in zip
    `post_unpack()`. It uses only `utils::hook`, `scheduler` (the `async` and
    `renderer` pipelines) and `game::` basics.
 3. **Switches** are read with `GetEnvironmentVariableA`. The verified
-   configuration is **`BO3_CG_FRAME=on`** (the drop-in build hard-wires exactly
+   configuration is **`BO3_CG_FRAME=on`** (the plugin build hard-wires exactly
    that). Either set it before the component runs or change the default in
    `splitscreen.cpp` (search for `"BO3_CG_FRAME"`). Other switches:
    * `BO3_SUN4=off` - go back to the shared sun-shadow slot for players 2-4
      (the separate sun shadows for all four views are on by default).
    * `BO3_SKIP_FIX=<names>` - disable individual relocations for bisecting.
 4. Ship the two `ui_scripts` folders wherever your client loads UI scripts
-   from (the drop-in package puts them in `<game folder>\boiii\ui_scripts\`).
-5. Built in, no proxy DLL is needed.
+   from (the plugin package puts them in `<game folder>\boiii\ui_scripts\`).
+5. Built in, no plugin DLL is needed.
 
 Define `SS_DIAG` to get the diagnostic trace
 (`%LOCALAPPDATA%\boiii\splitscreen_ui_trace.txt`) - extremely useful while
 working on it, never needed by players.
 
-## Option B: the drop-in DLL
+## Option B: the ezz plugin
 
 Needs Visual Studio 2022 (C++ build tools) and the MinHook source
 (https://github.com/TsudaKageyu/minhook).
@@ -119,15 +119,16 @@ set MINHOOK=<folder with the MinHook source>
 build_standalone.cmd            (or: build_standalone.cmd diag)
 ```
 
-Output `out\XINPUT9_1_0.dll`. Players put it next to ezz's `boiii.exe` together
-with `boiii\ui_scripts\zz_table_insert`, `zz_splitscreen` and `zz_mplan`. ezz
-BOIII loads it without any extra flag. (The CBServers client preloads the
-System32 copy of any game-folder DLL named like a Windows DLL unless started
-with `-allowproxydlls`.) Details for players: `docs/PLAYER_README.txt`.
+Output `out\bo3_local_splitscreen.dll`. Players put it in
+`<game folder>\boiii\plugins\` together with `boiii\ui_scripts\zz_table_insert`,
+`zz_splitscreen` and `zz_mplan`. ezz loads every DLL in that folder and needs
+the export `p_name`. Details for players: `docs/PLAYER_README.txt`.
 
-The DLL starts right after BOIII has run its own components' `post_unpack`
-(it hooks `boiii.exe`'s `SetProcessDPIAware` import, which BOIII calls at that
-point), checks the game build, and otherwise stays a pure XInput pass-through.
+The plugin starts right after ezz has run all its components' `post_unpack`
+(it redirects `boiii.exe`'s `SetProcessDPIAware` import, which ezz calls at
+that point), so ezz's own detours exist whatever order ezz loads plugins in.
+It checks the game build and otherwise does nothing, and pins itself (ezz
+frees plugins at exit while game threads may still run through its hooks).
 
 ---
 

@@ -7,8 +7,8 @@
 //   game                base address, client check, Com_IsRunningUILevel
 //   release_policy      fixed switches, no file access
 //
-// runtime::start() is called by the loader (xinput_proxy.cpp) at the moment
-// BOIII runs its own components' post_unpack - see that file.
+// runtime::start() is called by the loader (ezz_plugin.cpp) right after ezz
+// has run its own components' post_unpack - see that file.
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>

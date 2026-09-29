@@ -295,8 +295,42 @@ nop, all or none, after checking the bytes:
 0x0193E064, 0x0193E3F6, 0x0193E72E, 0x0193E8DC, 0x0193EA70, 0x0193EFB7,
 0x0193F38C, 0x0193F531, 0x0193F8F1. The call-instruction variants stay active.
 
+**Same trap, other functions.** Not every guard is PEB-selected:
+`Dvar_SetInt` (0x0226B3A0 -> body 0x0226B3B0) always compares its return
+address with image base and image+0x20000000 and xors its state-machine
+start when the caller is outside; the machine mixes in the PEB, so a call
+from a DLL hangs in some launches while holding the dvar lock (mod bug,
+fixed in 2.1 - the mod no longer calls it). Before calling ANY game function
+from boiii.exe or a plugin, check it with `tools/caller_guard_audit.py`'s
+method (a `lea reg,[rip+d]` to image+0x20000000 in its own body).
+
 **Native fix (ezz):** the same nine nops next to ezz's other Arxan patches
 (`arxan.cpp`), or call the original from a small stub inside the game image
 so the return address lies in the image. Any future ezz detour that calls
 the original of a guarded function has the same problem - the tool above
 checks a function in seconds.
+
+## 13. The mod as an ezz plugin (2.1) - small asks
+
+Since 2.1 the mod ships as `boiii\plugins\bo3_local_splitscreen.dll`
+(`component/plugins.cpp` loads it). Verified 2026-09-29: plugins.log
+"Loaded: BO3 Local Splitscreen", host-chain mask 0x1F7 (every bridge of
+items 2-4 and 12 in place).
+
+* **Start point.** Plugins get `post_unpack` in component order (priority,
+  then registration order), so a plugin cannot rely on ezz's own detours
+  (auth.cpp, live.cpp, client_patches.cpp) existing yet. The plugin
+  therefore redirects boiii.exe's `SetProcessDPIAware` import and starts
+  when `set_process_dpi_aware_stub` (main.cpp) calls it - after ALL
+  components. Ask: an export ezz calls after every component's
+  `post_unpack` (e.g. `post_start`), so plugins need no import redirect.
+* **p_name is effectively required.** `lib.invoke<const char*>("p_name")`
+  returns nullptr for a plugin without it, and `std::string(plugin_name)`
+  in the log line then reads a null pointer. Ask: fall back to the file
+  name when the export is missing (the code already has `fallback_name`
+  for the exception path).
+* **Unload at exit.** The component destructor frees every plugin while
+  game threads may still run through a plugin's hooks; the mod pins itself.
+  Ask: do not `FreeLibrary` plugins, or call `pre_destroy` and wait.
+* **Updater.** Please make sure the updater never removes files from
+  `<game>\boiii\plugins\` (not checked in ezz's updater code yet).

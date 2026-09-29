@@ -84,6 +84,28 @@ tail - which is the 32 KB print queue. Its reader then copied 0x5F72 bytes
 onto a stack buffer (crash) or stalled (freeze). Called only from a
 server-command handler, so Zombies never hit it. 8 con-relative sites added.
 
+### B10. Freeze when a controller is plugged in (2.1)
+The component set `splitscreen_playerCount` through `Dvar_SetInt`
+(`0x0226B3A0`) from its own thread and module. Dvar_SetInt checks its
+caller's return address against the image (`[rsp+0xA8]` vs image base and
+image+0x20000000) and xors the start of its Arxan state machine, which also
+mixes in the PEB: from the DLL it looped forever in some launches while
+holding the dvar lock, and the main thread blocked in
+`Com_Frame_Try_Block_Function`. The value is now written directly.
+`tools/`-side audit: no other function the component calls or hooks has
+such a check (ClientCommand is the ezz case, B5).
+
+### B9. MP lobby crash while a third player joined (2.1)
+The 217 client-script local-client checks were widened to a fixed 3. In the
+lobby `cl_maxLocalClients` is 2 and the per-client cgame blocks exist for
+two, so `CScr_SetShowcaseWeaponPaintshopXUID` (`0x00F01740`) got a NULL cg
+for local client 2 and wrote through it (90 of the 217 builtins take cg the
+same way). The bound now follows `cl_maxLocalClients` (min(3, count - 1)),
+set right after `AllocatePerLocalClientMemory` / `CL_FreePerLocalClientMemory`
+- the only writers - on the main thread. A 5 ms background loop was tried
+first and hung the 4-player load: the async and renderer pipelines stop
+during a map load.
+
 ### B8. Screen filters missing for players 3/4 (2.0)
 `CScr_SetFilterPassEnabled` (`0x0039DB30`) rejected local clients above 1
 (`cmp r9d, edi` against a register holding 1, own error line "called with an

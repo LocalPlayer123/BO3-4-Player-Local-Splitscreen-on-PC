@@ -1,0 +1,3 @@
+LIBRARY bo3_local_splitscreen
+EXPORTS
+	p_name = plugin_name

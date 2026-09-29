@@ -2337,9 +2337,16 @@ namespace splitscreen
 			{
 				return false;
 			}
-			const auto set = reinterpret_cast<void (*)(void*, int)>(base() + dvar_set_int_rva);
-			set(reinterpret_cast<void*>(dvar), static_cast<int>(value));
-			return true;
+			// Written like hold_splitscreen_player_count, NOT through Dvar_SetInt
+			// (0x0226B3A0): its entry checks the caller's return address against
+			// image .. image+0x20000000 and, called from this DLL, loops forever in
+			// its Arxan state machine while holding the dvar lock - the main thread
+			// then blocks in Com_Frame_Try_Block_Function. User freeze 2026-09-29
+			// 17:47 (2.0, controller plugged in at the main menu, dump
+			// data/user_freeze_20260929). The start state mixes in the PEB, so not
+			// every launch hangs.
+			auto* current = reinterpret_cast<uint32_t*>(dvar + dvar_current_offset);
+			return readable(current, sizeof(uint32_t)) && write_bytes(current, &value, sizeof(value));
 		}
 
 		uint32_t last_active_refresh = 0;
@@ -10623,6 +10630,22 @@ namespace splitscreen
 		};
 		bool csc_lc_widened = false;
 
+		// THE BOUND FOLLOWS cl_maxLocalClients (2026-09-29). A fixed 3 let local
+		// clients 2/3 into these builtins in the LOBBY, where cl_maxLocalClients
+		// is 2 and cgArray holds two clients: 90 of the 217 then take their cg
+		// through `lc < cl_maxLocalClients ? cg : NULL` and use it.
+		// CScr_SetShowcaseWeaponPaintshopXUID (0x00F01740, check 0x00F0175C) wrote
+		// through that NULL - crash 17:13, MP lobby, rdi = lc 2, cl_max 2
+		// (data/ezz_crash_20260929_1713). sync_csc_lc_bound() applies
+		// min(3, cl_max - 1): the stock 1 in the lobby (the stock script error
+		// for lc 2/3), 3 in a 4-player match - the console's bound (PS4
+		// CScr_GetLocalClientNum: lc < 4). It runs right after the only two
+		// writers of cl_maxLocalClients (install_lc_bound_hooks), on the main
+		// thread that also runs the client scripts. A 5 ms async loop was
+		// tried first and hung the 4-player load: the async and renderer
+		// pipelines stop during a map load, the bound stayed 1, and the first
+		// client-script error for lc 2 looped Scr_ErrorInternal forever
+		// (2026-09-29 17:33, the 09-26 hang family).
 		void widen_csc_lc_checks()
 		{
 			if (csc_lc_widened)
@@ -10643,21 +10666,11 @@ namespace splitscreen
 					return;
 				}
 			}
-			// PLAYER 4 (2026-09-27): 0x03 = local clients 0..3, the console's own bound.
-			// Rule 4 for slot 3: tools/audit_csc_slot3.py on a live code dump - the only
-			// [2] arrays still in place with a referenced slot 3 are clientUIActives
-			// +4 / +0x10 (the owned head of slot 3) and a jump-table false positive.
-			const uint8_t three_clients = 0x03;
-			for (const auto rva : csc_lc_check_imms)
-			{
-				write_bytes(reinterpret_cast<uint8_t*>(b + rva), &three_clients, 1);
-			}
+			// Rule 4 for slot 3 (2026-09-27): tools/audit_csc_slot3.py on a live code
+			// dump - the only [2] arrays still in place with a referenced slot 3 are
+			// clientUIActives +4 / +0x10 (the owned head of slot 3) and a jump-table
+			// false positive. The bytes stay stock here; sync_csc_lc_bound widens.
 			csc_lc_widened = true;
-			trace_line l;
-			l.str("csc lc bound: ");
-			l.dec(std::size(csc_lc_check_imms));
-			l.str(" client-script local-client checks widened 1 -> 3");
-			trace_write(l);
 		}
 
 		// CScr_SetFilterPassEnabled (0x0039DB30) is not in the table above: it
@@ -10665,20 +10678,111 @@ namespace splitscreen
 		// script instance) and prints its own "called with an invalid local
 		// client" line, so players 3/4 got no screen filters and the console
 		// filled with that line. PS4 0x14DEC0 accepts 0..4 and then only touches
-		// the client's cg_t (cgArray, 4 slots, behind its own cl_maxLocalClients
-		// check). `cmp r9d, edi` -> `cmp eax, 3`: eax is the same Scr_GetInt
-		// result r9 was just sign-extended from, and ja still rejects negatives.
+		// the client's cg_t (behind its own cl_maxLocalClients check, NULL past
+		// it - hence the same sync as the table). `cmp r9d, edi` -> `cmp eax, 1`:
+		// eax is the same Scr_GetInt result r9 was sign-extended from, ja still
+		// rejects negatives; sync_csc_lc_bound owns the immediate from then on.
+		constexpr uint32_t filter_pass_check_rva = 0x0039DB48;   // movsxd r9,eax ; cmp r9d,edi ; ja
+		bool filter_pass_owned = false;
+
 		void widen_filter_pass_lc_check()
 		{
-			constexpr uint32_t rva = 0x0039DB48;   // movsxd r9,eax ; cmp r9d,edi ; ja
 			static constexpr uint8_t stock[] = {0x4C, 0x63, 0xC8, 0x44, 0x3B, 0xCF, 0x0F, 0x87};
-			static constexpr uint8_t cmp_eax_3[] = {0x83, 0xF8, 0x03};
-			auto* at = reinterpret_cast<uint8_t*>(base() + rva);
-			const bool ok = readable(at, sizeof(stock)) && std::memcmp(at, stock, sizeof(stock)) == 0
-				&& write_bytes(at + 3, cmp_eax_3, sizeof(cmp_eax_3));
+			static constexpr uint8_t cmp_eax_1[] = {0x83, 0xF8, 0x01};
+			auto* at = reinterpret_cast<uint8_t*>(base() + filter_pass_check_rva);
+			filter_pass_owned = readable(at, sizeof(stock)) && std::memcmp(at, stock, sizeof(stock)) == 0
+				&& write_bytes(at + 3, cmp_eax_1, sizeof(cmp_eax_1));
 			trace_line l;
-			l.str(ok ? "SetFilterPassEnabled: local-client bound 1 -> 3"
-			         : "SetFilterPassEnabled: bytes differ - not widened");
+			l.str(filter_pass_owned ? "SetFilterPassEnabled: local-client bound follows cl_maxLocalClients"
+			                        : "SetFilterPassEnabled: bytes differ - not widened");
+			trace_write(l);
+		}
+
+		uint8_t csc_lc_bound_applied = 1;
+
+		void sync_csc_lc_bound()
+		{
+			if (!csc_lc_widened)
+			{
+				return;
+			}
+			const auto b = base();
+			const auto max_local = *reinterpret_cast<const volatile uint32_t*>(b + cl_max_local_clients_rva);
+			const uint8_t bound = max_local >= 4 ? 3 : max_local == 3 ? 2 : 1;
+			if (bound == csc_lc_bound_applied)
+			{
+				return;
+			}
+			for (const auto rva : csc_lc_check_imms)
+			{
+				write_bytes(reinterpret_cast<uint8_t*>(b + rva), &bound, 1);
+			}
+			if (filter_pass_owned)
+			{
+				write_bytes(reinterpret_cast<uint8_t*>(b + filter_pass_check_rva + 5), &bound, 1);
+			}
+			trace_line l;
+			l.str("csc lc bound: ");
+			l.dec(csc_lc_bound_applied);
+			l.str(" -> ");
+			l.dec(bound);
+			l.str(" (cl_maxLocalClients ");
+			l.dec(max_local);
+			l.str(")");
+			trace_write(l);
+			csc_lc_bound_applied = bound;
+		}
+
+		// AllocatePerLocalClientMemory (0x0135D330) stores the new
+		// cl_maxLocalClients as its last act (0x0135D4A9, PS4 0x416B93 in the
+		// caller), CL_FreePerLocalClientMemory (0x0135DC20) zeroes it
+		// (0x0135DC8D); no other code writes it. Neither has an Arxan caller
+		// guard (no PEB select in either body) and ezz hooks neither, so the
+		// originals can be called from this module. Return values are passed
+		// through untouched.
+		utils::hook::detour alloc_per_lc_hook;
+		utils::hook::detour free_per_lc_hook;
+
+		uint64_t alloc_per_lc_stub(const int a, const int b, const int c)
+		{
+			const auto r = alloc_per_lc_hook.invoke<uint64_t>(a, b, c);
+			sync_csc_lc_bound();
+			return r;
+		}
+
+		uint64_t free_per_lc_stub(const bool a)
+		{
+			const auto r = free_per_lc_hook.invoke<uint64_t>(a);
+			sync_csc_lc_bound();
+			return r;
+		}
+
+		void install_lc_bound_hooks()
+		{
+			if (!csc_lc_widened)
+			{
+				return;
+			}
+			// First instructions: mov [rsp+8],rbx / push rbx; sub rsp,20h
+			static constexpr uint8_t alloc_head[] = {0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x6C, 0x24, 0x10};
+			static constexpr uint8_t free_head[] = {0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0xE8};
+			const auto b = base();
+			if (!readable(reinterpret_cast<const void*>(b + 0x0135D330), sizeof(alloc_head))
+				|| std::memcmp(reinterpret_cast<const void*>(b + 0x0135D330), alloc_head, sizeof(alloc_head)) != 0
+				|| !readable(reinterpret_cast<const void*>(b + 0x0135DC20), sizeof(free_head))
+				|| std::memcmp(reinterpret_cast<const void*>(b + 0x0135DC20), free_head, sizeof(free_head)) != 0)
+			{
+				csc_lc_widened = false;   // no trigger - the bound stays stock
+				trace_line l;
+				l.str("csc lc bound: allocator prologues differ - not widened");
+				trace_write(l);
+				return;
+			}
+			alloc_per_lc_hook.create(b + 0x0135D330, reinterpret_cast<void*>(&alloc_per_lc_stub));
+			free_per_lc_hook.create(b + 0x0135DC20, reinterpret_cast<void*>(&free_per_lc_stub));
+			sync_csc_lc_bound();
+			trace_line l;
+			l.str("csc lc bound: follows cl_maxLocalClients (allocator hooks)");
 			trace_write(l);
 		}
 
@@ -17241,6 +17345,7 @@ namespace splitscreen
 			install_guest_copy();
 			widen_csc_lc_checks();
 			widen_filter_pass_lc_check();
+			install_lc_bound_hooks();
 			gate_lensflares_for_extra_clients();
 			// Before the clamp: it bounds the slot by the slices this creates.
 			// ON by default since 2026-09-28 20:39 (verified: 10 min 4-player MP with

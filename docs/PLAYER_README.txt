@@ -1,11 +1,26 @@
-BO3 Local Splitscreen 2.0  -  build {VERSION}
+BO3 Local Splitscreen 2.1  -  build {VERSION}
 ==============================================
 
 Up to FOUR local split-screen players for Call of Duty: Black Ops III on PC -
-Zombies and Multiplayer (offline custom games, bots work too). Works with the
-ezz BOIII client. Local (offline) play only.
+Zombies and Multiplayer (offline custom games, bots work too). An ezz BOIII
+plugin. Local (offline) play only.
 
 This is a BETA. Please report what works and what does not.
+
+
+NEW IN 2.1
+----------
+* The mod is now an ezz BOIII plugin: it lives in boiii\plugins\ instead of
+  a XINPUT9_1_0.dll next to boiii.exe, so it no longer clashes with other
+  mods that ship an XINPUT9_1_0.dll.
+* Fixed: the game could freeze when a controller was plugged in while the
+  game was running (for example at the main menu).
+* Fixed: a rare crash in the Multiplayer lobby while a third player joined
+  (it depended on the order in which the controllers joined).
+
+Updating from 2.0: DELETE XINPUT9_1_0.dll from your Black Ops III folder,
+then extract this zip. If the old file stays, it starts first and the
+plugin stands aside - you would keep running 2.0.
 
 
 NEW IN 2.0 (compared with 1.0)
@@ -25,9 +40,9 @@ NEW IN 2.0 (compared with 1.0)
   ("Connection Interrupted"): a check inside the game clashes with ezz's
   own command handling, and the mod switches that check off.
 
-Coming from 1.0: switch to ezz BOIII, extract this zip over the old files
-and change the Steam launch option as shown under START (-allowproxydlls
-is not needed with ezz BOIII).
+Coming from 1.0: switch to ezz BOIII, delete XINPUT9_1_0.dll, extract this
+zip over the old files and change the Steam launch option as shown under
+START (-allowproxydlls is not needed with ezz BOIII).
 
 
 REQUIREMENTS
@@ -48,12 +63,14 @@ ezz's boiii.exe. That is all.
 
 The zip adds only these files:
 
-    XINPUT9_1_0.dll                       (next to boiii.exe)
+    boiii\plugins\bo3_local_splitscreen.dll   (the mod; ezz loads it)
     boiii\ui_scripts\zz_table_insert\
     boiii\ui_scripts\zz_splitscreen\
     boiii\ui_scripts\zz_mplan\            (MULTIPLAYER in PLAY OFFLINE)
 
-No game files are replaced by this mod.
+No game files are replaced by this mod. ezz BOIII lists the plugins it
+loaded in boiii_players\plugins.log inside your Black Ops III folder
+("Loaded: BO3 Local Splitscreen").
 
 
 START
@@ -90,7 +107,8 @@ never changed.
 
 UNINSTALL
 ---------
-Delete XINPUT9_1_0.dll and the three folders listed under INSTALL.
+Delete boiii\plugins\bo3_local_splitscreen.dll and the three ui_scripts
+folders listed under INSTALL.
 
 
 KNOWN ISSUES
@@ -113,8 +131,7 @@ KNOWN ISSUES
 * Other maps than the tested ones (Der Eisendrache, Shadows of Evil and
   The Giant in Zombies; Safeguard and Splash in Multiplayer) should work
   but have not been tested yet - reports welcome.
-* If another mod also ships an XINPUT9_1_0.dll, only one of the two can be
-  installed.
+* Starting ezz BOIII with -noplugins also switches this mod off.
 * If the game or ezz BOIII changes to a version this mod does not know, the
   mod switches itself off and the game runs normally.
 
