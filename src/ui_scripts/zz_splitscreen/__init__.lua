@@ -12,7 +12,7 @@
 --     (Lobby.lua), wired through CoDMenu's button-model subscriptions for
 --     controllers 0..GetMaxLocalControllers()-1.
 --   * Offline room: Lobby_SetMaxLocalPlayers(4) capped by GetMaxLocalControllers.
--- The component sets GetMaxControllerCount / GetMaxLocalControllers to 3 (the
+-- The component sets GetMaxControllerCount / GetMaxLocalControllers to 4 (the
 -- controllers that have seats; PS4 4). This script takes the console branch of
 -- CoD.Menu.HandleButtonPress on PC as well - the stock body, unchanged otherwise.
 --
@@ -63,6 +63,7 @@ end
 local wrapped_toggle = nil
 local wrapped_add = nil
 local wrapped_handle_press = nil
+local wrapped_should_open = nil
 
 -- Lobby.lua's PostLoadFunc runs `if CoD.isPC then f0_local0(menu) end`, and the
 -- PC f0_local0 registers `unused_gamepad_button -> return true` on the Lobby
@@ -133,6 +134,38 @@ local function console_handle_button_press(menu, controller, button, model)
 	end
 end
 
+-- The stock LobbyAddLocalClient warns once the third controller is in
+-- (actions.lua: GetUsedControllerCount() == 3 -> UI_ShowWarningMessageDialog
+-- "MENU_RESTRICTED_TO_LOCAL_GAMES", "no networked games with 3 or more
+-- controllers"). The dialog sets anyControllerAllowed, so player 4's first A
+-- only closed it (measured 2026-09-29: controller 3's first press never
+-- reached SigninLocalClient, the second joined). Offline, where 3-4 players
+-- exist, the warning says nothing new: it is dropped where menus decide to
+-- open a pending message (CoDMenu.lua -> ShouldOpenMessageDialog), and the
+-- pending count is reset so the lobby's menu change does not reopen it.
+-- (LuaUtils is a read-only table whose fields pairs() does not list, so the
+-- warning call itself cannot be wrapped.)
+local RESTRICTED_WARNING = "MENU_RESTRICTED_TO_LOCAL_GAMES"
+
+local function drop_offline_restricted_warning()
+	if Engine.GetLobbyNetworkMode == nil or Engine.GetLobbyNetworkMode() == 2 then
+		return false
+	end
+	local dialog = Engine.GetModel(Engine.GetGlobalModel(), "messageDialog")
+	if dialog == nil then
+		return false
+	end
+	local pending = Engine.GetModel(dialog, "messagePending")
+	local message = Engine.GetModel(dialog, "message")
+	if pending == nil or message == nil or (Engine.GetModelValue(pending) or 0) <= 0
+		or Engine.GetModelValue(message) ~= RESTRICTED_WARNING then
+		return false
+	end
+	log("dropped " .. RESTRICTED_WARNING .. " (offline)")
+	Engine.SetModelValue(pending, 0)
+	return true
+end
+
 local function room_left()
 	if Dvar.lobby_maxLocalPlayers == nil then
 		return false
@@ -185,6 +218,17 @@ local function install()
 			end
 		end
 		LobbySplitscreenToggle = wrapped_toggle
+	end
+
+	if ShouldOpenMessageDialog ~= nil and ShouldOpenMessageDialog ~= wrapped_should_open then
+		local stock_should_open = ShouldOpenMessageDialog
+		wrapped_should_open = function(menu, controller)
+			if drop_offline_restricted_warning() then
+				return false
+			end
+			return stock_should_open(menu, controller)
+		end
+		ShouldOpenMessageDialog = wrapped_should_open
 	end
 
 	if LobbyAddLocalClient ~= nil and LobbyAddLocalClient ~= wrapped_add then

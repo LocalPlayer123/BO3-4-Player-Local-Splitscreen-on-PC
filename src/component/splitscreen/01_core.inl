@@ -615,7 +615,6 @@
 			std::memcpy(reinterpret_cast<void*>(dst + userdata_gamertag), out, sizeof(out));
 		}
 
-
 		// The copy cannot happen at post_unpack, where element 1 is still zeroed.
 		// The table pointers are written at post_unpack; the guest records are
 		// filled once element 1 is signed in.
