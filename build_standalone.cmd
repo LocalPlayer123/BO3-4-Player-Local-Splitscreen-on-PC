@@ -26,5 +26,5 @@ link /nologo /DLL /LTCG /OPT:REF /OPT:ICF /DEBUG:NONE /Brepro /MANIFEST:NO /MACH
 
 echo.
 echo Built out\XINPUT9_1_0.dll
-echo Ship it next to boiii.exe together with src\ui_scripts\zz_table_insert and
-echo src\ui_scripts\zz_splitscreen (as boiii\ui_scripts\...), see docs\PLAYER_README.txt.
+echo Ship it next to boiii.exe together with src\ui_scripts\zz_table_insert,
+echo zz_splitscreen and zz_mplan (as boiii\ui_scripts\...), see docs\PLAYER_README.txt.

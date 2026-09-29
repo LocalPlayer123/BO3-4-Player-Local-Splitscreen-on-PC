@@ -1,13 +1,19 @@
 # BO3 4-Player Local Splitscreen on PC
 
 Up to **four local splitscreen players** in Call of Duty: Black Ops III on PC
-(the game itself allows two). Built as a component for the BOIII client and
-also shippable as a drop-in DLL next to `boiii.exe`.
+(the game itself allows two). Built as a component for the BOIII client -
+since 2.0 for **ezz BOIII** - and also shippable as a drop-in DLL next to
+`boiii.exe`.
 
-Status: **beta**. 4-player Zombies works (lobby, loadouts, 2x2 screens, HUD per
-pane, back-to-back rounds). 4-player offline Multiplayer works in development
-builds. See [OPEN_PROBLEMS.md](docs/OPEN_PROBLEMS.md) for everything that is
-not solved yet - please read it before changing things.
+Status: **beta**. 4-player Zombies and 4-player offline Multiplayer (bots too)
+work under ezz BOIII 3.0 (lobby, loadouts, 2x2 screens, HUD per pane,
+back-to-back rounds). See [OPEN_PROBLEMS.md](docs/OPEN_PROBLEMS.md) for
+everything that is not solved yet - please read it before changing things.
+
+**ezz BOIII developers:** [EZZ_REQUIRED_CHANGES.md](docs/EZZ_REQUIRED_CHANGES.md)
+lists every change ezz needs to support four local players natively, each with
+the ezz source line and the game address. Item 12 is an ezz bug that hits
+every ezz player, with or without this mod.
 
 **This code is public domain ([The Unlicense](LICENSE)).** Take it, change it,
 merge it into your client, ship it under your own name. No credit needed.
@@ -30,6 +36,9 @@ console again, at runtime, without touching any file on disk:
    array usually lies on a foreign global; widening first only moves the crash).
 3. **Caves** for the few places where the PC made a different, 2-player-only
    decision (pane geometry, sign-in of controllers 2/3, sun-shadow slots, ...).
+   `splitscreen_ezz.hpp` bridges the places where ezz BOIII itself is sized
+   for two players (XUID table, name map, static cgame pools) and works
+   around ezz's ClientCommand hook (see EZZ_REQUIRED_CHANGES.md).
 4. **Lua** (`ui_scripts`) for the lobby side: console-style join with A / leave
    with B, and a table fix the stock scripts need with more than two players.
 
@@ -40,9 +49,11 @@ almost every site names the PS4 function it was checked against and what was
 measured.
 
 **Game build:** everything targets `BlackOps3.exe` with PE checksum
-**0x06517980** (the build BOIII installs). On any other build the component
-stands down and the game runs unmodified. A new game build needs every RVA
-re-mapped (they are all in `splitscreen.cpp` / `splitscreen_reloc.hpp`).
+**0x06531394** (the build ezz BOIII 3.0 installs). On any other build the
+component stands down and the game runs unmodified. A new game build needs
+every RVA re-mapped (they are all in `splitscreen.cpp` /
+`splitscreen_reloc.hpp` / `splitscreen_ezz.hpp`). Versions up to 1.1 targeted
+0x06517980, the build the CBServers BOIII client runs.
 
 ---
 
@@ -52,13 +63,14 @@ re-mapped (they are all in `splitscreen.cpp` / `splitscreen_reloc.hpp`).
 src/component/splitscreen.cpp          the component (all engine patches)
 src/component/splitscreen_reloc.hpp    generated reference tables for the relocations
 src/component/splitscreen_signin.hpp   sign-in helpers
+src/component/splitscreen_ezz.hpp      ezz BOIII bridges (see docs/EZZ_REQUIRED_CHANGES.md)
 src/ui_scripts/zz_splitscreen/         lobby: console join with A / leave with B (the stock
                                        console Lua branch, switched on for PC), fixes the
                                        PC-only Activate/Deactivate Splitscreen button
 src/ui_scripts/zz_table_insert/        table.insert tolerates nil (stock Zombies HUD code
                                        raises a full-screen UI error with 3+ players)
-src/ui_scripts_optional/zz_mplan/      enables MULTIPLAYER in the offline menu (not in the
-                                       player package yet, see OPEN_PROBLEMS.md #8)
+src/ui_scripts/zz_mplan/               enables MULTIPLAYER in the offline menu (retail greys
+                                       it out unless a mod is loaded; keeps the ownership check)
 src/standalone/                        the drop-in DLL build (XINPUT9_1_0.dll proxy)
   compat/                              stand-ins for the few BOIII headers the component uses
   runtime.cpp                          component registry, scheduler, hooks - no BOIII code
@@ -66,14 +78,19 @@ src/standalone/                        the drop-in DLL build (XINPUT9_1_0.dll pr
   test/smoke.cpp                       offline smoke test of the DLL
 build_standalone.cmd                   builds the drop-in DLL (MSVC + MinHook)
 docs/OPEN_PROBLEMS.md                  what is broken or unverified - start here
+docs/EZZ_REQUIRED_CHANGES.md           what ezz BOIII needs for native 4-player support
+docs/PLAN_EZZ_PORT.md                  the plan for moving the mod into ezz BOIII
 docs/PLAYER_README.txt                 the text players get with the drop-in zip
 ```
 
 ---
 
-## Option A: build it into BOIII (recommended)
+## Option A: build it into the client (recommended)
 
-1. Copy `src/component/*` into the client's `src/client/component/`.
+1. Copy `src/component/*` into the client's `src/client/component/`. For a
+   native ezz integration, EZZ_REQUIRED_CHANGES.md says which parts of
+   `splitscreen_ezz.hpp` become unnecessary once ezz sizes its own tables
+   for four.
 2. The component registers itself with `REGISTER_COMPONENT` and does its work in
    `post_unpack()`. It uses only `utils::hook`, `scheduler` (the `async` and
    `renderer` pipelines) and `game::` basics.
@@ -81,12 +98,12 @@ docs/PLAYER_README.txt                 the text players get with the drop-in zip
    configuration is **`BO3_CG_FRAME=on`** (the drop-in build hard-wires exactly
    that). Either set it before the component runs or change the default in
    `splitscreen.cpp` (search for `"BO3_CG_FRAME"`). Other switches:
-   * `BO3_SUN4=on` - separate sun shadows for all four views (experimental,
-     see OPEN_PROBLEMS.md).
+   * `BO3_SUN4=off` - go back to the shared sun-shadow slot for players 2-4
+     (the separate sun shadows for all four views are on by default).
    * `BO3_SKIP_FIX=<names>` - disable individual relocations for bisecting.
 4. Ship the two `ui_scripts` folders wherever your client loads UI scripts
    from (the drop-in package puts them in `<game folder>\boiii\ui_scripts\`).
-5. Built in, no proxy DLL and no `-allowproxydlls` flag are needed.
+5. Built in, no proxy DLL is needed.
 
 Define `SS_DIAG` to get the diagnostic trace
 (`%LOCALAPPDATA%\boiii\splitscreen_ui_trace.txt`) - extremely useful while
@@ -102,11 +119,11 @@ set MINHOOK=<folder with the MinHook source>
 build_standalone.cmd            (or: build_standalone.cmd diag)
 ```
 
-Output `out\XINPUT9_1_0.dll`. Players put it next to `boiii.exe` together with
-`boiii\ui_scripts\zz_table_insert` and `boiii\ui_scripts\zz_splitscreen`, and
-start BOIII with `-allowproxydlls` (recent BOIII builds preload the System32
-copy of any game-folder DLL named like a Windows DLL unless started with that
-flag). Details for players: `docs/PLAYER_README.txt`.
+Output `out\XINPUT9_1_0.dll`. Players put it next to ezz's `boiii.exe` together
+with `boiii\ui_scripts\zz_table_insert`, `zz_splitscreen` and `zz_mplan`. ezz
+BOIII loads it without any extra flag. (The CBServers client preloads the
+System32 copy of any game-folder DLL named like a Windows DLL unless started
+with `-allowproxydlls`.) Details for players: `docs/PLAYER_README.txt`.
 
 The DLL starts right after BOIII has run its own components' `post_unpack`
 (it hooks `boiii.exe`'s `SetProcessDPIAware` import, which BOIII calls at that

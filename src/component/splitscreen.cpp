@@ -15,6 +15,7 @@
 
 #include <utils/hook.hpp>
 #include <utils/finally.hpp>
+#include "splitscreen_ezz.hpp"
 
 #include <d3d11.h>   // sun shadow sidecar views (COM calls only, no import library)
 
@@ -69,7 +70,7 @@ namespace splitscreen
 		constexpr size_t base_table_rva = 0x17ADC958;
 
 		// imul rcx, rcx, 0x1e940   - displaced into the cave
-		constexpr size_t stride_site_rva = 0x01F23D11;
+		constexpr size_t stride_site_rva = 0x01F23651;
 		constexpr uint8_t stride_site_bytes[] = {0x48, 0x69, 0xC9, 0x40, 0xE9, 0x01, 0x00};
 
 		// A SECOND consumer at 0x00F7E918 receives the same mangled value, but
@@ -234,7 +235,7 @@ namespace splitscreen
 			// increments a local. It indexes no per-client array, so widening
 			// it cannot write anywhere. If IsBeingUsed(2) is false the count
 			// stays 2 and status 72 says why.
-			{0x01FBB359, 0x02, 0x04, "GetCountUsedAndSignedInLocalClients: 2 -> 4"},
+			{0x01FBAC99, 0x02, 0x04, "GetCountUsedAndSignedInLocalClients: 2 -> 4"},
 
 			// LobbyHost_AddLocalClients - the one that decides who is IN THE LOBBY.
 			//
@@ -358,7 +359,7 @@ namespace splitscreen
 			// force_scoreboard arrived for c2 and forceScoreboard stayed 0.
 			// PS4 returns 4 because it seats 4; this mod seats 3 (4 with player 4).
 			// 3.0f = 0x40400000: third immediate byte 0x00 -> 0x40.
-			{0x01FD72BD, 0x00, 0x80, "GetMaxControllerCount: 2.0f -> 4.0f (controllers with seats; 4 since player 4)"},
+			{0x01FD6BFD, 0x00, 0x80, "GetMaxControllerCount: 2.0f -> 4.0f (controllers with seats; 4 since player 4)"},
 
 			// GetMaxLocalControllers, same shape (0x01FE3390: `mov dword [rax-8],
 			// 0x40000000` at 0x01FE3398), same value, same reason (2026-09-27):
@@ -371,7 +372,7 @@ namespace splitscreen
 			// Lua users: actions.lua Lobby_SetMaxLocalPlayers (min) and CoDMenu
 			// ButtonBits subscriptions (nil-tolerant - measured: hud.lua's GetModel
 			// subscription for a missing model raised no error). 3.0f = seats.
-			{0x01FD72DD, 0x00, 0x80, "GetMaxLocalControllers: 2.0f -> 4.0f (controllers with seats; 4 since player 4)"},
+			{0x01FD6C1D, 0x00, 0x80, "GetMaxLocalControllers: 2.0f -> 4.0f (controllers with seats; 4 since player 4)"},
 
 			// Engine.GetPlayerStats - the call the gobblegum row is built from.
 			//
@@ -399,7 +400,7 @@ namespace splitscreen
 			// LOG.md records this byte as "necessary, not sufficient" from an
 			// earlier session - it was insufficient then because that walk still
 			// failed. It no longer does.
-			{0x01FBED9E, 0x01, 0x03, "Engine.GetPlayerStats: controller bound 1 -> 3"},
+			{0x01FBE6DE, 0x01, 0x03, "Engine.GetPlayerStats: controller bound 1 -> 3"},
 
 			// LobbyHost_AddLocalClients. RE-APPLIED once its array was relocated.
 			//
@@ -407,7 +408,7 @@ namespace splitscreen
 			// and reloc_tables now includes `netchan` - so if that relocation
 			// fails for any reason this byte is not written and the crash below
 			// cannot come back.
-			{0x01ECB3AB, 0x02, 0x04, "LobbyHost_AddLocalClients: controllers 2 -> 4"},
+			{0x01ECACEB, 0x02, 0x04, "LobbyHost_AddLocalClients: controllers 2 -> 4"},
 
 			// THE ACTIVATION LOOP BOUND - the missing half of the launch.
 			//
@@ -427,7 +428,7 @@ namespace splitscreen
 			// slot 3 is still foreign. Nothing is faked - the loop then runs
 			// the engine's own rule (active = IsBeingUsed) over the clients
 			// that really exist.
-			{0x027C2105, 0x02, 0x03, "SetAllUsedActive loop: local clients 2 -> 3"},
+			{0x027C1A45, 0x02, 0x03, "SetAllUsedActive loop: local clients 2 -> 3"},
 
 			// THE CONNECT LOOP - measured, not guessed (2026-08-18).
 			//
@@ -748,7 +749,7 @@ namespace splitscreen
 			// Verified live: 0x01EFF97A 02 -> 04 made the count return 3 with
 			// the game healthy. Without the client_objs relocation this same
 			// byte would read past a two-slot array.
-			{0x01EF38BA, 0x02, 0x04, "GetLobbyLocalClientCount loop: 2 -> 4"},
+			{0x01EF31FA, 0x02, 0x04, "GetLobbyLocalClientCount loop: 2 -> 4"},
 
 			// DEACTIVATE SPLITSCREEN, bounded the same way.
 			//
@@ -773,7 +774,7 @@ namespace splitscreen
 			// real and matters: the engine never produces a 0+2-with-a-gap
 			// layout itself. If a removal pass must leave a gap, prefer not
 			// running it at all over producing that state.
-			{0x01F0AD44, 0x02, 0x04, "LobbyRemoveAllLocalSplitscreenClient loop: 2 -> 4"},
+			{0x01F0A684, 0x02, 0x04, "LobbyRemoveAllLocalSplitscreenClient loop: 2 -> 4"},
 
 			// LiveUser_IsUserGuest (0x01EC70C0) rejects every controller index >= 2
 			// BEFORE it reads the isGuest byte:
@@ -804,7 +805,7 @@ namespace splitscreen
 			// clientGameStates[2] flags bit 0 set, controller 2 went from 18 ready file
 			// slots to 52, done[] completed all four targets, and Engine.GetCACRoot(2)
 			// returned userdata instead of nil.
-			{0x01EBAD02, 0x01, 0x03, "LiveUser_IsUserGuest bound: ci<=1 -> ci<=3"},
+			{0x01EBA642, 0x01, 0x03, "LiveUser_IsUserGuest bound: ci<=1 -> ci<=3"},
 
 			// THE FRONTEND CLIENT COMMANDS (2026-09-26 18:00). After the first
 			// three-player GAME OVER that did not crash, the game hung on the
@@ -856,7 +857,7 @@ namespace splitscreen
 			// controller 3's A never reached the Lua while this stopped at 3. Index 3:
 			// gaGlobs, playerKeys, s_gamePads [4]; seat record 3; clientUIActives[3]
 			// keyCatchers (+4, the slot's owned head).
-			{0x022876E4, 0x02, 0x04, "IN_GamepadsMove: poll controllers 2 -> 4 (players 3/4 sticks/buttons, menus too)"},
+			{0x02287024, 0x02, 0x04, "IN_GamepadsMove: poll controllers 2 -> 4 (players 3/4 sticks/buttons, menus too)"},
 
 			// PLAYER 3 STUCK LOADING FROM THE SECOND ROUND ON (2026-09-27): the
 			// netchan thread pumps only controllers 0 and 1. PS4 Netchan_Thread
@@ -884,7 +885,7 @@ namespace splitscreen
 			// clientGameStates via 0x020EF950 (relocated, three slots). Three,
 			// not four: clientGameStates has three.
 			// PLAYER 4: 4 - s_netchan rows [4], clientGameStates 4 records (a6f3fd8).
-			{0x0211EB04, 0x02, 0x04, "Netchan_Thread pump: controllers 2 -> 4 (transmit/acks/stale cleanup)"},
+			{0x0211E444, 0x02, 0x04, "Netchan_Thread pump: controllers 2 -> 4 (transmit/acks/stale cleanup)"},
 
 			// ...and the one that actually runs on the way back (measured
 			// 2026-09-26 18:20 with firstsnap_watch: lc 1 went 0x07 -> 0x06
@@ -907,16 +908,16 @@ namespace splitscreen
 		};
 
 		constexpr byte_patch storage_patches[] = {
-			{0x022194B5, 0x51, 0x91, "storage pool: SIB scale x2 -> x4"},
-			{0x02219613, 0x02, 0x04, "AllocateMemory: controllers 2 -> 4"},
-			{0x0221A0CE, 0x02, 0x04, "clear-all loop: controllers 2 -> 4"},
-			{0x0221A1B3, 0x02, 0x04, "file lookup A: controllers 2 -> 4"},
-			{0x0221A255, 0x02, 0x04, "file lookup B: controllers 2 -> 4"},
-			{0x0221A3DA, 0x02, 0x04, "file lookup C: controllers 2 -> 4"},
-			{0x0221A664, 0x02, 0x04, "file lookup D: controllers 2 -> 4"},
-			{0x0221A883, 0x02, 0x04, "file lookup E: controllers 2 -> 4"},
-			{0x0221A9CB, 0x02, 0x04, "controller gate 0x02276E30: 2 -> 4"},
-			{0x0221B1D6, 0x02, 0x04, "controller gate 0x02277640: 2 -> 4"},
+			{0x02218DF5, 0x51, 0x91, "storage pool: SIB scale x2 -> x4"},
+			{0x02218F53, 0x02, 0x04, "AllocateMemory: controllers 2 -> 4"},
+			{0x02219A0E, 0x02, 0x04, "clear-all loop: controllers 2 -> 4"},
+			{0x02219AF3, 0x02, 0x04, "file lookup A: controllers 2 -> 4"},
+			{0x02219B95, 0x02, 0x04, "file lookup B: controllers 2 -> 4"},
+			{0x02219D1A, 0x02, 0x04, "file lookup C: controllers 2 -> 4"},
+			{0x02219FA4, 0x02, 0x04, "file lookup D: controllers 2 -> 4"},
+			{0x0221A1C3, 0x02, 0x04, "file lookup E: controllers 2 -> 4"},
+			{0x0221A30B, 0x02, 0x04, "controller gate 0x02276E30: 2 -> 4"},
+			{0x0221AB16, 0x02, 0x04, "controller gate 0x02277640: 2 -> 4"},
 
 			// Found after the nine above, and they must be applied HERE rather
 			// than from a script at lobby time. Measured 2026-08-07: controller 1
@@ -960,11 +961,11 @@ namespace splitscreen
 			// Storage_Read refuses every controller >= 2, so no per-controller
 			// file is ever read for a guest: `movsxd rdi, ecx / cmp edi, 2 / jge
 			// return false`. Also missed by the scan.
-			{0x0221B13F, 0x02, 0x04, "Storage_Read controller bound: 2 -> 4"},
+			{0x0221AA7F, 0x02, 0x04, "Storage_Read controller bound: 2 -> 4"},
 
 			// Two more of the identical shape, found with tools/bound_scan.py.
-			{0x0221B323, 0x02, 0x04, "storage fn 0x02277780 controller bound: 2 -> 4"},
-			{0x0221B4FF, 0x02, 0x04, "storage fn 0x02277960 controller bound: 2 -> 4"},
+			{0x0221AC63, 0x02, 0x04, "storage fn 0x02277780 controller bound: 2 -> 4"},
+			{0x0221AE3F, 0x02, 0x04, "storage fn 0x02277960 controller bound: 2 -> 4"},
 
 			// THE TASK REAPER LOOP - why controller 2 never got a loadout.
 			//
@@ -1024,7 +1025,7 @@ namespace splitscreen
 			// stats reads allowed, 14 others blocked), so the only completions
 			// left to reap are the stats ones - which do nothing but set
 			// ready[ci].
-			{0x020ED11B, 0x02, 0x04, "TaskManager2_ProcessTasks per-controller loop: 2 -> 4"},
+			{0x020ECA5B, 0x02, 0x04, "TaskManager2_ProcessTasks per-controller loop: 2 -> 4"},
 		};
 
 		// s_storageMem.pool. Zero until AllocateMemory has run, so reading it
@@ -1608,7 +1609,7 @@ namespace splitscreen
 			if (raise_local_client_count)
 			{
 				constexpr uint32_t session_state_rva = 0x1686E874;
-				constexpr uint32_t set_network_mode_rva = 0x020EB4F0;
+				constexpr uint32_t set_network_mode_rva = 0x020EAE30;
 				constexpr uint32_t network_mode_mask = 0x3C0;
 				constexpr uint32_t network_mode_shift = 6;
 
@@ -1654,7 +1655,7 @@ namespace splitscreen
 		// on the game's own thread, against a controller that really is signed in
 		// - it is the same call the boot sequence makes, just once more, after
 		// the guests exist.
-		constexpr uint32_t storage_pump_rva = 0x0221AD40;
+		constexpr uint32_t storage_pump_rva = 0x0221A680;
 		constexpr uint8_t storage_pump_prologue[] = {0x40, 0x57, 0x48, 0x83, 0xEC, 0x40};
 
 		size_t storage_base_rva = 0;
@@ -1747,10 +1748,10 @@ namespace splitscreen
 		};
 
 		constexpr targets_lea targets_leas[] = {
-			{0x0221B806, 0x00}, {0x0221B94F, 0x00}, {0x0221B9A2, 0x00}, {0x0221BBCA, 0x00},
-			{0x0221B864, 0x08},
-			{0x0221B8E3, 0x20}, {0x0221B8C3, 0x28},
-			{0x0221B97E, 0x30}, {0x0221BC91, 0x30},
+			{0x0221B146, 0x00}, {0x0221B28F, 0x00}, {0x0221B2E2, 0x00}, {0x0221B50A, 0x00},
+			{0x0221B1A4, 0x08},
+			{0x0221B223, 0x20}, {0x0221B203, 0x28},
+			{0x0221B2BE, 0x30}, {0x0221B5D1, 0x30},
 		};
 
 		// Every imm32 that carries the OLD row stride. Found exhaustively rather
@@ -1784,7 +1785,7 @@ namespace splitscreen
 		//
 		// 0x2140, the old TOTAL size, appears nowhere in the TU.
 		constexpr uint32_t targets_strides[] = {
-			0x0221B812, 0x0221B884, 0x0221B8CD, 0x0221B8ED, 0x0221B94B, 0x0221BCA2,
+			0x0221B152, 0x0221B1C4, 0x0221B20D, 0x0221B22D, 0x0221B28B, 0x0221B5E2,
 		};
 
 		// OFF BY DEFAULT - correct in principle, not yet correct in practice.
@@ -1953,7 +1954,7 @@ namespace splitscreen
 		// misread as code, not a reference.)
 		constexpr size_t localfileop_rva = 0x17889DF0;
 		constexpr size_t localfileop_elem = 0x1820;
-		constexpr uint32_t localfileop_lea = 0x0221878E; // 7-byte lea, disp32 at +3
+		constexpr uint32_t localfileop_lea = 0x022180CE; // 7-byte lea, disp32 at +3
 
 		// Where it ended up. Needed to work out which controller a task belongs
 		// to: a gamer-profile TaskRecord carries its LocalFileOpData pointer at
@@ -2154,7 +2155,7 @@ namespace splitscreen
 		// at 0x020EF7C9. Inferring is not knowing, and the whole priority order of
 		// the project turns on the answer, so read it out of the live game. One
 		// byte per controller, so -1 appears as 0xFF and cannot be misread.
-		constexpr uint32_t local_client_num_rva = 0x020E3700;
+		constexpr uint32_t local_client_num_rva = 0x020E3040;
 
 		// cl_maxLocalClients - RVA 0x053A2720, verified 2026-08-16 as the store
 		// target of 0x0135D489 and read by ~2630 `cmp <reg>, [cl_maxLocalClients]`
@@ -2202,11 +2203,11 @@ namespace splitscreen
 		//
 		// Result is packed into one word, bit set = that check returned TRUE, so a
 		// ZERO bit names the culprit outright.
-		constexpr uint32_t signin_predicate_rva = 0x01DFF150;
-		constexpr uint32_t ten_record_walk_rva = 0x01E9D660;
-		constexpr uint32_t six_record_walk_rva = 0x01EA30C0;
+		constexpr uint32_t signin_predicate_rva = 0x01DFEA90;
+		constexpr uint32_t ten_record_walk_rva = 0x01E9CFA0;
+		constexpr uint32_t six_record_walk_rva = 0x01EA2A00;
 		constexpr uint32_t storage_pair_rva = 0x015E2CB0;
-		constexpr uint32_t storage_has_file_rva = 0x0221A9C0;
+		constexpr uint32_t storage_has_file_rva = 0x0221A300;
 
 		// The file types 0x01E0B520 requires, read off its disassembly.
 		//
@@ -2229,7 +2230,13 @@ namespace splitscreen
 			const auto has = reinterpret_cast<bool (*)(int, int, int)>(base() + storage_has_file_rva);
 
 			uint32_t bits = 0;
-			if (pred(ci)) { bits |= 1u << 0; }   // the whole predicate
+			// ezz BOIII detours this predicate with a side effect (not ready ->
+			// Storage_Pump(ci)); called from this async thread, the game's va()
+			// then reads a NULL thread-local and crashes (2026-09-29, RVA
+			// 0x0227CAC4, ctrl 2). A diagnostic must not run game code on the
+			// wrong thread: skip it whenever the host client has hooked it.
+			const bool pred_hooked = *reinterpret_cast<const uint8_t*>(base() + signin_predicate_rva) == 0xE9;
+			if (!pred_hooked && pred(ci)) { bits |= 1u << 0; }   // the whole predicate
 			if (ten(ci, 1)) { bits |= 1u << 1; }
 			if (six(ci, 1)) { bits |= 1u << 2; }
 			if (pair(ci, 1)) { bits |= 1u << 3; }
@@ -2303,7 +2310,7 @@ namespace splitscreen
 		// On console this is a non-issue because a joining player is made active in
 		// the lobby (CL_Command_SetClientBeingUsedAndActive and friends), so the
 		// dvar is already right long before START GAME.
-		constexpr uint32_t set_all_used_active_rva = 0x027C2080;
+		constexpr uint32_t set_all_used_active_rva = 0x027C19C0;
 
 		// Calling that function is NOT enough, measured 2026-08-18: it fired
 		// (status 88 = 1) and the count block never ran (86 = 0), because the
@@ -2318,7 +2325,7 @@ namespace splitscreen
 		//
 		// NOT from the allocator detour - doing this during early startup
 		// black-screened the client three times. Here the game is fully up.
-		constexpr uint32_t dvar_set_int_rva = 0x0226BA60;
+		constexpr uint32_t dvar_set_int_rva = 0x0226B3A0;
 
 		bool set_splitscreen_player_count(const uint32_t value)
 		{
@@ -2338,9 +2345,9 @@ namespace splitscreen
 		uint32_t last_active_refresh = 0;
 		uint32_t active_refreshes = 0;
 
-		constexpr uint32_t is_being_used_rva = 0x020E38D0;
-		constexpr uint32_t lc_controller_index_rva = 0x020E3870;
-		constexpr uint32_t live_user_is_signed_in_rva = 0x01EBAC60;
+		constexpr uint32_t is_being_used_rva = 0x020E3210;
+		constexpr uint32_t lc_controller_index_rva = 0x020E31B0;
+		constexpr uint32_t live_user_is_signed_in_rva = 0x01EBA5A0;
 
 		void probe_local_client_slots()
 		{
@@ -2691,7 +2698,7 @@ namespace splitscreen
 		//
 		// Calling it is not faking anything: it is the game's own reaper, on the
 		// game's own thread, for a task the game itself created.
-		constexpr uint32_t process_tasks_rva = 0x02254310;
+		constexpr uint32_t process_tasks_rva = 0x02253C50;
 		constexpr uint8_t process_tasks_prologue[] = {0x83, 0xF9, 0xFF};
 		bool process_tasks_ok = false;
 
@@ -2878,7 +2885,7 @@ namespace splitscreen
 		// and blacked out the renderer every previous time.
 		constexpr uint32_t settings_read_result_rva = 0x0164DC50;
 		constexpr uint8_t settings_read_result_prologue[] = {0x40, 0x57, 0x48, 0x83, 0xEC, 0x20};
-		constexpr uint32_t storage_reset_rva = 0x0221B1D0;
+		constexpr uint32_t storage_reset_rva = 0x0221AB10;
 
 		utils::hook::detour settings_read_result_hook;
 		uint32_t guest_settings_completions = 0;
@@ -3142,7 +3149,7 @@ namespace splitscreen
 			return storage_read_hook.invoke<bool>(controller, file_type, index);
 		}
 
-		constexpr uint32_t storage_read_rva = 0x0221B130;
+		constexpr uint32_t storage_read_rva = 0x0221AA70;
 		constexpr uint8_t storage_read_prologue[] = {0x48, 0x89, 0x5C, 0x24, 0x08};
 
 		// --- clientGameStates: the fix for the -1 ----------------------------
@@ -3486,7 +3493,7 @@ namespace splitscreen
 		// Counted into status 37..40 by controller, and 41 records any first
 		// argument outside 0..3 - the task whose opData lands in the allocation
 		// padding implies an index around 8, and this is what would prove it.
-		constexpr uint32_t start_op_rva = 0x02218750;
+		constexpr uint32_t start_op_rva = 0x02218090;
 		constexpr uint8_t start_op_prologue[] = {0x48, 0x89, 0x5C, 0x24, 0x10};
 		// CL_SplitscreenPlayerCount - MAKE THE NUMBER TRUE AT ITS SOURCE.
 		//
@@ -3523,9 +3530,9 @@ namespace splitscreen
 		//
 		// Falls back to the original whenever the seat table has not been
 		// relocated or reads zero, so it can never invent a count.
-		constexpr uint32_t splitscreen_player_count_rva = 0x027C2170;
+		constexpr uint32_t splitscreen_player_count_rva = 0x027C1AB0;
 		constexpr uint8_t splitscreen_player_count_prologue[] = {
-			0x48, 0x8B, 0x0D, 0x89, 0x38, 0xB9, 0x02, // mov rcx, [rip+0x2B99DD9]
+			0x48, 0x8B, 0x0D, 0x49, 0x3F, 0xB9, 0x02, // mov rcx, [rip+0x2B99DD9]
 			0x48, 0x85, 0xC9,                         // test rcx, rcx
 		};
 
@@ -3570,7 +3577,7 @@ namespace splitscreen
 		// plain memory read the detour already does - no engine predicates.
 		constexpr uint32_t cl_init_rva = 0x01359410;
 		constexpr uint32_t cl_init_range_imm_rva = 0x0135948B;
-		constexpr uint32_t cbuf_execute_range_imm_rva = 0x020E00F0;
+		constexpr uint32_t cbuf_execute_range_imm_rva = 0x020DFA30;
 		// The resting value of that range check: 0x02 stock, 0x04 once
 		// install_cbuf_for_players34() has given local clients 2/3 their own
 		// command buffers and widened Com_Frame's Cbuf loop (2026-09-28, MP).
@@ -3579,8 +3586,8 @@ namespace splitscreen
 		// Defined with the IsActive cave, further down. The cgame frame-loop
 		// widen below may only run when the cave is installed - see there.
 		extern bool isactive_caved;
-		constexpr uint32_t cl_frame_pump_imm_rva = 0x020ED51E;
-		constexpr uint32_t netchan_poll_imm_rva = 0x020EBAE4;
+		constexpr uint32_t cl_frame_pump_imm_rva = 0x020ECE5E;
+		constexpr uint32_t netchan_poll_imm_rva = 0x020EB424;
 
 		bool cl_init2_done = false;
 
@@ -4193,8 +4200,8 @@ namespace splitscreen
 		// STRAIGHT to the seat write, skipping every validation above - i.e. it
 		// reproduces by itself the state that broke hosting. So this refuses to
 		// call unless the patch is verified in memory first.
-		constexpr uint32_t guest_signin_rva = 0x01E00590;
-		constexpr uint32_t is_user_guest_imm_rva = 0x01EBAD02;
+		constexpr uint32_t guest_signin_rva = 0x01DFFED0;
+		constexpr uint32_t is_user_guest_imm_rva = 0x01EBA642;
 		constexpr size_t userdata_is_guest = 0x29;
 		constexpr uint32_t guest_join_max_attempts = 8;
 		uint32_t guest_join_attempts = 0;
@@ -4243,12 +4250,12 @@ namespace splitscreen
 		// transaction moved into the component so a fresh process needs no manual
 		// memory patching.
 		constexpr uint32_t gamepad_bound_rvas[] = {
-			0x0228519B,
-			0x0228528B,
-			0x02286041,
-			0x02286449,
-			0x01FD7539,
-			0x01FD81CE,
+			0x02284ADB,
+			0x02284BCB,
+			0x02285981,
+			0x02285D89,
+			0x01FD6E79,
+			0x01FD7B0E,
 		};
 		constexpr size_t expected_gamepad_refs = 38;
 		bool gamepads_activated = false;
@@ -4279,7 +4286,7 @@ namespace splitscreen
 		constexpr int32_t gamepad_no_device = 8;
 		static_assert(gamepads_reloc_table.old_size == 2 * gamepad_stride);
 		static_assert(gamepads_reloc_table.new_size == 4 * gamepad_stride);
-		constexpr uint32_t gamepad_rescan_rva = 0x022866D0;
+		constexpr uint32_t gamepad_rescan_rva = 0x02286010;
 		constexpr uint8_t gamepad_rescan_bytes[] = {
 			0x48, 0x83, 0xEC, 0x28,                      // sub rsp, 28h
 			0xE8, 0xE7, 0xEF, 0xFF, 0xFF,                // call 0x022F20D0 enumerate
@@ -4330,8 +4337,8 @@ namespace splitscreen
 			uint8_t expected[11];
 		};
 		constexpr type_selector_site gamepad_type_selector_sites[] = {
-			{0x02286066, {0x33, 0xC9, 0x8D, 0x42, 0xFC, 0x83, 0xF8, 0x03, 0x0F, 0x46, 0xCD}},
-			{0x0228646A, {0x33, 0xC9, 0x8D, 0x42, 0xFC, 0x83, 0xF8, 0x03, 0x0F, 0x46, 0xCE}},
+			{0x022859A6, {0x33, 0xC9, 0x8D, 0x42, 0xFC, 0x83, 0xF8, 0x03, 0x0F, 0x46, 0xCD}},
+			{0x02285DAA, {0x33, 0xC9, 0x8D, 0x42, 0xFC, 0x83, 0xF8, 0x03, 0x0F, 0x46, 0xCE}},
 		};
 		constexpr uint8_t gamepad_type_selector_fixed[11] = {
 			0x8D, 0x42, 0xFC,                            // lea eax, [rdx-4]
@@ -4948,79 +4955,79 @@ namespace splitscreen
 			{0x013E35A9, 7, 3, 0x8, true, {0x4C, 0x8D, 0x35, 0x18, 0x66, 0xF7, 0x03}},
 			{0x013E378A, 7, 3, 0x8, true, {0x48, 0x8D, 0x0D, 0x37, 0x64, 0xF7, 0x03}},
 			{0x0164E034, 7, 3, 0x0, true, {0x48, 0x8D, 0x0D, 0x85, 0xBB, 0xD0, 0x03}},
-			{0x01E012D1, 7, 3, 0x0, true, {0x48, 0x8D, 0x35, 0xE8, 0x88, 0x55, 0x03}},
-			{0x01E0139F, 7, 3, 0x0, true, {0x48, 0x8D, 0x0D, 0x1A, 0x88, 0x55, 0x03}},
-			{0x01E19AF9, 7, 3, 0x8, true, {0x48, 0x8D, 0x15, 0xC8, 0x00, 0x54, 0x03}},
-			{0x01E19BBE, 8, 4, 0x8, false, {0x46, 0x8B, 0xB4, 0x38, 0xC8, 0x9B, 0x35, 0x05}},
-			{0x01E1BE45, 8, 3, 0x8, false, {0x83, 0xBC, 0x39, 0xC8, 0x9B, 0x35, 0x05, 0x0B}},
-			{0x01E4B855, 8, 3, 0x8, false, {0x83, 0xBC, 0x11, 0xC8, 0x9B, 0x35, 0x05, 0x0B}},
-			{0x01E896B7, 7, 3, 0x8, true, {0x48, 0x8D, 0x0D, 0x0A, 0x05, 0x4D, 0x03}},
-			{0x01EB800D, 7, 3, 0x8, true, {0x48, 0x8D, 0x0D, 0xB4, 0x1B, 0x4A, 0x03}},
-			{0x01EBE97E, 7, 3, 0x8, true, {0x48, 0x8D, 0x0D, 0x43, 0xB2, 0x49, 0x03}},
-			{0x01EC1BE9, 7, 3, 0x0, true, {0x48, 0x8D, 0x0D, 0xD0, 0x7F, 0x49, 0x03}},
-			{0x01EC247D, 7, 3, 0x8, true, {0x48, 0x8D, 0x0D, 0x44, 0x77, 0x49, 0x03}},
-			{0x01EC2AC4, 7, 3, 0x10, true, {0x48, 0x8D, 0x15, 0x05, 0x71, 0x49, 0x03}},
-			{0x01EC2B28, 7, 3, 0x10, true, {0x48, 0x8D, 0x05, 0xA1, 0x70, 0x49, 0x03}},
-			{0x01EC5218, 7, 3, 0x10, true, {0x48, 0x8D, 0x3D, 0xB1, 0x49, 0x49, 0x03}},
-			{0x01EE944C, 9, 4, 0x8, false, {0x42, 0x83, 0xBC, 0x38, 0xC8, 0x9B, 0x35, 0x05, 0x0A}},
-			{0x01EEF079, 7, 3, 0x8, true, {0x48, 0x8D, 0x05, 0x48, 0xAB, 0x46, 0x03}},
-			{0x01F09E66, 7, 3, 0x8, true, {0x48, 0x8D, 0x3D, 0x5B, 0xFD, 0x44, 0x03}},
-			{0x01F1CC51, 7, 3, 0x0, true, {0x48, 0x8D, 0x05, 0x68, 0xCF, 0x43, 0x03}},
-			{0x01F1D772, 8, 3, 0x4, false, {0xF6, 0x84, 0x08, 0xC4, 0x9B, 0x35, 0x05, 0x10}},
-			{0x01F1DF0E, 7, 3, 0x8, true, {0x48, 0x8D, 0x0D, 0xB3, 0xBC, 0x43, 0x03}},
-			{0x01F24698, 8, 3, 0x10, false, {0x83, 0xBC, 0x18, 0xD0, 0x9B, 0x35, 0x05, 0x00}},
-			{0x01F30087, 7, 3, 0x0, false, {0x8B, 0x84, 0x10, 0xC0, 0x9B, 0x35, 0x05}},
-			{0x01F3AF94, 7, 3, 0x0, false, {0x8B, 0x84, 0x18, 0xC0, 0x9B, 0x35, 0x05}},
-			{0x01F72D62, 7, 3, 0x10, true, {0x48, 0x8D, 0x05, 0x67, 0x6E, 0x3E, 0x03}},
-			{0x01F94567, 7, 3, 0x0, false, {0x8B, 0x84, 0x10, 0xC0, 0x9B, 0x35, 0x05}},
-			{0x01FA4860, 8, 3, 0x8, false, {0x83, 0xBC, 0x11, 0xC8, 0x9B, 0x35, 0x05, 0x0B}},
-			{0x01FBB5A0, 8, 3, 0x8, false, {0x83, 0xBC, 0x10, 0xC8, 0x9B, 0x35, 0x05, 0x0B}},
-			{0x01FC01E2, 7, 3, 0x8, true, {0x48, 0x8D, 0x05, 0xDF, 0x99, 0x39, 0x03}},
-			{0x02067001, 8, 3, 0x10, false, {0x83, 0xBC, 0x10, 0xD0, 0x9B, 0x35, 0x05, 0x00}},
-			{0x02075589, 9, 4, 0x10, false, {0x42, 0x83, 0xBC, 0x00, 0xD0, 0x9B, 0x35, 0x05, 0x00}},
-			{0x02084B42, 8, 3, 0x10, false, {0x83, 0xBC, 0x10, 0xD0, 0x9B, 0x35, 0x05, 0x00}},
-			{0x02087D79, 9, 4, 0x10, false, {0x42, 0x83, 0xBC, 0x12, 0xD0, 0x9B, 0x35, 0x05, 0x00}},
-			{0x020E40FC, 7, 3, 0x0, false, {0x49, 0x8D, 0xBE, 0xC0, 0x9B, 0x35, 0x05}},
-			{0x020E41E1, 7, 3, 0x0, false, {0x49, 0x8D, 0x9E, 0xC0, 0x9B, 0x35, 0x05}},
-			{0x020ED0C8, 7, 3, 0x8, true, {0x48, 0x8D, 0x0D, 0xF9, 0xCA, 0x26, 0x03}},
-			{0x020F0E3B, 7, 3, 0x0, true, {0x48, 0x8D, 0x1D, 0x7E, 0x8D, 0x26, 0x03}},
-			{0x020F2751, 7, 3, 0x0, true, {0x48, 0x8D, 0x15, 0x68, 0x74, 0x26, 0x03}},
-			{0x020F276B, 7, 3, 0x0, true, {0x48, 0x8D, 0x15, 0x4E, 0x74, 0x26, 0x03}},
-			{0x02216C30, 7, 3, 0x0, true, {0x48, 0x8D, 0x05, 0x89, 0x2F, 0x14, 0x03}},
-			{0x022173CA, 7, 3, 0x0, true, {0x48, 0x8D, 0x0D, 0xEF, 0x27, 0x14, 0x03}},
-			{0x02388140, 7, 3, 0x8, true, {0x48, 0x8D, 0x1D, 0x81, 0x1A, 0xFD, 0x02}},
-			{0x0252C58C, 7, 3, 0x8, true, {0x48, 0x8D, 0x1D, 0x35, 0xD6, 0xE2, 0x02}},
-			{0x0258331B, 7, 3, 0x0, false, {0x8B, 0x84, 0x10, 0xC0, 0x9B, 0x35, 0x05}},
-			{0x02584DC7, 8, 4, 0x0, false, {0x42, 0x8B, 0x84, 0x02, 0xC0, 0x9B, 0x35, 0x05}},
-			{0x02586852, 7, 3, 0x8, true, {0x48, 0x8D, 0x05, 0x6F, 0x33, 0xDD, 0x02}},
-			{0x02587052, 7, 3, 0x8, true, {0x48, 0x8D, 0x05, 0x6F, 0x2B, 0xDD, 0x02}},
-			{0x0258779E, 7, 3, 0x8, true, {0x48, 0x8D, 0x05, 0x23, 0x24, 0xDD, 0x02}},
-			{0x0258F8FA, 7, 3, 0x0, true, {0x48, 0x8D, 0x0D, 0xBF, 0xA2, 0xDC, 0x02}},
-			{0x025922D8, 8, 4, 0x0, false, {0x42, 0x8B, 0x8C, 0x22, 0xC0, 0x9B, 0x35, 0x05}},
-			{0x0259AE06, 7, 3, 0x0, false, {0x8B, 0x84, 0x10, 0xC0, 0x9B, 0x35, 0x05}},
-			{0x025A114C, 7, 3, 0x0, true, {0x4C, 0x8D, 0x35, 0x6D, 0x8A, 0xDB, 0x02}},
-			{0x025A4848, 7, 3, 0x0, true, {0x48, 0x8D, 0x0D, 0x71, 0x53, 0xDB, 0x02}},
-			{0x02789CD6, 7, 3, 0x0, false, {0x8B, 0x84, 0x30, 0xC0, 0x9B, 0x35, 0x05}},
-			{0x0279834E, 8, 3, 0x8, false, {0x83, 0xBC, 0x08, 0xC8, 0x9B, 0x35, 0x05, 0x00}},
-			{0x027C1CD0, 7, 3, 0x8, true, {0x48, 0x8D, 0x05, 0xF1, 0x7E, 0xB9, 0x02}},
-			{0x027C1D09, 7, 3, 0x8, true, {0x48, 0x8D, 0x05, 0xB8, 0x7E, 0xB9, 0x02}},
-			{0x027C1D49, 7, 3, 0x8, true, {0x48, 0x8D, 0x05, 0x78, 0x7E, 0xB9, 0x02}},
-			{0x027C1D7E, 7, 3, 0x0, true, {0x48, 0x8D, 0x3D, 0x3B, 0x7E, 0xB9, 0x02}},
-			{0x027C1DD5, 7, 3, 0x0, true, {0x48, 0x8D, 0x05, 0xE4, 0x7D, 0xB9, 0x02}},
-			{0x027C1E42, 7, 3, 0x0, true, {0x48, 0x8D, 0x05, 0x77, 0x7D, 0xB9, 0x02}},
-			{0x027C1E79, 7, 3, 0x0, true, {0x48, 0x8D, 0x0D, 0x40, 0x7D, 0xB9, 0x02}},
-			{0x027C1EAD, 7, 3, 0x1078, true, {0x48, 0x8D, 0x0D, 0x84, 0x8D, 0xB9, 0x02}},
-			{0x027C1EE4, 6, 2, 0x1078, true, {0x84, 0x0D, 0x4E, 0x8D, 0xB9, 0x02}},
-			{0x027C1F23, 6, 2, 0x1078, true, {0x84, 0x15, 0x0F, 0x8D, 0xB9, 0x02}},
-			{0x027C1F46, 7, 3, 0x0, true, {0x48, 0x8D, 0x05, 0x73, 0x7C, 0xB9, 0x02}},
-			{0x027C1F91, 6, 2, 0x1078, true, {0x84, 0x0D, 0xA1, 0x8C, 0xB9, 0x02}},
-			{0x027C1FA3, 7, 3, 0x0, true, {0x48, 0x8D, 0x0D, 0x16, 0x7C, 0xB9, 0x02}},
-			{0x027C1FE3, 6, 2, 0x1078, true, {0x84, 0x15, 0x4F, 0x8C, 0xB9, 0x02}},
-			{0x027C200D, 7, 3, 0x0, true, {0x48, 0x8D, 0x3D, 0xAC, 0x7B, 0xB9, 0x02}},
-			{0x027C2052, 6, 2, 0x1078, true, {0x84, 0x15, 0xE0, 0x8B, 0xB9, 0x02}},
-			{0x027C2091, 7, 3, 0x0, true, {0x48, 0x8D, 0x1D, 0x28, 0x7B, 0xB9, 0x02}},
-			{0x027C20CD, 7, 3, 0x0, true, {0x40, 0x84, 0x35, 0xEC, 0x7A, 0xB9, 0x02}},
-			{0x027C20DC, 7, 3, 0x1078, true, {0x40, 0x84, 0x35, 0x55, 0x8B, 0xB9, 0x02}},
+			{0x01E00C11, 7, 3, 0x0, true, {0x48, 0x8D, 0x35, 0xA8, 0x8F, 0x55, 0x03}},
+			{0x01E00CDF, 7, 3, 0x0, true, {0x48, 0x8D, 0x0D, 0xDA, 0x8E, 0x55, 0x03}},
+			{0x01E19439, 7, 3, 0x8, true, {0x48, 0x8D, 0x15, 0x88, 0x07, 0x54, 0x03}},
+			{0x01E194FE, 8, 4, 0x8, false, {0x46, 0x8B, 0xB4, 0x38, 0xC8, 0x9B, 0x35, 0x05}},
+			{0x01E1B785, 8, 3, 0x8, false, {0x83, 0xBC, 0x39, 0xC8, 0x9B, 0x35, 0x05, 0x0B}},
+			{0x01E4B195, 8, 3, 0x8, false, {0x83, 0xBC, 0x11, 0xC8, 0x9B, 0x35, 0x05, 0x0B}},
+			{0x01E88FF7, 7, 3, 0x8, true, {0x48, 0x8D, 0x0D, 0xCA, 0x0B, 0x4D, 0x03}},
+			{0x01EB794D, 7, 3, 0x8, true, {0x48, 0x8D, 0x0D, 0x74, 0x22, 0x4A, 0x03}},
+			{0x01EBE2BE, 7, 3, 0x8, true, {0x48, 0x8D, 0x0D, 0x03, 0xB9, 0x49, 0x03}},
+			{0x01EC1529, 7, 3, 0x0, true, {0x48, 0x8D, 0x0D, 0x90, 0x86, 0x49, 0x03}},
+			{0x01EC1DBD, 7, 3, 0x8, true, {0x48, 0x8D, 0x0D, 0x04, 0x7E, 0x49, 0x03}},
+			{0x01EC2404, 7, 3, 0x10, true, {0x48, 0x8D, 0x15, 0xC5, 0x77, 0x49, 0x03}},
+			{0x01EC2468, 7, 3, 0x10, true, {0x48, 0x8D, 0x05, 0x61, 0x77, 0x49, 0x03}},
+			{0x01EC4B58, 7, 3, 0x10, true, {0x48, 0x8D, 0x3D, 0x71, 0x50, 0x49, 0x03}},
+			{0x01EE8D8C, 9, 4, 0x8, false, {0x42, 0x83, 0xBC, 0x38, 0xC8, 0x9B, 0x35, 0x05, 0x0A}},
+			{0x01EEE9B9, 7, 3, 0x8, true, {0x48, 0x8D, 0x05, 0x08, 0xB2, 0x46, 0x03}},
+			{0x01F097A6, 7, 3, 0x8, true, {0x48, 0x8D, 0x3D, 0x1B, 0x04, 0x45, 0x03}},
+			{0x01F1C591, 7, 3, 0x0, true, {0x48, 0x8D, 0x05, 0x28, 0xD6, 0x43, 0x03}},
+			{0x01F1D0B2, 8, 3, 0x4, false, {0xF6, 0x84, 0x08, 0xC4, 0x9B, 0x35, 0x05, 0x10}},
+			{0x01F1D84E, 7, 3, 0x8, true, {0x48, 0x8D, 0x0D, 0x73, 0xC3, 0x43, 0x03}},
+			{0x01F23FD8, 8, 3, 0x10, false, {0x83, 0xBC, 0x18, 0xD0, 0x9B, 0x35, 0x05, 0x00}},
+			{0x01F2F9C7, 7, 3, 0x0, false, {0x8B, 0x84, 0x10, 0xC0, 0x9B, 0x35, 0x05}},
+			{0x01F3A8D4, 7, 3, 0x0, false, {0x8B, 0x84, 0x18, 0xC0, 0x9B, 0x35, 0x05}},
+			{0x01F726A2, 7, 3, 0x10, true, {0x48, 0x8D, 0x05, 0x27, 0x75, 0x3E, 0x03}},
+			{0x01F93EA7, 7, 3, 0x0, false, {0x8B, 0x84, 0x10, 0xC0, 0x9B, 0x35, 0x05}},
+			{0x01FA41A0, 8, 3, 0x8, false, {0x83, 0xBC, 0x11, 0xC8, 0x9B, 0x35, 0x05, 0x0B}},
+			{0x01FBAEE0, 8, 3, 0x8, false, {0x83, 0xBC, 0x10, 0xC8, 0x9B, 0x35, 0x05, 0x0B}},
+			{0x01FBFB22, 7, 3, 0x8, true, {0x48, 0x8D, 0x05, 0x9F, 0xA0, 0x39, 0x03}},
+			{0x02066941, 8, 3, 0x10, false, {0x83, 0xBC, 0x10, 0xD0, 0x9B, 0x35, 0x05, 0x00}},
+			{0x02074EC9, 9, 4, 0x10, false, {0x42, 0x83, 0xBC, 0x00, 0xD0, 0x9B, 0x35, 0x05, 0x00}},
+			{0x02084482, 8, 3, 0x10, false, {0x83, 0xBC, 0x10, 0xD0, 0x9B, 0x35, 0x05, 0x00}},
+			{0x020876B9, 9, 4, 0x10, false, {0x42, 0x83, 0xBC, 0x12, 0xD0, 0x9B, 0x35, 0x05, 0x00}},
+			{0x020E3A3C, 7, 3, 0x0, false, {0x49, 0x8D, 0xBE, 0xC0, 0x9B, 0x35, 0x05}},
+			{0x020E3B21, 7, 3, 0x0, false, {0x49, 0x8D, 0x9E, 0xC0, 0x9B, 0x35, 0x05}},
+			{0x020ECA08, 7, 3, 0x8, true, {0x48, 0x8D, 0x0D, 0xB9, 0xD1, 0x26, 0x03}},
+			{0x020F077B, 7, 3, 0x0, true, {0x48, 0x8D, 0x1D, 0x3E, 0x94, 0x26, 0x03}},
+			{0x020F2091, 7, 3, 0x0, true, {0x48, 0x8D, 0x15, 0x28, 0x7B, 0x26, 0x03}},
+			{0x020F20AB, 7, 3, 0x0, true, {0x48, 0x8D, 0x15, 0x0E, 0x7B, 0x26, 0x03}},
+			{0x02216570, 7, 3, 0x0, true, {0x48, 0x8D, 0x05, 0x49, 0x36, 0x14, 0x03}},
+			{0x02216D0A, 7, 3, 0x0, true, {0x48, 0x8D, 0x0D, 0xAF, 0x2E, 0x14, 0x03}},
+			{0x02387A80, 7, 3, 0x8, true, {0x48, 0x8D, 0x1D, 0x41, 0x21, 0xFD, 0x02}},
+			{0x0252BECC, 7, 3, 0x8, true, {0x48, 0x8D, 0x1D, 0xF5, 0xDC, 0xE2, 0x02}},
+			{0x02582C5B, 7, 3, 0x0, false, {0x8B, 0x84, 0x10, 0xC0, 0x9B, 0x35, 0x05}},
+			{0x02584707, 8, 4, 0x0, false, {0x42, 0x8B, 0x84, 0x02, 0xC0, 0x9B, 0x35, 0x05}},
+			{0x02586192, 7, 3, 0x8, true, {0x48, 0x8D, 0x05, 0x2F, 0x3A, 0xDD, 0x02}},
+			{0x02586992, 7, 3, 0x8, true, {0x48, 0x8D, 0x05, 0x2F, 0x32, 0xDD, 0x02}},
+			{0x025870DE, 7, 3, 0x8, true, {0x48, 0x8D, 0x05, 0xE3, 0x2A, 0xDD, 0x02}},
+			{0x0258F23A, 7, 3, 0x0, true, {0x48, 0x8D, 0x0D, 0x7F, 0xA9, 0xDC, 0x02}},
+			{0x02591C18, 8, 4, 0x0, false, {0x42, 0x8B, 0x8C, 0x22, 0xC0, 0x9B, 0x35, 0x05}},
+			{0x0259A746, 7, 3, 0x0, false, {0x8B, 0x84, 0x10, 0xC0, 0x9B, 0x35, 0x05}},
+			{0x025A0A8C, 7, 3, 0x0, true, {0x4C, 0x8D, 0x35, 0x2D, 0x91, 0xDB, 0x02}},
+			{0x025A4188, 7, 3, 0x0, true, {0x48, 0x8D, 0x0D, 0x31, 0x5A, 0xDB, 0x02}},
+			{0x02789616, 7, 3, 0x0, false, {0x8B, 0x84, 0x30, 0xC0, 0x9B, 0x35, 0x05}},
+			{0x02797C8E, 8, 3, 0x8, false, {0x83, 0xBC, 0x08, 0xC8, 0x9B, 0x35, 0x05, 0x00}},
+			{0x027C1610, 7, 3, 0x8, true, {0x48, 0x8D, 0x05, 0xB1, 0x85, 0xB9, 0x02}},
+			{0x027C1649, 7, 3, 0x8, true, {0x48, 0x8D, 0x05, 0x78, 0x85, 0xB9, 0x02}},
+			{0x027C1689, 7, 3, 0x8, true, {0x48, 0x8D, 0x05, 0x38, 0x85, 0xB9, 0x02}},
+			{0x027C16BE, 7, 3, 0x0, true, {0x48, 0x8D, 0x3D, 0xFB, 0x84, 0xB9, 0x02}},
+			{0x027C1715, 7, 3, 0x0, true, {0x48, 0x8D, 0x05, 0xA4, 0x84, 0xB9, 0x02}},
+			{0x027C1782, 7, 3, 0x0, true, {0x48, 0x8D, 0x05, 0x37, 0x84, 0xB9, 0x02}},
+			{0x027C17B9, 7, 3, 0x0, true, {0x48, 0x8D, 0x0D, 0x00, 0x84, 0xB9, 0x02}},
+			{0x027C17ED, 7, 3, 0x1078, true, {0x48, 0x8D, 0x0D, 0x44, 0x94, 0xB9, 0x02}},
+			{0x027C1824, 6, 2, 0x1078, true, {0x84, 0x0D, 0x0E, 0x94, 0xB9, 0x02}},
+			{0x027C1863, 6, 2, 0x1078, true, {0x84, 0x15, 0xCF, 0x93, 0xB9, 0x02}},
+			{0x027C1886, 7, 3, 0x0, true, {0x48, 0x8D, 0x05, 0x33, 0x83, 0xB9, 0x02}},
+			{0x027C18D1, 6, 2, 0x1078, true, {0x84, 0x0D, 0x61, 0x93, 0xB9, 0x02}},
+			{0x027C18E3, 7, 3, 0x0, true, {0x48, 0x8D, 0x0D, 0xD6, 0x82, 0xB9, 0x02}},
+			{0x027C1923, 6, 2, 0x1078, true, {0x84, 0x15, 0x0F, 0x93, 0xB9, 0x02}},
+			{0x027C194D, 7, 3, 0x0, true, {0x48, 0x8D, 0x3D, 0x6C, 0x82, 0xB9, 0x02}},
+			{0x027C1992, 6, 2, 0x1078, true, {0x84, 0x15, 0xA0, 0x92, 0xB9, 0x02}},
+			{0x027C19D1, 7, 3, 0x0, true, {0x48, 0x8D, 0x1D, 0xE8, 0x81, 0xB9, 0x02}},
+			{0x027C1A0D, 7, 3, 0x0, true, {0x40, 0x84, 0x35, 0xAC, 0x81, 0xB9, 0x02}},
+			{0x027C1A1C, 7, 3, 0x1078, true, {0x40, 0x84, 0x35, 0x15, 0x92, 0xB9, 0x02}},
 		};
 
 		bool client_ui_actives_relocated = false;
@@ -5454,7 +5461,7 @@ namespace splitscreen
 		// 0x01F328FB taking the address of 0x179DBDDE (= slot 3) as its OWN
 		// global. Exactly ONE reference to rewrite.
 		constexpr flat24_site uielem_sites[] = {
-			{0x01F27096, {0x4C, 0x8D, 0x35, 0x3B, 0x5E, 0xA3, 0x15}},
+			{0x01F269D6, {0x4C, 0x8D, 0x35, 0xFB, 0x64, 0xA3, 0x15}},
 		};
 
 		// THE MISSING READER (2026-09-26 18:05) - why panes 1 and 2 had no HUD.
@@ -5479,7 +5486,7 @@ namespace splitscreen
 			{
 				return;
 			}
-			auto* insn = reinterpret_cast<uint8_t*>(base() + 0x026F9092);
+			auto* insn = reinterpret_cast<uint8_t*>(base() + 0x026F89D2);
 			constexpr uint8_t expect[] = {0x43, 0x0F, 0xB7, 0x8C, 0x67, 0xD8, 0xCE, 0x95, 0x17};
 			if (!readable(insn, sizeof(expect)) || std::memcmp(insn, expect, sizeof(expect)) != 0)
 			{
@@ -5602,7 +5609,7 @@ namespace splitscreen
 		// engine's own rule; the cave applies it to the clients the PC build
 		// forgot to size for. The component already relies on exactly this
 		// equivalence in install_active_count_fix.
-		constexpr uint32_t isactive_rva = 0x027C1FA0;
+		constexpr uint32_t isactive_rva = 0x027C18E0;
 		constexpr uint8_t isactive_expected[] = {
 			0x48, 0x63, 0xC1,                   // movsxd rax, ecx
 			0x48, 0x8D, 0x0D,                   // lea rcx, [clientUIActives]
@@ -5726,10 +5733,10 @@ namespace splitscreen
 		// both live. Widening them alone would make IsActive(2) - which has no
 		// bounds check of its own - read the foreign array at 0x053DACB0, and
 		// would index the geometry table past its two rows.
-		constexpr uint32_t get_active_count_rva = 0x027C1F80;
+		constexpr uint32_t get_active_count_rva = 0x027C18C0;
 		constexpr uint8_t get_active_count_expected[] = {
 			0x33, 0xC0,                                 // xor eax, eax
-			0xF6, 0x05, 0x37, 0x7C, 0xB9, 0x02, 0x01,   // test byte [rip+..], 1
+			0xF6, 0x05, 0xF7, 0x82, 0xB9, 0x02, 0x01,   // test byte [rip+..], 1
 			0xB9, 0x01, 0x00, 0x00, 0x00,               // mov ecx, 1
 			0x0F, 0x45, 0xC1,                           // cmovne eax, ecx
 		};
@@ -5821,8 +5828,8 @@ namespace splitscreen
 		// brought the HUD back on panes 1 and 2. zz_probe confirms LUI.roots.UIRoot2
 		// exists. Contexts that are not active are still skipped by the loop's
 		// IsActive gate, so the frontend (lc 2 inactive) does not walk it.
-		constexpr uint32_t lui_ctx_bound_rva = 0x02683945;
-		constexpr uint8_t lui_ctx_expected[] = {0x44, 0x3B, 0x3D, 0xD4, 0xFD, 0xC9, 0x02};
+		constexpr uint32_t lui_ctx_bound_rva = 0x02683285;
+		constexpr uint8_t lui_ctx_expected[] = {0x44, 0x3B, 0x3D, 0x94, 0x04, 0xCA, 0x02};
 		constexpr uint8_t lui_ctx_patched[]  = {0x41, 0x83, 0xFF, 0x03, 0x90, 0x90, 0x90};
 		bool lui_ctx_held = false;
 
@@ -5867,7 +5874,7 @@ namespace splitscreen
 				return false;
 			}
 			constexpr uint8_t want[] = {0x83, 0xFF, 0x02};   // cmp edi, 2
-			auto* at = reinterpret_cast<uint8_t*>(base() + 0x01F27112);
+			auto* at = reinterpret_cast<uint8_t*>(base() + 0x01F26A52);
 			if (!readable(at, sizeof(want))
 				|| std::memcmp(at, want, sizeof(want)) != 0)
 			{
@@ -5909,9 +5916,9 @@ namespace splitscreen
 		// missing allocation so the crash moves to the next array): the
 		// function EXITS here, nothing downstream runs, and "no snapshot yet"
 		// is a state the engine itself models with this exact exit.
-		constexpr uint32_t snapguard_rva = 0x01F3AEEB;
-		constexpr uint32_t snapguard_ret0 = 0x01F3AF18;   // xor eax,eax; ...ret
-		constexpr uint32_t snapguard_resume = 0x01F3AEF2; // the jne after the test
+		constexpr uint32_t snapguard_rva = 0x01F3A82B;
+		constexpr uint32_t snapguard_ret0 = 0x01F3A858;   // xor eax,eax; ...ret
+		constexpr uint32_t snapguard_resume = 0x01F3A832; // the jne after the test
 		constexpr uint8_t snapguard_expected[] = {
 			0x48, 0x8B, 0x57, 0x30,   // mov rdx, [rdi+0x30]
 			0xF6, 0x02, 0x10,         // test byte [rdx], 0x10
@@ -6695,8 +6702,8 @@ namespace splitscreen
 			{0x0131BD10, 4, 9, false, 0x0118}, // cmp byte ptr [rdi + r15 + 0x52f2b08], 0
 		};
 		constexpr entcoll_site gamepads_completion_sites[] = {
-			{0x022851B2, 2, 7, true , 0x0074}, // cmp dword ptr [rip + 0x15b7c7bb], 8
-			{0x02286861, 4, 9, false, 0x0000}, // cmp byte ptr [rcx + r9 + 0x17e6e310], 0
+			{0x02284AF2, 2, 7, true , 0x0074}, // cmp dword ptr [rip + 0x15b7c7bb], 8
+			{0x022861A1, 4, 9, false, 0x0000}, // cmp byte ptr [rcx + r9 + 0x17e6e310], 0
 		};
 
 		// The array's current base, derived from a site that the original relocation
@@ -7141,30 +7148,30 @@ namespace splitscreen
 		constexpr uint32_t entword_client_bytes = entword_row * 2;   // 0xE08
 		constexpr size_t entword_slots = 4;
 		constexpr entcoll_site entword_sites[] = {
-			{0x020F43B4, 3, 7, true,  0}, // lea rcx,[rip+..]
-			{0x020F5CBD, 4, 8, false, 0}, // mov word [rax+rdx*2+0x16DD3540],di
-			{0x020F5D49, 3, 7, true,  0}, // lea rcx,[rip+..]
-			{0x020F5F18, 3, 7, true,  0}, // lea rcx,[rip+..]   (the clear)
-			{0x020F6027, 5, 9, false, 0}, // movsx rcx,word [rax+r10+..]  (crash site)
-			{0x020F6059, 5, 9, false, 0}, // mov word [rax+r10+..],dx
-			{0x020F6373, 5, 9, false, 0}, // movzx ecx,word cs:[rcx+rax*2+..]
-			{0x020F960C, 3, 7, true,  0}, // lea rsi,[rip+..]
+			{0x020F3CF4, 3, 7, true,  0}, // lea rcx,[rip+..]
+			{0x020F55FD, 4, 8, false, 0}, // mov word [rax+rdx*2+0x16DD3540],di
+			{0x020F5689, 3, 7, true,  0}, // lea rcx,[rip+..]
+			{0x020F5858, 3, 7, true,  0}, // lea rcx,[rip+..]   (the clear)
+			{0x020F5967, 5, 9, false, 0}, // movsx rcx,word [rax+r10+..]  (crash site)
+			{0x020F5999, 5, 9, false, 0}, // mov word [rax+r10+..],dx
+			{0x020F5CB3, 5, 9, false, 0}, // movzx ecx,word cs:[rcx+rax*2+..]
+			{0x020F8F4C, 3, 7, true,  0}, // lea rsi,[rip+..]
 		};
 		// size = immediate width in bytes (4 = imm32, 1 = imm8)
 		struct entword_imm { uint32_t rva; uint8_t off; uint8_t size; uint32_t was; uint32_t want; };
 		constexpr entword_imm entword_imms[] = {
-			{0x020F5F21, 2, 4, 0x1C08, 0x3820}, // mov r8d,0x1c08  - memset size
-			{0x020F604F, 2, 4, 0x1C08, 0x3820}, // cmp rax,0x1c08  - the /GS bound
-			{0x020F439F, 2, 4, 0x702, 0x704},   // imul ecx,ecx,0x702   ClearAllSkel(lc)
-			{0x020F43A5, 1, 4, 0x702, 0x704},   // mov edi,0x702        ClearAllSkel count
-			{0x020F5CAC, 3, 4, 0x702, 0x704},   // imul rdx,rdx,0x702   Com_ClientDObjCreate
-			{0x020F5D40, 2, 4, 0x702, 0x704},   // imul edx,edx,0x702   Com_GetClientDObj
-			{0x020F5F9E, 2, 4, 0x702, 0x704},   // imul edi,edi,0x702   Com_SafeClientDObjFree
-			{0x020F6369, 3, 4, 0x702, 0x704},   // imul r13,r13,0x702   rebuild-all row
-			{0x020F9420, 2, 4, 0x702, 0x704},   // cmp esi,0x702        rebuild-all count
-			{0x020F965F, 2, 4, 0x702, 0x704},   // cmp ebx,0x702        free-all count
-			{0x020F943D, 3, 1, 0x02, 0x04},     // cmp r12d,2           rebuild-all clients
-			{0x020F9669, 2, 1, 0x02, 0x04},     // cmp ebp,2            free-all clients
+			{0x020F5861, 2, 4, 0x1C08, 0x3820}, // mov r8d,0x1c08  - memset size
+			{0x020F598F, 2, 4, 0x1C08, 0x3820}, // cmp rax,0x1c08  - the /GS bound
+			{0x020F3CDF, 2, 4, 0x702, 0x704},   // imul ecx,ecx,0x702   ClearAllSkel(lc)
+			{0x020F3CE5, 1, 4, 0x702, 0x704},   // mov edi,0x702        ClearAllSkel count
+			{0x020F55EC, 3, 4, 0x702, 0x704},   // imul rdx,rdx,0x702   Com_ClientDObjCreate
+			{0x020F5680, 2, 4, 0x702, 0x704},   // imul edx,edx,0x702   Com_GetClientDObj
+			{0x020F58DE, 2, 4, 0x702, 0x704},   // imul edi,edi,0x702   Com_SafeClientDObjFree
+			{0x020F5CA9, 3, 4, 0x702, 0x704},   // imul r13,r13,0x702   rebuild-all row
+			{0x020F8D60, 2, 4, 0x702, 0x704},   // cmp esi,0x702        rebuild-all count
+			{0x020F8F9F, 2, 4, 0x702, 0x704},   // cmp ebx,0x702        free-all count
+			{0x020F8D7D, 3, 1, 0x02, 0x04},     // cmp r12d,2           rebuild-all clients
+			{0x020F8FA9, 2, 1, 0x02, 0x04},     // cmp ebp,2            free-all clients
 		};
 		bool entword_relocated = false;
 		size_t entword_new = 0;
@@ -7461,34 +7468,34 @@ namespace splitscreen
 		constexpr uint32_t model_pool_self_off = 0x1C;
 		constexpr uint32_t model_pool_next_off = 0x1E;
 		constexpr entcoll_site model_pool_sites[] = {
-			{0x0200CDCE, 3, 7, true , 0x00},   // lea rdx,[base]            AllocateNode
-			{0x0200CE1F, 3, 7, true , 0x00},   // lea rdx,[base]            AllocateNode
-			{0x0200D141, 3, 7, true , 0x00},   // lea rbx,[base]            FreeModel
-			{0x0200D15E, 3, 7, true , 0x00},   // lea rsi,[base]            FreeModel
-			{0x0200D193, 3, 7, true , 0x00},   // lea rbx,[base]            FreeModel
-			{0x0200D35F, 3, 7, true , 0x00},   // lea rax,[base]            GetBool   (leaf, no .pdata)
-			{0x0200D38F, 3, 7, true , 0x08},   // lea rax,[base+8]          GetDataType (leaf)
-			{0x0200D3AF, 3, 7, true , 0x00},   // lea rax,[base]            GetFunction (leaf)
-			{0x0200D3EF, 3, 7, true , 0x00},   // lea rax,[base]            getter (leaf)
-			{0x0200D50D, 3, 7, true , 0x00},   // lea r11,[base]            GetModel
-			{0x0200D660, 3, 7, true , 0x00},   // lea rax,[base]            GetReal   (leaf)
-			{0x0200D694, 3, 7, true , 0x00},   // lea rax,[base]            getter (leaf)
-			{0x0200D6BF, 3, 7, true , 0x00},   // lea rax,[base]            getter (leaf)
-			{0x0200D8CF, 5, 9, false, 0x20},   // movzx ebx,[r13+rax*8+base+0x20]  notify
-			{0x0200DAD3, 3, 7, true , 0x20},   // lea rax,[base+0x20]       Reset (subscription heads)
-			{0x0200DAF8, 3, 7, true , 0x22},   // lea rdi,[base+0x22]       Reset (persistent)
-			{0x0200DB58, 3, 7, true , 0x00},   // lea r9,[base]             typed get/set
-			{0x0200DBBC, 3, 7, true , 0x00},   // lea rax,[base]
-			{0x0200DC15, 3, 7, true , 0x00},   // lea rax,[base]
-			{0x0200DC6C, 3, 7, true , 0x00},   // lea rax,[base]
-			{0x0200DCB7, 3, 7, true , 0x00},   // lea rax,[base]
-			{0x0200DD21, 3, 7, true , 0x00},   // lea r15,[base]            SetString
-			{0x0200DE0C, 3, 7, true , 0x00},   // lea rax,[base]
-			{0x0200DEB1, 4, 8, false, 0x20},   // lea rdx,[rcx*8+base+0x20] Subscribe
-			{0x0200DF10, 3, 7, false, 0x20},   // lea rdx,[r10+base+0x20]   (leaf)
-			{0x0200E03F, 4, 8, false, 0x20},   // movzx ecx,[rax+rbp+base+0x20]  unsubscribe
-			{0x0200E087, 4, 8, false, 0x1A},   // movzx ecx,[rax+rbp+base+0x1A]
-			{0x0200E0A7, 4, 8, false, 0x1E},   // movzx ebx,[rdi+rdx*8+base+0x1E]
+			{0x0200C70E, 3, 7, true , 0x00},   // lea rdx,[base]            AllocateNode
+			{0x0200C75F, 3, 7, true , 0x00},   // lea rdx,[base]            AllocateNode
+			{0x0200CA81, 3, 7, true , 0x00},   // lea rbx,[base]            FreeModel
+			{0x0200CA9E, 3, 7, true , 0x00},   // lea rsi,[base]            FreeModel
+			{0x0200CAD3, 3, 7, true , 0x00},   // lea rbx,[base]            FreeModel
+			{0x0200CC9F, 3, 7, true , 0x00},   // lea rax,[base]            GetBool   (leaf, no .pdata)
+			{0x0200CCCF, 3, 7, true , 0x08},   // lea rax,[base+8]          GetDataType (leaf)
+			{0x0200CCEF, 3, 7, true , 0x00},   // lea rax,[base]            GetFunction (leaf)
+			{0x0200CD2F, 3, 7, true , 0x00},   // lea rax,[base]            getter (leaf)
+			{0x0200CE4D, 3, 7, true , 0x00},   // lea r11,[base]            GetModel
+			{0x0200CFA0, 3, 7, true , 0x00},   // lea rax,[base]            GetReal   (leaf)
+			{0x0200CFD4, 3, 7, true , 0x00},   // lea rax,[base]            getter (leaf)
+			{0x0200CFFF, 3, 7, true , 0x00},   // lea rax,[base]            getter (leaf)
+			{0x0200D20F, 5, 9, false, 0x20},   // movzx ebx,[r13+rax*8+base+0x20]  notify
+			{0x0200D413, 3, 7, true , 0x20},   // lea rax,[base+0x20]       Reset (subscription heads)
+			{0x0200D438, 3, 7, true , 0x22},   // lea rdi,[base+0x22]       Reset (persistent)
+			{0x0200D498, 3, 7, true , 0x00},   // lea r9,[base]             typed get/set
+			{0x0200D4FC, 3, 7, true , 0x00},   // lea rax,[base]
+			{0x0200D555, 3, 7, true , 0x00},   // lea rax,[base]
+			{0x0200D5AC, 3, 7, true , 0x00},   // lea rax,[base]
+			{0x0200D5F7, 3, 7, true , 0x00},   // lea rax,[base]
+			{0x0200D661, 3, 7, true , 0x00},   // lea r15,[base]            SetString
+			{0x0200D74C, 3, 7, true , 0x00},   // lea rax,[base]
+			{0x0200D7F1, 4, 8, false, 0x20},   // lea rdx,[rcx*8+base+0x20] Subscribe
+			{0x0200D850, 3, 7, false, 0x20},   // lea rdx,[r10+base+0x20]   (leaf)
+			{0x0200D97F, 4, 8, false, 0x20},   // movzx ecx,[rax+rbp+base+0x20]  unsubscribe
+			{0x0200D9C7, 4, 8, false, 0x1A},   // movzx ecx,[rax+rbp+base+0x1A]
+			{0x0200D9E7, 4, 8, false, 0x1E},   // movzx ebx,[rdi+rdx*8+base+0x1E]
 		};
 		// ============ command buffers for local clients 2 and 3 (2026-09-28, MP) ============
 		//
@@ -7517,11 +7524,11 @@ namespace splitscreen
 		// Cbuf_ExecuteInternal the relocated records. Runs at post_unpack, before
 		// Cbuf_Init and before the first frame; all or nothing.
 		constexpr uint32_t cbuf_old_records_rva = 0x1681EFB8;
-		constexpr uint32_t cbuf_exec_lea_rva = 0x020E0288;   // lea rax,[records] in Cbuf_ExecuteInternal
+		constexpr uint32_t cbuf_exec_lea_rva = 0x020DFBC8;   // lea rax,[records] in Cbuf_ExecuteInternal
 		constexpr uint8_t cbuf_exec_lea_head[] = {0x48, 0x8D, 0x05};
-		constexpr uint32_t cbuf_range_check_rva = 0x020E00ED;
+		constexpr uint32_t cbuf_range_check_rva = 0x020DFA2D;
 		constexpr uint8_t cbuf_range_check_stock[] = {0x48, 0x83, 0xFB, 0x02, 0x73, 0x13};
-		constexpr uint32_t cbuf_frame_bound_rva = 0x020ED473;
+		constexpr uint32_t cbuf_frame_bound_rva = 0x020ECDB3;
 		constexpr uint8_t cbuf_frame_bound_stock[] = {0x83, 0xFE, 0x02, 0x7C, 0xE9};
 		constexpr uint32_t cbuf_text_size = 0x10000;
 		constexpr size_t cbuf_record_stride = 0x10;
@@ -7637,23 +7644,23 @@ namespace splitscreen
 		constexpr uint32_t joinclient_new_count = 4;
 		constexpr uint32_t joinclient_ci_off = 0xAC;
 		constexpr entcoll_site joinclient_sites[] = {
-			{0x01ED888F, 3, 7, true , 0x0},     // lea rbx,[base]          reset loop
-			{0x01ED88E3, 3, 7, true , 0x0},     // lea rcx,[base]          getter (leaf)
-			{0x01ED891C, 2, 6, true , 0x0},     // mov [base],eax          init (leaf)
-			{0x01ED8922, 3, 7, true , 0xAC},    // mov qword [base+0xAC]   init: slot0 ci, slot1 state
-			{0x01ED8912, 2, 10, true, 0x15C},   // mov dword [base+0x15C],1  init: slot1 ci
-			{0x01ED8958, 3, 7, true , 0x0},     // lea rax,[base]          agreement request handler
-			{0x01ED8AF8, 3, 7, true , 0x0},     // lea rax,[base]
-			{0x01ED8D95, 3, 7, true , 0xA8},    // lea rbx,[base+0xA8]     update loop start
-			{0x02E9104F, 3, 7, true , 0x6E},    // lea rbx,[base+0x6E]     static ctor (ran already)
+			{0x01ED81CF, 3, 7, true , 0x0},     // lea rbx,[base]          reset loop
+			{0x01ED8223, 3, 7, true , 0x0},     // lea rcx,[base]          getter (leaf)
+			{0x01ED825C, 2, 6, true , 0x0},     // mov [base],eax          init (leaf)
+			{0x01ED8262, 3, 7, true , 0xAC},    // mov qword [base+0xAC]   init: slot0 ci, slot1 state
+			{0x01ED8252, 2, 10, true, 0x15C},   // mov dword [base+0x15C],1  init: slot1 ci
+			{0x01ED8298, 3, 7, true , 0x0},     // lea rax,[base]          agreement request handler
+			{0x01ED8438, 3, 7, true , 0x0},     // lea rax,[base]
+			{0x01ED86D5, 3, 7, true , 0xA8},    // lea rbx,[base+0xA8]     update loop start
+			{0x02E904FF, 3, 7, true , 0x6E},    // lea rbx,[base+0x6E]     static ctor (ran already)
 		};
 		constexpr entcoll_site joinclient_end_sites[] = {
-			{0x01ED8898, 3, 7, true , 0x160},   // lea rsi,[base+2*0xB0]        reset loop end
-			{0x01ED8D9E, 3, 7, true , 0x208},   // lea r14,[base+0xA8+2*0xB0]   update loop end
+			{0x01ED81D8, 3, 7, true , 0x160},   // lea rsi,[base+2*0xB0]        reset loop end
+			{0x01ED86DE, 3, 7, true , 0x208},   // lea r14,[base+0xA8+2*0xB0]   update loop end
 		};
-		constexpr uint32_t lobbymsg_bound_rva = 0x01EECD4E;
+		constexpr uint32_t lobbymsg_bound_rva = 0x01EEC68E;
 		constexpr uint8_t lobbymsg_bound_stock[] = {0x83, 0xFB, 0x02, 0x7C, 0xC5};   // cmp ebx,2 / jl
-		constexpr uint32_t netchan_get_lea_rva = 0x0211C611;                          // lea rax,[s_netchan]
+		constexpr uint32_t netchan_get_lea_rva = 0x0211BF51;                          // lea rax,[s_netchan]
 		constexpr uint32_t netchan_old_base = 0x16DEAEB0;
 		const char* joinclient_result = "lobby join clients: not attempted";
 		size_t joinclient_new = 0;
@@ -7761,8 +7768,8 @@ namespace splitscreen
 			const char* what;
 		};
 		constexpr ctrl_check_patch lua_ctrl_checks[] = {
-			{0x01F42EBE, {0x83, 0xF9, 0x01, 0x0F, 0x87, 0x12, 0x18, 0x00, 0x00}, "Engine.GetClientNum"},
-			{0x01F502EE, {0x83, 0xF9, 0x01, 0x0F, 0x87, 0x17, 0x18, 0x00, 0x00}, "Engine.GetPredictedClientNum"},
+			{0x01F427FE, {0x83, 0xF9, 0x01, 0x0F, 0x87, 0x12, 0x18, 0x00, 0x00}, "Engine.GetClientNum"},
+			{0x01F4FC2E, {0x83, 0xF9, 0x01, 0x0F, 0x87, 0x17, 0x18, 0x00, 0x00}, "Engine.GetPredictedClientNum"},
 		};
 		const char* lua_ctrl_result = "lua controller checks: not attempted";
 
@@ -7812,10 +7819,10 @@ namespace splitscreen
 		// allocated from it. No code references the static buffer (RVA 0x163FB160,
 		// right after the old node array) except the hidden init itself, so nothing
 		// compares string pointers against its address.
-		constexpr uint32_t hunk_create_rva = 0x02277460;
+		constexpr uint32_t hunk_create_rva = 0x02276DA0;
 		constexpr uint8_t hunk_create_prologue[] = {
 			0x49, 0x63, 0xC0,                          // movsxd rax,r8d
-			0x4C, 0x8D, 0x1D, 0x86, 0xB4, 0x14, 0x01,  // lea r11,[rip+0x0114B486] (scheme table)
+			0x4C, 0x8D, 0x1D, 0x46, 0xBB, 0x14, 0x01,  // lea r11,[rip+0x0114B486] (scheme table)
 		};
 		constexpr size_t model_string_stock_size = 0xC0000;
 		constexpr size_t model_string_new_size = 0x400000;
@@ -7898,7 +7905,7 @@ namespace splitscreen
 			return true;
 		}
 
-		constexpr uint32_t model_pool_bound_rva = 0x0200DACE;
+		constexpr uint32_t model_pool_bound_rva = 0x0200D40E;
 		constexpr uint8_t model_pool_bound_stock[] = {0xBE, 0x00, 0x90, 0x00, 0x00};   // mov esi,0x9000
 		constexpr uint8_t model_pool_bound_new[] = {0xBE, 0xFF, 0xFF, 0x00, 0x00};     // mov esi,0xFFFF
 		const char* model_pool_result = "ui model pool: not attempted";
@@ -8024,7 +8031,7 @@ namespace splitscreen
 			{0x01D0E059, 3, 7, true, 0},            // lea rdx,[base]        alloc
 			{0x01D0D598, 3, 7, true, sst_stride},   // lea rbp,[base+0x21F0] buffer creation
 			{0x01D0DF0A, 3, 7, true, sst_stride},   // lea rbp,[base+0x21F0] free loop
-			{0x02E8B38A, 3, 7, true, 0},            // lea rbx,[base]        static constructor
+			{0x02E8A83A, 3, 7, true, 0},            // lea rbx,[base]        static constructor
 		};
 		constexpr entcoll_site sst_end_site[] = {
 			{0x01D0D5A6, 3, 7, true, sst_old_count * sst_stride},   // lea r14,[end] creation loop end
@@ -8033,7 +8040,7 @@ namespace splitscreen
 		constexpr sst_imm sst_imms[] = {
 			{0x01D0E056, 2, 1, 3, sst_new_count - 1},   // and eax,3 -> 7
 			{0x01D0DF11, 2, 4, 4, sst_new_count},       // mov r14d,4 -> 8
-			{0x02E8B391, 1, 4, 3, sst_new_count - 1},   // mov edi,3 (dec/jns) -> 7
+			{0x02E8A841, 1, 4, 3, sst_new_count - 1},   // mov edi,3 (dec/jns) -> 7
 		};
 		const char* sst_result = "sun-shadow ring: not attempted";
 		size_t sst_new = 0;
@@ -8344,7 +8351,7 @@ namespace splitscreen
 			{0x01347E77, 3, 7, true , 0x0148}, // lea rax, [rip + 0x405433a]
 			{0x01347F7F, 3, 7, true , 0x0138}, // lea rax, [rip + 0x4054222]
 			{0x013481CE, 3, 7, true , 0x0000}, // lea r8, [rip + 0x4053e9b]
-			{0x01DDE9AA, 3, 7, true , 0x0000}, // lea rax, [rip + 0x35b12cf]
+			{0x01DDE2EA, 3, 7, true , 0x0000}, // lea rax, [rip + 0x35b12cf]
 			// 0x0219DA4D `adc bh, [rdi+0x539e9e4]` REMOVED (2026-09-25 pdata cross-check):
 			// inside the 370 KB Arxan-flattened blob 0x02195450..0x021EFAE4, right
 			// after two unconditional jmps and a nop, and no jmp/call/jcc anywhere in
@@ -8551,11 +8558,11 @@ namespace splitscreen
 			{0x010C153D, 4, 9, false, 0x1618}, // cmp dword ptr [r12 + rax + 0x4d19d58], 0
 			{0x010C1548, 3, 7, false, 0x161C}, // lea rdi, [rax + 0x4d19d5c]
 			{0x010C1583, 4, 8, false, 0x1618}, // cmp r14d, dword ptr [r12 + r13 + 0x4d19d58]
-			{0x023A118E, 3, 7, true , 0x0000}, // mov rdx, qword ptr [rip + 0x28feafb]
-			{0x023AB51A, 4, 9, false, 0x0000}, // cmp qword ptr [rax + r15 + 0x4d18740], 0
-			{0x02622498, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x267d7f1]
-			{0x02CCEC92, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x1fd0ff7]
-			{0x02EFA1A7, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x1da0082]
+			{0x023A0ACE, 3, 7, true , 0x0000}, // mov rdx, qword ptr [rip + 0x28feafb]
+			{0x023AAE5A, 4, 9, false, 0x0000}, // cmp qword ptr [rax + r15 + 0x4d18740], 0
+			{0x02621DD8, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x267d7f1]
+			{0x02CCE142, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x1fd0ff7]
+			{0x02EF9657, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x1da0082]
 		};
 
 		// s_cameraShakeSet - CameraShakeSet[4] (PS4 0x03F61EF0, 0x104). CG_ClearCameraShakes
@@ -8574,7 +8581,7 @@ namespace splitscreen
 		constexpr entcoll_site moverinfos_sites[] = {
 			{0x004CB9D4, 3, 7, true , 0x0000}, // lea rax, [rip + 0x43177d5]
 			{0x004F0FDB, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x42f21ce]
-			{0x02CCE2AA, 3, 7, true , 0x0000}, // lea rbx, [rip + 0x1a9c44f]
+			{0x02CCD75A, 3, 7, true , 0x0000}, // lea rbx, [rip + 0x1a9c44f]
 		};
 
 		// moveInfoEntNum - int[4] (PS4 0x03F61D90), read next to moverInfos at 0x004F0FCA.
@@ -8687,14 +8694,14 @@ namespace splitscreen
 		// and one clear, `memset(arr, 0, 0x2B08)` at 0x020F0900/0x020F0909.
 		// Moved to [4]; the clear widens to four rows.
 		constexpr entcoll_site session_member_sites[] = {
-			{0x020E4840, 3, 7, true , 0x0000}, // lea rcx, [arr]           clear
-			{0x020E68E4, 3, 7, false, 0x0000}, // lea rdx, [rax + arr]     rax = image base
-			{0x020E6920, 3, 7, true , 0x0021}, // lea rax, [arr + 0x21]
-			{0x020E6931, 3, 7, false, 0x0001}, // lea rsi, [rsi + arr + 1] image-base relative
+			{0x020E4180, 3, 7, true , 0x0000}, // lea rcx, [arr]           clear
+			{0x020E6224, 3, 7, false, 0x0000}, // lea rdx, [rax + arr]     rax = image base
+			{0x020E6260, 3, 7, true , 0x0021}, // lea rax, [arr + 0x21]
+			{0x020E6271, 3, 7, false, 0x0001}, // lea rsi, [rsi + arr + 1] image-base relative
 		};
 		constexpr uint32_t session_member_base = 0x1684FAA0;
 		constexpr uint32_t session_member_stride = 18 * 0x132;   // 0x1584
-		constexpr uint32_t session_member_clear_rva = 0x020E4849;
+		constexpr uint32_t session_member_clear_rva = 0x020E4189;
 		size_t session_member_new = 0;
 
 		bool relocate_session_members()
@@ -8843,7 +8850,7 @@ namespace splitscreen
 			{0x00071B48, 3, 7, true , 0x0000}, // lea rax, [rip + 0x3603681]
 			{0x00073644, 3, 7, true , 0x0000}, // lea rax, [rip + 0x3601b85]
 			{0x000753E0, 3, 7, true , 0x0000}, // lea rax, [rip + 0x35ffde9]
-			{0x02C6B2F5, 3, 7, true , 0x01B4}, // lea rax, [rip + 0x9915d8]
+			{0x02C6A7A5, 3, 7, true , 0x01B4}, // lea rax, [rip + 0x9915d8]
 		};
 		constexpr perclient_array aaglob_array = {
 			"aaGlobArray", 0x035F61D0, 0x4E30, aaglob_v2_sites, std::size(aaglob_v2_sites), 0, {}};
@@ -9204,6 +9211,7 @@ namespace splitscreen
 		constexpr entcoll_site compass_actors_sites[] = {
 			{0x00598884, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x426bcf5]   CG_ClearCompassPingData (added: pdata_xcheck)
 			{0x005A1EC3, 3, 7, true , 0x0000}, // lea rax, [rip + 0x42626b6]
+			{0x005A1FA3, 3, 7, true , 0x0000}, // lea rcx,[array] / imul rax,rax,0x2C00 - missed by the v2 scanner until 2026-09-29 (same RVA in 0x06517980)
 			{0x005A3B0D, 3, 7, true , 0x0000}, // lea rax, [rip + 0x4260a6c]
 			{0x005A5343, 3, 7, true , 0x0000}, // lea rax, [rip + 0x425f236]
 			{0x005A6CFF, 3, 7, true , 0x0000}, // lea rax, [rip + 0x425d87a]
@@ -9359,8 +9367,8 @@ namespace splitscreen
 			{0x011CA1FD, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x380f22c]
 			{0x0122C649, 4, 8, false, 0x0000}, // add rdi, qword ptr [rbp + r14*8 + 0x49d9410]
 			{0x0126671A, 4, 8, false, 0x0000}, // add rdi, qword ptr [r10 + rsi*8 + 0x49d9410]
-			{0x026D1AB4, 4, 8, false, 0x0000}, // add r13, qword ptr [rcx + rax*8 + 0x49d9410]
-			{0x0271FD7E, 4, 8, false, 0x0000}, // add rbx, qword ptr [r14 + rax*8 + 0x49d9410]
+			{0x026D13F4, 4, 8, false, 0x0000}, // add r13, qword ptr [rcx + rax*8 + 0x49d9410]
+			{0x0271F6BE, 4, 8, false, 0x0000}, // add rbx, qword ptr [r14 + rax*8 + 0x49d9410]
 		};
 		constexpr entcoll_site cg_ikbuf_sites[] = {
 			{0x00843B03, 4, 8, false, 0x0000}, // mov qword ptr [rsi + r13 + 0x4a315c0], rax
@@ -9381,42 +9389,42 @@ namespace splitscreen
 			{0x00853DD9, 4, 8, false, 0x0000}, // mov rdx, qword ptr [r14 + rdi*8 + 0x17f00ff0]
 			{0x00856F0C, 3, 7, true , 0x0000}, // mov qword ptr [rip + 0x176aa0dd], rax
 			{0x00856F13, 3, 7, true , 0x0008}, // mov qword ptr [rip + 0x176aa0de], rax
-			{0x022F2F80, 4, 8, false, 0x0000}, // mov rax, qword ptr [r13 + rdi*8 + 0x17f00ff0]
-			{0x022F6356, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x15b921e3]
-			{0x022F6373, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x15b921c6]
-			{0x022F63B3, 4, 8, false, 0x0000}, // mov r10, qword ptr [rdi + r11*8 + 0x17f00ff0]
-			{0x022F643D, 4, 8, false, 0x0000}, // mov rax, qword ptr [rdi + r11*8 + 0x17f00ff0]
-			{0x022F644D, 4, 8, false, 0x0000}, // mov rax, qword ptr [rdi + r11*8 + 0x17f00ff0]
-			{0x022F645D, 4, 8, false, 0x0000}, // mov rax, qword ptr [rdi + r11*8 + 0x17f00ff0]
-			{0x022F646A, 4, 8, false, 0x0000}, // mov rax, qword ptr [rdi + r11*8 + 0x17f00ff0]
-			{0x022F6477, 4, 8, false, 0x0000}, // mov rax, qword ptr [rdi + r11*8 + 0x17f00ff0]
-			{0x022F649B, 4, 8, false, 0x0000}, // mov rax, qword ptr [rdi + r11*8 + 0x17f00ff0]
-			{0x022F65B1, 4, 8, false, 0x0000}, // mov rcx, qword ptr [r14 + rsi*8 + 0x17f00ff0]
-			{0x022F65D0, 4, 8, false, 0x0000}, // mov rdi, qword ptr [r14 + rsi*8 + 0x17f00ff0]
-			{0x022F6727, 4, 8, false, 0x0000}, // add r8, qword ptr [rdi + r12*8 + 0x17f00ff0]
-			{0x022F6774, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rdx + r12*8 + 0x17f00ff0]
-			{0x022F6788, 4, 8, false, 0x0000}, // mov r8, qword ptr [rdx + r12*8 + 0x17f00ff0]
-			{0x022F67AA, 4, 8, false, 0x0000}, // mov rax, qword ptr [rcx + r12*8 + 0x17f00ff0]
-			{0x022F67D0, 4, 8, false, 0x0000}, // mov rax, qword ptr [r14 + r12*8 + 0x17f00ff0]
-			{0x022F6814, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rdi + r12*8 + 0x17f00ff0]
-			{0x022F6821, 4, 8, false, 0x0000}, // mov rax, qword ptr [rdi + r12*8 + 0x17f00ff0]
-			{0x022FB259, 4, 8, false, 0x0000}, // add rdx, qword ptr [r12 + r15*8 + 0x17f00ff0]
-			{0x022FB2FA, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x15b8d23f]
-			{0x022FCF9F, 4, 8, false, 0x0000}, // lea rsi, [rdi*8 + 0x17f00ff0]
-			{0x022FDB3C, 4, 8, false, 0x0000}, // add rdi, qword ptr [rsi + r15*8 + 0x17f00ff0]
-			{0x02300D0F, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x15b8782a]
+			{0x022F28C0, 4, 8, false, 0x0000}, // mov rax, qword ptr [r13 + rdi*8 + 0x17f00ff0]
+			{0x022F5C96, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x15b921e3]
+			{0x022F5CB3, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x15b921c6]
+			{0x022F5CF3, 4, 8, false, 0x0000}, // mov r10, qword ptr [rdi + r11*8 + 0x17f00ff0]
+			{0x022F5D7D, 4, 8, false, 0x0000}, // mov rax, qword ptr [rdi + r11*8 + 0x17f00ff0]
+			{0x022F5D8D, 4, 8, false, 0x0000}, // mov rax, qword ptr [rdi + r11*8 + 0x17f00ff0]
+			{0x022F5D9D, 4, 8, false, 0x0000}, // mov rax, qword ptr [rdi + r11*8 + 0x17f00ff0]
+			{0x022F5DAA, 4, 8, false, 0x0000}, // mov rax, qword ptr [rdi + r11*8 + 0x17f00ff0]
+			{0x022F5DB7, 4, 8, false, 0x0000}, // mov rax, qword ptr [rdi + r11*8 + 0x17f00ff0]
+			{0x022F5DDB, 4, 8, false, 0x0000}, // mov rax, qword ptr [rdi + r11*8 + 0x17f00ff0]
+			{0x022F5EF1, 4, 8, false, 0x0000}, // mov rcx, qword ptr [r14 + rsi*8 + 0x17f00ff0]
+			{0x022F5F10, 4, 8, false, 0x0000}, // mov rdi, qword ptr [r14 + rsi*8 + 0x17f00ff0]
+			{0x022F6067, 4, 8, false, 0x0000}, // add r8, qword ptr [rdi + r12*8 + 0x17f00ff0]
+			{0x022F60B4, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rdx + r12*8 + 0x17f00ff0]
+			{0x022F60C8, 4, 8, false, 0x0000}, // mov r8, qword ptr [rdx + r12*8 + 0x17f00ff0]
+			{0x022F60EA, 4, 8, false, 0x0000}, // mov rax, qword ptr [rcx + r12*8 + 0x17f00ff0]
+			{0x022F6110, 4, 8, false, 0x0000}, // mov rax, qword ptr [r14 + r12*8 + 0x17f00ff0]
+			{0x022F6154, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rdi + r12*8 + 0x17f00ff0]
+			{0x022F6161, 4, 8, false, 0x0000}, // mov rax, qword ptr [rdi + r12*8 + 0x17f00ff0]
+			{0x022FAB99, 4, 8, false, 0x0000}, // add rdx, qword ptr [r12 + r15*8 + 0x17f00ff0]
+			{0x022FAC3A, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x15b8d23f]
+			{0x022FC8DF, 4, 8, false, 0x0000}, // lea rsi, [rdi*8 + 0x17f00ff0]
+			{0x022FD47C, 4, 8, false, 0x0000}, // add rdi, qword ptr [rsi + r15*8 + 0x17f00ff0]
+			{0x0230064F, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x15b8782a]
 		};
 		constexpr entcoll_site numdestructibles_sites[] = {
 			// 0x0235CB02 `lea r8` REMOVED: end marker of the s_destructibles loop (see below)
-			{0x022F6118, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x15bd1511]
-			{0x022F6422, 4, 8, false, 0x0000}, // inc dword ptr [rdi + r11*4 + 0x17f400e0]
-			{0x022F6615, 4, 12, false, 0x0000}, // mov dword ptr [r14 + rsi*4 + 0x17f400e0], 0
-			{0x022F66DF, 4, 8, false, 0x0000}, // mov dword ptr [rdi + r14*4 + 0x17f400e0], eax
-			{0x022F988B, 4, 8, false, 0x0000}, // cmp r13d, dword ptr [rdi + r12*4 + 0x17f400e0]
-			{0x022FB244, 4, 8, false, 0x0000}, // cmp dword ptr [r12 + r15*4 + 0x17f400e0], ebx
-			{0x022FB282, 4, 8, false, 0x0000}, // cmp ebx, dword ptr [r12 + r15*4 + 0x17f400e0]
-			{0x022FD00D, 4, 8, false, 0x0000}, // cmp dword ptr [r14 + r15 + 0x17f400e0], ebx
-			{0x022FD04F, 4, 8, false, 0x0000}, // cmp ebx, dword ptr [r14 + r15 + 0x17f400e0]
+			{0x022F5A58, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x15bd1511]
+			{0x022F5D62, 4, 8, false, 0x0000}, // inc dword ptr [rdi + r11*4 + 0x17f400e0]
+			{0x022F5F55, 4, 12, false, 0x0000}, // mov dword ptr [r14 + rsi*4 + 0x17f400e0], 0
+			{0x022F601F, 4, 8, false, 0x0000}, // mov dword ptr [rdi + r14*4 + 0x17f400e0], eax
+			{0x022F91CB, 4, 8, false, 0x0000}, // cmp r13d, dword ptr [rdi + r12*4 + 0x17f400e0]
+			{0x022FAB84, 4, 8, false, 0x0000}, // cmp dword ptr [r12 + r15*4 + 0x17f400e0], ebx
+			{0x022FABC2, 4, 8, false, 0x0000}, // cmp ebx, dword ptr [r12 + r15*4 + 0x17f400e0]
+			{0x022FC94D, 4, 8, false, 0x0000}, // cmp dword ptr [r14 + r15 + 0x17f400e0], ebx
+			{0x022FC98F, 4, 8, false, 0x0000}, // cmp ebx, dword ptr [r14 + r15 + 0x17f400e0]
 			// 0x0237B56E `lea rdx` and 0x0237BF49 `lea r13` REMOVED - with 0x0235CB02 they
 			// are END MARKERS of loops over s_destructibles (0x17F37CE0, 0x80 x 0x108),
 			// which ends exactly where cg_numDestructibles begins: `add rbx,0x108 /
@@ -9425,24 +9433,24 @@ namespace splitscreen
 			// 0x0237BF6C, 2026-09-25 20:08. Caught since by tools/sentinel_check.py.
 		};
 		constexpr entcoll_site cg_updatetime_sites[] = {
-			{0x022F6621, 4, 12, false, 0x0000}, // mov dword ptr [r14 + rsi*4 + 0x17f400e8], 0
-			{0x022FCFE0, 4, 8, false, 0x0000}, // mov eax, dword ptr [r14 + r15 + 0x17f400e8]
-			{0x022FCFEA, 4, 8, false, 0x0000}, // mov dword ptr [r14 + r15 + 0x17f400e8], eax
-			{0x022FD005, 4, 8, false, 0x0000}, // mov dword ptr [r14 + r15 + 0x17f400e8], eax
+			{0x022F5F61, 4, 12, false, 0x0000}, // mov dword ptr [r14 + rsi*4 + 0x17f400e8], 0
+			{0x022FC920, 4, 8, false, 0x0000}, // mov eax, dword ptr [r14 + r15 + 0x17f400e8]
+			{0x022FC92A, 4, 8, false, 0x0000}, // mov dword ptr [r14 + r15 + 0x17f400e8], eax
+			{0x022FC945, 4, 8, false, 0x0000}, // mov dword ptr [r14 + r15 + 0x17f400e8], eax
 		};
 		constexpr entcoll_site destr_gamestates_sites[] = {
-			{0x023026CC, 3, 7, true , 0x0002}, // lea rax, [rip + 0x15b85e7f]
-			{0x02302703, 3, 7, true , 0x0000}, // lea rax, [rip + 0x15b85e46]
-			{0x023031C7, 3, 7, true , 0x0000}, // lea r15, [rip + 0x15b85382]
-			{0x02303271, 3, 7, true , 0x0002}, // lea rax, [rip + 0x15b852da]
-			{0x023032A3, 3, 7, false, 0x0000}, // lea rdx, [r11 + 0x17f01000]
-			{0x023032AA, 3, 7, false, 0x0000}, // lea r9, [r11 + 0x17f01000]
+			{0x0230200C, 3, 7, true , 0x0002}, // lea rax, [rip + 0x15b85e7f]
+			{0x02302043, 3, 7, true , 0x0000}, // lea rax, [rip + 0x15b85e46]
+			{0x02302B07, 3, 7, true , 0x0000}, // lea r15, [rip + 0x15b85382]
+			{0x02302BB1, 3, 7, true , 0x0002}, // lea rax, [rip + 0x15b852da]
+			{0x02302BE3, 3, 7, false, 0x0000}, // lea rdx, [r11 + 0x17f01000]
+			{0x02302BEA, 3, 7, false, 0x0000}, // lea r9, [r11 + 0x17f01000]
 		};
 		constexpr entcoll_site destr_numgamestates_sites[] = {
-			{0x023026B3, 3, 7, true , 0x0000}, // lea rax, [rip + 0x15b87f96]
-			{0x0230318D, 3, 7, true , 0x0000}, // lea rax, [rip + 0x15b874bc]
-			{0x02303261, 4, 8, false, 0x0000}, // mov r9d, dword ptr [r11 + r10*4 + 0x17f03100]   (added: pdata_xcheck)
-			{0x023032B1, 4, 8, false, 0x0000}, // mov dword ptr [r11 + r10*4 + 0x17f03100], eax
+			{0x02301FF3, 3, 7, true , 0x0000}, // lea rax, [rip + 0x15b87f96]
+			{0x02302ACD, 3, 7, true , 0x0000}, // lea rax, [rip + 0x15b874bc]
+			{0x02302BA1, 4, 8, false, 0x0000}, // mov r9d, dword ptr [r11 + r10*4 + 0x17f03100]   (added: pdata_xcheck)
+			{0x02302BF1, 4, 8, false, 0x0000}, // mov dword ptr [r11 + r10*4 + 0x17f03100], eax
 		};
 		constexpr perclient_array batch4[] = {
 			{"cg_weaponsarray", 0x0495A410, 0x8, cg_weaponsarray_sites, std::size(cg_weaponsarray_sites), 0, {}},
@@ -9468,15 +9476,15 @@ namespace splitscreen
 		// the foreign flag, not ours) plus the reset loop's end marker
 		// (0x02471623 `lea r14`, stock end 0x17FA8708 -> new + 5*8).
 		constexpr entcoll_site ikstates_sites[] = {
-			{0x023F8203, 3, 7, true , 0x0008}, // lea rdx, [ikStates+8]   IK_AllocateLocalClientMemory
-			{0x023F83CD, 3, 7, true , 0x0000}, // lea rdx, [ikStates]
-			{0x023F83FF, 3, 7, true , 0x0000}, // lea rdx, [ikStates]
-			{0x023F84D5, 3, 7, true , 0x0008}, // lea rax, [ikStates+8]
-			{0x023F88C0, 3, 7, true , 0x0000}, // lea rsi, [ikStates]
-			{0x023F8B6C, 3, 7, true , 0x0000}, // lea rsi, [ikStates]      reset loop start
-			{0x023F8C54, 3, 7, true , 0x0000}, // lea rsi, [ikStates]
-			{0x023F9920, 3, 7, true , 0x0008}, // lea rcx, [ikStates+8]
-			{0x0245ABF9, 4, 9, false, 0x0008}, // cmp qword [rbx+rcx*8+ikStates+8], 0
+			{0x023F7B43, 3, 7, true , 0x0008}, // lea rdx, [ikStates+8]   IK_AllocateLocalClientMemory
+			{0x023F7D0D, 3, 7, true , 0x0000}, // lea rdx, [ikStates]
+			{0x023F7D3F, 3, 7, true , 0x0000}, // lea rdx, [ikStates]
+			{0x023F7E15, 3, 7, true , 0x0008}, // lea rax, [ikStates+8]
+			{0x023F8200, 3, 7, true , 0x0000}, // lea rsi, [ikStates]
+			{0x023F84AC, 3, 7, true , 0x0000}, // lea rsi, [ikStates]      reset loop start
+			{0x023F8594, 3, 7, true , 0x0000}, // lea rsi, [ikStates]
+			{0x023F9260, 3, 7, true , 0x0008}, // lea rcx, [ikStates+8]
+			{0x0245A539, 4, 9, false, 0x0008}, // cmp qword [rbx+rcx*8+ikStates+8], 0
 		};
 		constexpr uint32_t ikstates_base = 0x17F297C0;
 		constexpr uint32_t ikstates_old_slots = 3;
@@ -9503,7 +9511,7 @@ namespace splitscreen
 			{
 				return false;
 			}
-			if (!retarget_end_marker(0x023F8B73, 3, 7, ikstates_base + ikstates_old_slots * 8,
+			if (!retarget_end_marker(0x023F84B3, 3, 7, ikstates_base + ikstates_old_slots * 8,
 			                         reinterpret_cast<size_t>(fresh) + ikstates_new_slots * 8))
 			{
 				for (size_t j = 0; j < std::size(ikstates_sites); ++j)
@@ -9534,7 +9542,7 @@ namespace splitscreen
 			if (!ik_reset_widened)
 			{
 				ik_reset_widened = relocate_ikstates()
-					|| retarget_end_marker(0x023F8B73, 3, 7, 0x17F297D8, base() + 0x17F297E0);
+					|| retarget_end_marker(0x023F84B3, 3, 7, 0x17F297D8, base() + 0x17F297E0);
 			}
 		}
 
@@ -9569,7 +9577,7 @@ namespace splitscreen
 			{0x0019A8A4, 3, 7, true , 0x0000}, // lea rax, [rip + 0x40c0c55]
 			{0x0019A9D6, 3, 7, true , 0x0000}, // lea rax, [rip + 0x40c0b23]
 			{0x0019B831, 3, 7, true , 0x0000}, // lea rdx, [rip + 0x40bfcc8]
-			{0x02CA7F48, 3, 7, true , 0x00F0}, // lea rax, [rip + 0x153abf1]
+			{0x02CA73F8, 3, 7, true , 0x00F0}, // lea rax, [rip + 0x153abf1]
 		};
 		// 0x0481CC80 x 0x3C0 - 8 entries of 0x78 per client ((lc, idx) accessors
 		// 0x0060F6A0 / 0x0060F830 / 0x00641870; caller 0x00643580 takes lc and indexes
@@ -9643,7 +9651,7 @@ namespace splitscreen
 			{0x00A21B09, 3, 7, true , 0x0000}, // lea r11, [rip + 0x4302d10]
 			{0x00A21B10, 3, 7, true , 0x0048}, // lea rdx, [rip + 0x4302d51]
 			{0x00A21B69, 3, 7, true , 0x0044}, // lea rsi, [rip + 0x4302cf4]
-			{0x02D2D3A5, 3, 7, true , 0x0040}, // lea rax, [rip + 0x1f7ea04]
+			{0x02D2C855, 3, 7, true , 0x0040}, // lea rax, [rip + 0x1f7ea04]
 		};
 		constexpr entcoll_site tnotify_head_sites[] = {
 			{0x00A219F1, 4, 8, false, 0x0000}, // mov qword ptr [r12 + rdi*8 + 0x4d286c0], rbx
@@ -9703,8 +9711,8 @@ namespace splitscreen
 			};
 			if (!batch6_new[0])
 			{
-				if (!bytes_at(0x02D2D3A0, tnotify_static_init, sizeof(tnotify_static_init))
-					|| !bytes_at(0x02D2D3B2, tnotify_static_init_body, sizeof(tnotify_static_init_body)))
+				if (!bytes_at(0x02D2C850, tnotify_static_init, sizeof(tnotify_static_init))
+					|| !bytes_at(0x02D2C862, tnotify_static_init_body, sizeof(tnotify_static_init_body)))
 				{
 					note("[splitscreen] tnotify: static initializer differs - queues not moved\n");
 					return;
@@ -9758,7 +9766,7 @@ namespace splitscreen
 		// only writes zeros, so zero-filled slots 2/3 are its exact initial state.
 		constexpr entcoll_site fxgpu_client_sites[] = {
 			{0x01CBD588, 3, 7, true , 0x0000}, // lea rax, [rip + 0xd841ea1]
-			{0x02E8A904, 3, 7, true , 0x00C0}, // lea rbx, [rip + 0xc608505]
+			{0x02E89DB4, 3, 7, true , 0x00C0}, // lea rbx, [rip + 0xc608505]
 		};
 		constexpr perclient_array batch7[] = {
 			{"view_idsets_240", 0x0F48C880, 0x240, fxgpu_client_sites, std::size(fxgpu_client_sites), 0, {}},
@@ -9888,7 +9896,7 @@ namespace splitscreen
 			{0x01C9C85F, 3, 7, true , 0x0000}, // lea rcx, [rip + 0xd83b316]
 			{0x01C9CA22, 3, 7, true , 0x0000}, // lea rax, [rip + 0xd83b153]
 			{0x01C9CB0F, 3, 7, true , 0x0000}, // lea rax, [rip + 0xd83b066]
-			{0x02E8A76A, 3, 7, true , 0x0000}, // lea rbx, [rip + 0xc5e0d2b]
+			{0x02E89C1A, 3, 7, true , 0x0000}, // lea rbx, [rip + 0xc5e0d2b]
 		};
 		constexpr perclient_array batch9[] = {
 			{"rview_a24", 0x0F464FCC, 0xA24, rview_a24_sites, std::size(rview_a24_sites), 0, {}},
@@ -10032,12 +10040,12 @@ namespace splitscreen
 		// states, root, stack). Cold paths only, plain Win32 file calls, no CRT
 		// (see note()). CG_LUIHUDRestart (PC 0x00F7E970 = PS4 0x29AD90) is
 		// verified and documented here in case a real HUD restart is ever needed.
-		constexpr uint32_t ui_cod_init_rva = 0x01F1CF50;
+		constexpr uint32_t ui_cod_init_rva = 0x01F1C890;
 		constexpr uint32_t ui_cod_init_callsites[] = {
-			0x01F2651F,   // UI_CoD_RunFrame        (if !UI_IsInitialized)
-			0x01F26F48,   // UI_CoD_ShutdownAndInit (CL_InitUI, Com_InitUIAndCommonXAssets, devmap)
+			0x01F25E5F,   // UI_CoD_RunFrame        (if !UI_IsInitialized)
+			0x01F26888,   // UI_CoD_ShutdownAndInit (CL_InitUI, Com_InitUIAndCommonXAssets, devmap)
 		};
-		constexpr uint32_t lui_scoped_event_rva = 0x02685CE0;
+		constexpr uint32_t lui_scoped_event_rva = 0x02685620;
 		constexpr uint32_t first_snapshot_event_callsites[] = {
 			0x00F7E9F6,   // CG_LUIHUDRestart
 			0x01321058,   // CL_FirstSnapshot
@@ -10321,7 +10329,7 @@ namespace splitscreen
 		// are saved to his own slot by the game as usual and are replaced by the
 		// next copy, which is the console's "keeps nothing".
 		// BO3_GUEST_COPY=off disables it.
-		constexpr uint32_t save_read_callsite = 0x0221872E;
+		constexpr uint32_t save_read_callsite = 0x0221806E;
 		constexpr uint32_t save_read_rva = 0x01C144B0;
 		constexpr size_t save_desc_stride = 0x58;
 		constexpr size_t save_desc_name_max = 0x40;
@@ -10333,14 +10341,14 @@ namespace splitscreen
 		// nothing ("copied 0, missing 0" for all four controllers at boot).
 		constexpr uint32_t save_dir_branch_rva = 0x01C1451E;
 		constexpr uint32_t save_base_dvar_rva = 0x179E63E0;
-		constexpr uint32_t dvar_get_string_rva = 0x02263130;
+		constexpr uint32_t dvar_get_string_rva = 0x02262A70;
 		constexpr const char* sponsor_copy_names[] = {
 			"loadouts_zm_offline", "loadouts_mp_offline", "loadouts_cp_offline",
 			"stats_zm_offline", "stats_mp_offline", "stats_cp_offline",
 			"stats_cp_nightmare_offline", "stats_fr_offline",
 		};
 		bool guest_copy_installed = false;
-		constexpr uint32_t save_write_callsite = 0x02218709;   // call 0x01C20990, same task layout
+		constexpr uint32_t save_write_callsite = 0x02218049;   // call 0x01C20990, same task layout
 		constexpr uint32_t save_write_rva = 0x01C145C0;
 
 		// Trace only: which controller's files the game writes, and when.
@@ -10652,6 +10660,28 @@ namespace splitscreen
 			trace_write(l);
 		}
 
+		// CScr_SetFilterPassEnabled (0x0039DB30) is not in the table above: it
+		// compares against a register holding 1 (`cmp r9d, edi`, edi is also the
+		// script instance) and prints its own "called with an invalid local
+		// client" line, so players 3/4 got no screen filters and the console
+		// filled with that line. PS4 0x14DEC0 accepts 0..4 and then only touches
+		// the client's cg_t (cgArray, 4 slots, behind its own cl_maxLocalClients
+		// check). `cmp r9d, edi` -> `cmp eax, 3`: eax is the same Scr_GetInt
+		// result r9 was just sign-extended from, and ja still rejects negatives.
+		void widen_filter_pass_lc_check()
+		{
+			constexpr uint32_t rva = 0x0039DB48;   // movsxd r9,eax ; cmp r9d,edi ; ja
+			static constexpr uint8_t stock[] = {0x4C, 0x63, 0xC8, 0x44, 0x3B, 0xCF, 0x0F, 0x87};
+			static constexpr uint8_t cmp_eax_3[] = {0x83, 0xF8, 0x03};
+			auto* at = reinterpret_cast<uint8_t*>(base() + rva);
+			const bool ok = readable(at, sizeof(stock)) && std::memcmp(at, stock, sizeof(stock)) == 0
+				&& write_bytes(at + 3, cmp_eax_3, sizeof(cmp_eax_3));
+			trace_line l;
+			l.str(ok ? "SetFilterPassEnabled: local-client bound 1 -> 3"
+			         : "SetFilterPassEnabled: bytes differ - not widened");
+			trace_write(l);
+		}
+
 		// ---- BATCH 12: the zombies HUD player list (2026-09-26 16:02) -----------
 		//
 		// With lens flares gated the round ran ~55 s (Com_Frame and all three
@@ -10679,43 +10709,43 @@ namespace splitscreen
 		// generator's convergence test (leaf right after int3 padding) and is
 		// added by hand - pe_xref's exhaustive scan lists it.
 		constexpr entcoll_site hudpl_score_sites[] = {
-			{0x026A4A35, 4, 8, false, 0x0000}, // cmp dword ptr [r14 + rsi + 0x1a8759d0], eax
-			{0x026A4A48, 4, 8, false, 0x0000}, // mov dword ptr [r14 + rsi + 0x1a8759d0], eax
-			{0x026A7BB2, 3, 7, false, 0x0000}, // mov dword ptr [rcx + rsi + 0x1a8759d0], eax
-			{0x026C74CB, 3, 7, false, 0x0000}, // lea rcx, [r10 + 0x1a8759d0]
-			{0x026CC801, 4, 8, false, 0x0000}, // mov edx, dword ptr [r14 + rax + 0x1a8759d0]
+			{0x026A4375, 4, 8, false, 0x0000}, // cmp dword ptr [r14 + rsi + 0x1a8759d0], eax
+			{0x026A4388, 4, 8, false, 0x0000}, // mov dword ptr [r14 + rsi + 0x1a8759d0], eax
+			{0x026A74F2, 3, 7, false, 0x0000}, // mov dword ptr [rcx + rsi + 0x1a8759d0], eax
+			{0x026C6E0B, 3, 7, false, 0x0000}, // lea rcx, [r10 + 0x1a8759d0]
+			{0x026CC141, 4, 8, false, 0x0000}, // mov edx, dword ptr [r14 + rax + 0x1a8759d0]
 		};
 		constexpr entcoll_site hudpl_gap_sites[] = {
-			{0x026A4A56, 4, 8, false, 0x0000}, // mov dword ptr [r14 + rsi + 0x1a875a10], eax
+			{0x026A4396, 4, 8, false, 0x0000}, // mov dword ptr [r14 + rsi + 0x1a875a10], eax
 		};
 		constexpr entcoll_site hudpl_flags_sites[] = {
-			{0x026A4A09, 4, 8, false, 0x0000}, // cmp dword ptr [r14 + rsi + 0x1a875a50], eax
-			{0x026A4A22, 4, 8, false, 0x0000}, // mov dword ptr [r14 + rsi + 0x1a875a50], eax
-			{0x026A7B97, 3, 8, false, 0x0000}, // cmp dword ptr [rcx + rsi + 0x1a875a50], 1
-			{0x026A7BB9, 3, 11, false, 0x0000}, // mov dword ptr [rcx + rsi + 0x1a875a50], 0
-			{0x026C749C, 4, 8, false, 0x0000}, // mov qword ptr [rax + r10 + 0x1a875a50], r9
-			{0x026C74A4, 4, 8, false, 0x0008}, // mov qword ptr [rax + r10 + 0x1a875a58], r9
-			{0x026C74AC, 4, 8, false, 0x0010}, // mov qword ptr [rax + r10 + 0x1a875a60], r9
-			{0x026C74BB, 4, 8, false, 0x0018}, // mov qword ptr [rax + r10 + 0x1a875a68], r9
-			{0x026CC795, 4, 9, false, 0x0000}, // cmp dword ptr [r14 + rdx + 0x1a875a50], 0
+			{0x026A4349, 4, 8, false, 0x0000}, // cmp dword ptr [r14 + rsi + 0x1a875a50], eax
+			{0x026A4362, 4, 8, false, 0x0000}, // mov dword ptr [r14 + rsi + 0x1a875a50], eax
+			{0x026A74D7, 3, 8, false, 0x0000}, // cmp dword ptr [rcx + rsi + 0x1a875a50], 1
+			{0x026A74F9, 3, 11, false, 0x0000}, // mov dword ptr [rcx + rsi + 0x1a875a50], 0
+			{0x026C6DDC, 4, 8, false, 0x0000}, // mov qword ptr [rax + r10 + 0x1a875a50], r9
+			{0x026C6DE4, 4, 8, false, 0x0008}, // mov qword ptr [rax + r10 + 0x1a875a58], r9
+			{0x026C6DEC, 4, 8, false, 0x0010}, // mov qword ptr [rax + r10 + 0x1a875a60], r9
+			{0x026C6DFB, 4, 8, false, 0x0018}, // mov qword ptr [rax + r10 + 0x1a875a68], r9
+			{0x026CC0D5, 4, 9, false, 0x0000}, // cmp dword ptr [r14 + rdx + 0x1a875a50], 0
 		};
 		constexpr entcoll_site hudpl_ids_sites[] = {
-			{0x026A7AF4, 4, 8, false, 0x0000}, // cmp ebx, dword ptr [r14 + rax + 0x1a875a90]
-			{0x026A7B66, 4, 8, false, 0x0000}, // mov dword ptr [r14 + rsi + 0x1a875a90], ebx
-			{0x026C7418, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x18135bc1]
-			{0x026C7492, 3, 7, false, 0x0000}, // lea rdx, [r10 + 0x1a875a90]
+			{0x026A7434, 4, 8, false, 0x0000}, // cmp ebx, dword ptr [r14 + rax + 0x1a875a90]
+			{0x026A74A6, 4, 8, false, 0x0000}, // mov dword ptr [r14 + rsi + 0x1a875a90], ebx
+			{0x026C6D58, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x18135bc1]
+			{0x026C6DD2, 3, 7, false, 0x0000}, // lea rdx, [r10 + 0x1a875a90]
 		};
 		constexpr entcoll_site hudpl_icons_sites[] = {
-			{0x026A4A62, 3, 8, false, 0x0000}, // cmp qword ptr [rsi + 0x1a875ad0], 0
-			{0x026A4A6A, 3, 7, false, 0x0000}, // lea rsi, [rsi + 0x1a875ad0]
-			{0x026A7BA1, 4, 8, false, 0x0000}, // mov qword ptr [rsi + rax*8 + 0x1a875ad0], rbx
-			{0x026C7480, 3, 7, true , 0x0000}, // lea rdx, [rip + 0x18135b99]
-			{0x026CC769, 3, 7, true , 0x0000}, // lea rax, [rip + 0x181308b0]
-			{0x026C7403, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x18135c16]  (reset leaf 0x0273FEB0; convergence-rejected, hand-verified)
+			{0x026A43A2, 3, 8, false, 0x0000}, // cmp qword ptr [rsi + 0x1a875ad0], 0
+			{0x026A43AA, 3, 7, false, 0x0000}, // lea rsi, [rsi + 0x1a875ad0]
+			{0x026A74E1, 4, 8, false, 0x0000}, // mov qword ptr [rsi + rax*8 + 0x1a875ad0], rbx
+			{0x026C6DC0, 3, 7, true , 0x0000}, // lea rdx, [rip + 0x18135b99]
+			{0x026CC0A9, 3, 7, true , 0x0000}, // lea rax, [rip + 0x181308b0]
+			{0x026C6D43, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x18135c16]  (reset leaf 0x0273FEB0; convergence-rejected, hand-verified)
 		};
 		constexpr entcoll_site hudpl_self_sites[] = {
-			{0x026A499B, 4, 8, false, 0x0000}, // mov dword ptr [rsi + r11*4 + 0x1a875b50], eax
-			{0x026CC74D, 3, 7, false, 0x0000}, // lea rax, [rdx + 0x1a875b50]
+			{0x026A42DB, 4, 8, false, 0x0000}, // mov dword ptr [rsi + r11*4 + 0x1a875b50], eax
+			{0x026CC08D, 3, 7, false, 0x0000}, // lea rax, [rdx + 0x1a875b50]
 		};
 		constexpr perclient_array batch12[] = {
 			{"hudpl_score", 0x1A7F6A50, 0x20, hudpl_score_sites, std::size(hudpl_score_sites), 0, {}},
@@ -10776,7 +10806,7 @@ namespace splitscreen
 			{0x010CD12C, 4, 8, false, 0x2BA8}, // mov qword ptr [rax + r14 + 0x4d2f6e8], rcx
 			{0x010EB4F0, 3, 7, true , 0x0000}, // lea rdx, [rip + 0x3c41669]  (reset leaf, no .pdata, read by hand)
 			{0x010F30C2, 3, 7, true , 0x0000}, // lea rax, [rip + 0x3c39a97]
-			{0x02D2D76F, 3, 7, true , 0x0830}, // lea rbx, [rip + 0x1f8714a]  (static initializer)
+			{0x02D2CC1F, 3, 7, true , 0x0830}, // lea rbx, [rip + 0x1f8714a]  (static initializer)
 		};
 		constexpr entcoll_site prevview_sites[] = {
 			{0x01CDF3D5, 3, 7, true , 0x0000}, // lea rax, [rip + 0xe15ffd4]
@@ -10817,14 +10847,14 @@ namespace splitscreen
 		// end marker of this one. 0x01EA53CF.. read cache[0] with fixed
 		// addresses (the primary controller's flush) - rip sites like the rest.
 		constexpr entcoll_site statscache_sites[] = {
-			{0x01E9554F, 3, 7, true , 0x0000}, // lea rcx, [rip + 0xf578eaa]  (LiveStats_ResetCache memset)
-			{0x01E98FFF, 2, 6, true , 0x4400}, // mov edx, dword ptr [rip + 0xf5797fb]
-			{0x01E9900F, 2, 6, true , 0x4400}, // mov eax, dword ptr [rip + 0xf5797eb]
-			{0x01E99019, 3, 7, true , 0x0040}, // lea r14, [rip + 0xf575420]
-			{0x01E99020, 3, 7, true , 0x0000}, // lea rbp, [rip + 0xf5753d9]
-			{0x01E99063, 2, 6, true , 0x4400}, // mov eax, dword ptr [rip + 0xf579797]
-			{0x01E9906D, 3, 7, true , 0x4400}, // mov dword ptr [rip + 0xf57978c], r15d
-			{0x01E99BEB, 3, 7, true , 0x0000}, // lea rax, [rip + 0xf57480e]  (LiveStats_SetStatChanged)
+			{0x01E94E8F, 3, 7, true , 0x0000}, // lea rcx, [rip + 0xf578eaa]  (LiveStats_ResetCache memset)
+			{0x01E9893F, 2, 6, true , 0x4400}, // mov edx, dword ptr [rip + 0xf5797fb]
+			{0x01E9894F, 2, 6, true , 0x4400}, // mov eax, dword ptr [rip + 0xf5797eb]
+			{0x01E98959, 3, 7, true , 0x0040}, // lea r14, [rip + 0xf575420]
+			{0x01E98960, 3, 7, true , 0x0000}, // lea rbp, [rip + 0xf5753d9]
+			{0x01E989A3, 2, 6, true , 0x4400}, // mov eax, dword ptr [rip + 0xf579797]
+			{0x01E989AD, 3, 7, true , 0x4400}, // mov dword ptr [rip + 0xf57978c], r15d
+			{0x01E9952B, 3, 7, true , 0x0000}, // lea rax, [rip + 0xf57480e]  (LiveStats_SetStatChanged)
 		};
 		constexpr perclient_array batch14[] = {
 			{"statscache", 0x1139B860, 0x4404, statscache_sites, std::size(statscache_sites), 0, {}},
@@ -10912,51 +10942,51 @@ namespace splitscreen
 			{0x013D7173, 4, 8, false, 0x0000}, // mov rax, qword ptr [r15 + r13 + 0x179dbdc8]
 			{0x013D71D5, 4, 8, false, 0x0000}, // mov qword ptr [r15 + r13 + 0x179dbdc8], rax
 			{0x013D72CC, 4, 8, false, 0x0000}, // mov r8, qword ptr [r15 + r13 + 0x179dbdc8]
-			{0x01F24377, 4, 8, false, 0x0000}, // mov esi, dword ptr [rax + r12*8 + 0x179dbdc8]
-			{0x01F246D3, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rbx + r12*8 + 0x179dbdc8]
-			{0x01F26DF5, 3, 7, true , 0x0000}, // lea rsi, [rip + 0x15aa8f0c]
-			{0x01FDB137, 3, 7, true , 0x0000}, // lea r8, [rip + 0x159f4bca]
-			{0x01FF7A07, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rsi + rdx*8 + 0x179dbdc8]
-			{0x01FF7BF7, 4, 8, false, 0x0000}, // mov r9, qword ptr [r14 + rdi*8 + 0x179dbdc8]
-			{0x01FF7DCF, 4, 8, false, 0x0000}, // mov r9, qword ptr [rdx + rdi*8 + 0x179dbdc8]
-			{0x01FF7F1E, 4, 8, false, 0x0000}, // mov r9, qword ptr [rcx + rdi*8 + 0x179dbdc8]
-			{0x01FF8077, 4, 8, false, 0x0000}, // mov r9, qword ptr [r14 + rdi*8 + 0x179dbdc8]
-			{0x0200C943, 4, 8, false, 0x0000}, // mov rcx, qword ptr [r14 + rbx*8 + 0x179dbdc8]
-			{0x0201193F, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x159be3c2]
-			{0x02011BFE, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x159be103]
-			{0x0201CB77, 5, 9, false, 0x0000}, // movzx eax, byte ptr [r13 + rdi*8 + 0x179dbdc8]
-			{0x02036630, 4, 8, false, 0x0000}, // mov rcx, qword ptr [r11 + rsi*8 + 0x179dbdc8]
-			{0x020386A1, 4, 8, false, 0x0000}, // mov rax, qword ptr [rcx + r14*8 + 0x179dbdc8]
-			{0x02038823, 4, 8, false, 0x0000}, // mov rax, qword ptr [rcx + r14*8 + 0x179dbdc8]
-			{0x02038A4E, 4, 8, false, 0x0000}, // mov rax, qword ptr [rcx + r14*8 + 0x179dbdc8]
-			{0x0203AEE0, 4, 8, false, 0x0000}, // mov rax, qword ptr [rdx + r12*8 + 0x179dbdc8]
-			{0x020469B0, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rcx + r14*8 + 0x179dbdc8]
-			{0x02055498, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rdx + r15*8 + 0x179dbdc8]
-			{0x0205C5C0, 4, 8, false, 0x0000}, // mov rcx, qword ptr [r8 + r13*8 + 0x179dbdc8]
-			{0x02066FA6, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rdx + rsi*8 + 0x179dbdc8]
-			{0x0206F9F3, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rsi + rdi*8 + 0x179dbdc8]
-			{0x0206FDD1, 4, 8, false, 0x0000}, // mov rcx, qword ptr [r14 + rdi*8 + 0x179dbdc8]
-			{0x0207552E, 4, 8, false, 0x0000}, // mov rcx, qword ptr [r8 + rbx*8 + 0x179dbdc8]
-			{0x0207890F, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rdx + r14*8 + 0x179dbdc8]
-			{0x0207A37C, 4, 8, false, 0x0000}, // mov r9, qword ptr [r12 + r14*8 + 0x179dbdc8]
-			{0x0207BFAD, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rdx + r12*8 + 0x179dbdc8]
-			{0x02081144, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rdx + r14*8 + 0x179dbdc8]
-			{0x02084AF6, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rdx + rsi*8 + 0x179dbdc8]
-			{0x02087D32, 4, 8, false, 0x0000}, // mov rcx, qword ptr [r10 + rdi*8 + 0x179dbdc8]
-			{0x02087EAE, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rbx + rdi*8 + 0x179dbdc8]
-			{0x02092B16, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rax + rbx*8 + 0x179dbdc8]
-			{0x02099645, 4, 8, false, 0x0000}, // mov rcx, qword ptr [r12 + rsi*8 + 0x179dbdc8]
-			{0x020998CF, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rdx + r13*8 + 0x179dbdc8]
-			{0x020A149F, 3, 7, true , 0x0000}, // lea r9, [rip + 0x1592e862]
-			{0x020A1597, 3, 7, true , 0x0000}, // lea r9, [rip + 0x1592e76a]
-			{0x025B18E3, 4, 8, true , 0x0000}, // movdqu xmm0, xmmword ptr [rip + 0x153b1a2d]
-			{0x025B192B, 4, 8, true , 0x0000}, // movdqu xmmword ptr [rip + 0x153b19e5], xmm0
-			{0x025D1E7E, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x15391493]
-			{0x025D4788, 4, 8, false, 0x0000}, // mov rcx, qword ptr [r14 + rbx*8 + 0x179dbdc8]
-			{0x026B798E, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rsi + rdi*8 + 0x179dbdc8]
-			{0x026EC32A, 4, 8, false, 0x0000}, // movzx ecx, byte ptr [rdx + rsi*8 + 0x179dbdc8]
-			{0x026EF783, 4, 8, false, 0x0000}, // mov eax, dword ptr [rax + r13*8 + 0x179dbdc8]
-			{0x026EF7CA, 4, 8, false, 0x0000}, // mov eax, dword ptr [rax + r13*8 + 0x179dbdc8]
+			{0x01F23CB7, 4, 8, false, 0x0000}, // mov esi, dword ptr [rax + r12*8 + 0x179dbdc8]
+			{0x01F24013, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rbx + r12*8 + 0x179dbdc8]
+			{0x01F26735, 3, 7, true , 0x0000}, // lea rsi, [rip + 0x15aa8f0c]
+			{0x01FDAA77, 3, 7, true , 0x0000}, // lea r8, [rip + 0x159f4bca]
+			{0x01FF7347, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rsi + rdx*8 + 0x179dbdc8]
+			{0x01FF7537, 4, 8, false, 0x0000}, // mov r9, qword ptr [r14 + rdi*8 + 0x179dbdc8]
+			{0x01FF770F, 4, 8, false, 0x0000}, // mov r9, qword ptr [rdx + rdi*8 + 0x179dbdc8]
+			{0x01FF785E, 4, 8, false, 0x0000}, // mov r9, qword ptr [rcx + rdi*8 + 0x179dbdc8]
+			{0x01FF79B7, 4, 8, false, 0x0000}, // mov r9, qword ptr [r14 + rdi*8 + 0x179dbdc8]
+			{0x0200C283, 4, 8, false, 0x0000}, // mov rcx, qword ptr [r14 + rbx*8 + 0x179dbdc8]
+			{0x0201127F, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x159be3c2]
+			{0x0201153E, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x159be103]
+			{0x0201C4B7, 5, 9, false, 0x0000}, // movzx eax, byte ptr [r13 + rdi*8 + 0x179dbdc8]
+			{0x02035F70, 4, 8, false, 0x0000}, // mov rcx, qword ptr [r11 + rsi*8 + 0x179dbdc8]
+			{0x02037FE1, 4, 8, false, 0x0000}, // mov rax, qword ptr [rcx + r14*8 + 0x179dbdc8]
+			{0x02038163, 4, 8, false, 0x0000}, // mov rax, qword ptr [rcx + r14*8 + 0x179dbdc8]
+			{0x0203838E, 4, 8, false, 0x0000}, // mov rax, qword ptr [rcx + r14*8 + 0x179dbdc8]
+			{0x0203A820, 4, 8, false, 0x0000}, // mov rax, qword ptr [rdx + r12*8 + 0x179dbdc8]
+			{0x020462F0, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rcx + r14*8 + 0x179dbdc8]
+			{0x02054DD8, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rdx + r15*8 + 0x179dbdc8]
+			{0x0205BF00, 4, 8, false, 0x0000}, // mov rcx, qword ptr [r8 + r13*8 + 0x179dbdc8]
+			{0x020668E6, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rdx + rsi*8 + 0x179dbdc8]
+			{0x0206F333, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rsi + rdi*8 + 0x179dbdc8]
+			{0x0206F711, 4, 8, false, 0x0000}, // mov rcx, qword ptr [r14 + rdi*8 + 0x179dbdc8]
+			{0x02074E6E, 4, 8, false, 0x0000}, // mov rcx, qword ptr [r8 + rbx*8 + 0x179dbdc8]
+			{0x0207824F, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rdx + r14*8 + 0x179dbdc8]
+			{0x02079CBC, 4, 8, false, 0x0000}, // mov r9, qword ptr [r12 + r14*8 + 0x179dbdc8]
+			{0x0207B8ED, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rdx + r12*8 + 0x179dbdc8]
+			{0x02080A84, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rdx + r14*8 + 0x179dbdc8]
+			{0x02084436, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rdx + rsi*8 + 0x179dbdc8]
+			{0x02087672, 4, 8, false, 0x0000}, // mov rcx, qword ptr [r10 + rdi*8 + 0x179dbdc8]
+			{0x020877EE, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rbx + rdi*8 + 0x179dbdc8]
+			{0x02092456, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rax + rbx*8 + 0x179dbdc8]
+			{0x02098F85, 4, 8, false, 0x0000}, // mov rcx, qword ptr [r12 + rsi*8 + 0x179dbdc8]
+			{0x0209920F, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rdx + r13*8 + 0x179dbdc8]
+			{0x020A0DDF, 3, 7, true , 0x0000}, // lea r9, [rip + 0x1592e862]
+			{0x020A0ED7, 3, 7, true , 0x0000}, // lea r9, [rip + 0x1592e76a]
+			{0x025B1223, 4, 8, true , 0x0000}, // movdqu xmm0, xmmword ptr [rip + 0x153b1a2d]
+			{0x025B126B, 4, 8, true , 0x0000}, // movdqu xmmword ptr [rip + 0x153b19e5], xmm0
+			{0x025D17BE, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x15391493]
+			{0x025D40C8, 4, 8, false, 0x0000}, // mov rcx, qword ptr [r14 + rbx*8 + 0x179dbdc8]
+			{0x026B72CE, 4, 8, false, 0x0000}, // mov rcx, qword ptr [rsi + rdi*8 + 0x179dbdc8]
+			{0x026EBC6A, 4, 8, false, 0x0000}, // movzx ecx, byte ptr [rdx + rsi*8 + 0x179dbdc8]
+			{0x026EF0C3, 4, 8, false, 0x0000}, // mov eax, dword ptr [rax + r13*8 + 0x179dbdc8]
+			{0x026EF10A, 4, 8, false, 0x0000}, // mov eax, dword ptr [rax + r13*8 + 0x179dbdc8]
 		};
 		constexpr perclient_array batch15[] = {
 			{"visbits", 0x1795CEC8, 0x8, visbits_sites, std::size(visbits_sites), 0, {}},
@@ -10978,7 +11008,7 @@ namespace splitscreen
 				}
 				// the per-client reset loop that zeroes bits[lc]: 2 -> 4 (player 4,
 				// 2026-09-27; visbits is relocated to [4] by relocate_perclient)
-				auto* bound = reinterpret_cast<uint8_t*>(base() + 0x01F26E10);
+				auto* bound = reinterpret_cast<uint8_t*>(base() + 0x01F26750);
 				constexpr uint8_t bound_old[] = {0x83, 0xFF, 0x02};
 				if (readable(bound, sizeof(bound_old)) && std::memcmp(bound, bound_old, sizeof(bound_old)) == 0)
 				{
@@ -11063,6 +11093,19 @@ namespace splitscreen
 			{0x0133DB93, 4, 0x13B80}, // mov rdi, qword ptr [rcx + r8 + 0x13b80]
 			{0x0133DB9E, 4, 0x13B94}, // idiv dword ptr [rcx + r8 + 0x13b94]
 			{0x0133DBA6, 4, 0x13BB4}, // mov dword ptr [rcx + r8 + 0x13bb4], edx
+			// Con_ClearNotify (PS4 0x3F1FE0): clears the 4 game-message windows,
+			// rcx = con (lea at 0x01339215). A leaf with no .pdata, so the first
+			// scan never decoded it; tools/con_refs.py finds it. Missing, it
+			// cleared 16-byte blocks of con.operationBuffer (the print queue) for
+			// local clients 2/3 - MP freeze / stack-overflow crash, 2026-09-29.
+			{0x01339223, 4, 0x130A8}, // mov qword ptr [rax + rcx + 0x130a8], rdx
+			{0x0133922B, 4, 0x130B0},
+			{0x01339233, 4, 0x130E8},
+			{0x0133923B, 4, 0x130F0},
+			{0x01339243, 4, 0x13128},
+			{0x0133924B, 4, 0x13130},
+			{0x01339253, 4, 0x13168},
+			{0x0133925B, 4, 0x13170},
 		};
 
 		constexpr uint32_t conmsgbuf_end_marker_rva = 0x0133AB7E; // lea rcx, [&messageBuffer[2]+0x2B10]
@@ -11171,21 +11214,53 @@ namespace splitscreen
 		// moved it runs to 4 like PS4. The Com_ShutdownInternal UI-close loops
 		// (see widen_client_shutdown_loops) may only follow once this moved.
 		constexpr entcoll_site uiinfo_sites[] = {
-			{0x02230B61, 3, 7, true , 0x0000}, // lea rdi, [rip + 0x1574f1a8]
-			{0x02230F1C, 3, 7, true , 0x184C}, // lea rax, [rip + 0x15750639]
-			{0x02230F4C, 3, 7, true , 0x002C}, // lea rax, [rip + 0x1574ede9]
-			{0x02231289, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x1574ea80]  UI_UIContext_GetInfo
-			{0x02231747, 3, 7, true , 0x001C}, // lea rsi, [rip + 0x1574e5de]  UI_InitUIInfos
-			{0x02231989, 3, 7, true , 0x184C}, // lea rdx, [rip + 0x1574fbcc]
-			{0x02231C3F, 3, 7, true , 0x0000}, // lea rsi, [rip + 0x1574e0ca]
-			{0x02232D4B, 3, 7, true , 0x0030}, // lea rax, [rip + 0x1574cfee]
-			{0x02232FB5, 3, 7, true , 0x0000}, // lea rax, [rip + 0x1574cd54]
-			{0x02233060, 3, 7, true , 0x0000}, // lea rax, [rip + 0x1574cca9]
+			{0x022304A1, 3, 7, true , 0x0000}, // lea rdi, [rip + 0x1574f1a8]
+			{0x0223085C, 3, 7, true , 0x184C}, // lea rax, [rip + 0x15750639]
+			{0x0223088C, 3, 7, true , 0x002C}, // lea rax, [rip + 0x1574ede9]
+			{0x02230BC9, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x1574ea80]  UI_UIContext_GetInfo
+			{0x02231087, 3, 7, true , 0x001C}, // lea rsi, [rip + 0x1574e5de]  UI_InitUIInfos
+			{0x022312C9, 3, 7, true , 0x184C}, // lea rdx, [rip + 0x1574fbcc]
+			{0x0223157F, 3, 7, true , 0x0000}, // lea rsi, [rip + 0x1574e0ca]
+			{0x0223268B, 3, 7, true , 0x0030}, // lea rax, [rip + 0x1574cfee]
+			{0x022328F5, 3, 7, true , 0x0000}, // lea rax, [rip + 0x1574cd54]
+			{0x022329A0, 3, 7, true , 0x0000}, // lea rax, [rip + 0x1574cca9]
 		};
 		constexpr perclient_array batch17[] = {
 			{"uiinfo", 0x1795D270, 0x1B68, uiinfo_sites, std::size(uiinfo_sites), 0, {}},
 		};
 		size_t batch17_new[std::size(batch17)] = {};
+
+		// ---- UI3D texture windows per local client [2] -> [4] (2026-09-29)
+		// PS4 keeps one g_ui3d_windows (R_UI3D_PerframeInit(bool) 0xA77FF0). The
+		// PC saves the first 6 windows (6 x 0xB4 = 0x438) per local client:
+		// R_UI3D_SetupBackendData(backend, lc) 0x01D100D0 copies them to
+		// g_ui3dStack+0x58B0 + lc*0x438, R_UI3D_PerframeInit(lc) 0x01D0FF20
+		// restores them next frame. [2]: local client 2 saved and restored its
+		// HUD texture windows over the data behind the array (player 3's white
+		// HUD panels in MP); client 3's slot happened to land on unused memory.
+		// Found by perclient_sweep on the 2026 image + IDB names. The three
+		// other hits in the range (0x01D0FFE4, 0x01D10190, 0x01D1044E) are end
+		// markers of the 126-window working loops and stay. R_UI3D_Init
+		// 0x01D0FCD0 copies the cleared windows into slots 0 and 1; slots 2/3
+		// of the zero-filled block are that same state.
+		constexpr entcoll_site ui3d_windows_sites[] = {
+			{0x01D0FD15, 3, 7, true , 0x0000}, // lea rbx, [saved]         init, slot 0
+			{0x01D0FDB0, 3, 7, true , 0x0438}, // lea rcx, [saved + 0x438] init, slot 1
+			{0x01D0FF2F, 3, 7, true , 0x0000}, // lea rdx, [saved]         R_UI3D_PerframeInit
+			{0x01D10373, 3, 7, true , 0x0000}, // lea rcx, [saved]         R_UI3D_SetupBackendData
+		};
+		constexpr perclient_array batch18[] = {
+			{"ui3d_windows", 0x10B2F2F0, 0x438, ui3d_windows_sites, std::size(ui3d_windows_sites), 0, {}},
+		};
+		size_t batch18_new[std::size(batch18)] = {};
+
+		void relocate_batch18()
+		{
+			if (!batch18_new[0])
+			{
+				batch18_new[0] = relocate_perclient(batch18[0]);
+			}
+		}
 
 		void relocate_batch17()
 		{
@@ -11194,7 +11269,7 @@ namespace splitscreen
 				return;
 			}
 			const auto b = base();
-			auto* bound = reinterpret_cast<uint8_t*>(b + 0x022317D0);
+			auto* bound = reinterpret_cast<uint8_t*>(b + 0x02231110);
 			constexpr uint8_t bound_old[] = {0x83, 0xFD, 0x02};   // cmp ebp, 2
 			if (!readable(bound, sizeof(bound_old)) || std::memcmp(bound, bound_old, sizeof(bound_old)) != 0)
 			{
@@ -11559,13 +11634,13 @@ namespace splitscreen
 		bool widen_statscache_reset(const size_t cache_new)
 		{
 			const auto b = base();
-			auto* imm = reinterpret_cast<uint8_t*>(b + 0x01E95558);
+			auto* imm = reinterpret_cast<uint8_t*>(b + 0x01E94E98);
 			constexpr uint8_t imm_old[] = {0x41, 0xB8, 0x08, 0x88, 0x00, 0x00};
 			constexpr uint8_t imm_new[] = {0x41, 0xB8, 0x10, 0x10, 0x01, 0x00};
-			const auto* lea = reinterpret_cast<const uint8_t*>(b + 0x01E9554F);
+			const auto* lea = reinterpret_cast<const uint8_t*>(b + 0x01E94E8F);
 			int32_t lea_disp = 0;
 			std::memcpy(&lea_disp, lea + 3, sizeof(lea_disp));
-			if (!cache_new || b + 0x01E95556 + lea_disp != cache_new
+			if (!cache_new || b + 0x01E94E96 + lea_disp != cache_new
 			    || !readable(imm, sizeof(imm_old)) || std::memcmp(imm, imm_old, sizeof(imm_old)) != 0)
 			{
 				note("[splitscreen] statscache reset: bytes differ - not widened\n");
@@ -11747,10 +11822,10 @@ namespace splitscreen
 		// At process exit the shutdown only returns memory the OS reclaims
 		// anyway, so the EXIT thunk returns at once. The level-end shutdown is
 		// untouched (it is reached through 0x014ED6A0, not this thunk).
-		constexpr uint32_t lensflare_exit_thunk_rva = 0x02EFA390;
+		constexpr uint32_t lensflare_exit_thunk_rva = 0x02EF9840;
 		constexpr uint8_t lensflare_exit_thunk_expected[] = {
-			0x48, 0x8D, 0x0D, 0x79, 0x48, 0x3B, 0x00,   // lea rcx, [rip -> 0x0332DC10]
-			0xE9, 0xD4, 0x18, 0x5C, 0xFE,               // jmp 0x014BBC50
+			0x48, 0x8D, 0x0D, 0xC9, 0x53, 0x3B, 0x00,   // lea rcx, [rip -> 0x0332DC10]
+			0xE9, 0x24, 0x24, 0x5C, 0xFE,               // jmp 0x014BBC50
 		};
 
 		void skip_lensflare_exit_shutdown()
@@ -11815,28 +11890,28 @@ namespace splitscreen
 		// "LastInput"/"ControllerType". The cave creates a root only while the
 		// global model is non-zero (init has run) and the slot is still zero
 		// (idempotent if the function ever runs again).
-		constexpr uint32_t lastinput_init_rva = 0x020E39A0;       // Com_LocalClient_LastInput_Init
+		constexpr uint32_t lastinput_init_rva = 0x020E32E0;       // Com_LocalClient_LastInput_Init
 		constexpr uint8_t lastinput_init_expected[] = {
 			0x48, 0x89, 0x5C, 0x24, 0x10,                         // mov [rsp+0x10], rbx
 		};
-		constexpr uint32_t ui_controller_model_getter_rva = 0x0200D5A0;
+		constexpr uint32_t ui_controller_model_getter_rva = 0x0200CEE0;
 		constexpr uint8_t ui_controller_model_getter_expected[] = {
 			0x48, 0x63, 0xC1,                                     // movsxd rax, ecx
-			0x48, 0x8D, 0x0D, 0x92, 0xEA, 0x25, 0x14,             // lea rcx, [rip -> 0x162EAFBC]
+			0x48, 0x8D, 0x0D, 0x52, 0xF1, 0x25, 0x14,             // lea rcx, [rip -> 0x162EAFBC]
 			0x0F, 0xB7, 0x04, 0x41,                               // movzx eax, word [rcx+rax*2]
 			0xC3,
 		};
-		constexpr uint32_t ui_global_model_getter_rva = 0x0200D3D0;
+		constexpr uint32_t ui_global_model_getter_rva = 0x0200CD10;
 		constexpr uint8_t ui_global_model_getter_expected[] = {
-			0x0F, 0xB7, 0x05, 0x61, 0xEC, 0x25, 0x14,             // movzx eax, word [rip -> 0x162EAFB8]
+			0x0F, 0xB7, 0x05, 0x21, 0xF3, 0x25, 0x14,             // movzx eax, word [rip -> 0x162EAFB8]
 			0xC3,
 		};
-		constexpr uint32_t ui_create_persistent_rva = 0x0200CFC0;
+		constexpr uint32_t ui_create_persistent_rva = 0x0200C900;
 		constexpr uint8_t ui_create_persistent_expected[] = {
 			0x48, 0x89, 0x5C, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, // prologue
 			0x57, 0x48, 0x83, 0xEC, 0x70,
 		};
-		constexpr uint32_t ui_create_persistent_alloc_rva = 0x0200D025;
+		constexpr uint32_t ui_create_persistent_alloc_rva = 0x0200C965;
 		constexpr uint8_t ui_create_persistent_alloc_expected[] = {
 			0x48, 0x8D, 0x54, 0x24, 0x20,                         // lea rdx, [rsp+0x20]  (key)
 			0x41, 0xB0, 0x01,                                     // mov r8b, 1           (persistent)
@@ -12063,11 +12138,11 @@ namespace splitscreen
 		// Max 2 -> 3 (the seats). No native code reads the dvar (dvar_users.py:
 		// 0 readers of its global 0x1574D3B8) - only that Lua, which then applies
 		// the console's own numbers. Default stays 2.
-		constexpr uint32_t lobby_max_local_reg_rva = 0x01EDC5C2;
+		constexpr uint32_t lobby_max_local_reg_rva = 0x01EDBF02;
 		constexpr uint8_t lobby_max_local_reg_expected[] = {
 			0xB9, 0x69, 0xF0, 0xD2, 0x44,                         // mov ecx, hash
 			0x89, 0x5C, 0x24, 0x28,                               // mov [rsp+0x28], ebx  flags
-			0x48, 0x89, 0x05, 0x6E, 0x1E, 0x7F, 0x13,             // mov [rip+..], rax
+			0x48, 0x89, 0x05, 0x2E, 0x25, 0x7F, 0x13,             // mov [rip+..], rax
 			0xC7, 0x44, 0x24, 0x20, 0x02, 0x00, 0x00, 0x00,       // mov dword [rsp+0x20], 2  max
 		};
 		constexpr size_t lobby_max_local_max_off = 20;
@@ -12174,9 +12249,13 @@ namespace splitscreen
 		//   (set+8 .. set+0x40; set+0x48 is the depth-view array pointer), and
 		//   R_SetRenderTargetSlice 0x01CF54E0 clamps the colour index to 7. So:
 		//   the check admits 2..12, the creation loop bound (0x01CD5494) becomes
-		//   min(slices, 8), slices 8..11 get RTVs in a sidecar made here from
-		//   slice 0's own desc, and the setter takes the sidecar view for RT 9
-		//   slices 8..11 (falls back to the stock clamp while one is missing).
+		//   min(slices, 6) - RT 9's inline slots stay EXACTLY as in the stock
+		//   2-player game (slices 0..5; slots 6/7 empty) - and slices 6..11 get
+		//   RTVs in a sidecar made here from slice 0's own desc; the setter takes
+		//   the sidecar view for RT 9 slices 6..11 (stock clamp while one is
+		//   missing). Player 3's white HUD blocks (MP) are NOT caused by this:
+		//   2026-09-29 they appear with the stock 2-slot clamp and stock cache
+		//   too; they depend on where player 3 stands (LOG 2026-09-29).
 		//   Only RT 9 has colour and more than one slice, so the widened check
 		//   changes no other target. Readers of the current slice (+0x80C8,
 		//   all 8 sites): the setter above, and the clear 0x01CF33A0, which for
@@ -12212,8 +12291,8 @@ namespace splitscreen
 		constexpr uint32_t sun_slices_wanted = 12;
 		bool sun_slices_grown = false;
 		const char* sun_grow_result = "sun shadow 12 slices: not attempted";
-		ID3D11RenderTargetView* sun_trans_extra[4] = {};      // RT 9 slices 8..11 (read by the setter cave)
-		ID3D11RenderTargetView* sun_trans_retired[4] = {};    // released one tick later
+		ID3D11RenderTargetView* sun_trans_extra[6] = {};      // RT 9 slices 6..11 (read by the caves)
+		ID3D11RenderTargetView* sun_trans_retired[6] = {};    // released one tick later
 		void* sun_trans_seen_v0 = nullptr;
 
 		bool grow_sun_shadow_slices()
@@ -12249,12 +12328,12 @@ namespace splitscreen
 			const uint8_t c_rt5[] = {0x48, 0xC7, 0x85, 0x04, 0x0D, 0x00, 0x00, n, 0x00, 0x00, 0x00, 0xC3};
 			// +0x10: mov dword [rbp+0xD5C], 12 ; ret      (RT 9 slices)
 			const uint8_t c_rt9[] = {0xC7, 0x85, 0x5C, 0x0D, 0x00, 0x00, n, 0x00, 0x00, 0x00, 0xC3};
-			// +0x20: movzx eax,[rsi+0xA86] ; cmp eax,8 ; jbe +5 ; mov eax,8 ; ret
-			const uint8_t c_loop[] = {0x0F, 0xB7, 0x86, 0x86, 0x0A, 0x00, 0x00, 0x83, 0xF8, 0x08, 0x76, 0x05,
-			                          0xB8, 0x08, 0x00, 0x00, 0x00, 0xC3};
+			// +0x20: movzx eax,[rsi+0xA86] ; cmp eax,6 ; jbe +5 ; mov eax,6 ; ret
+			const uint8_t c_loop[] = {0x0F, 0xB7, 0x86, 0x86, 0x0A, 0x00, 0x00, 0x83, 0xF8, 0x06, 0x76, 0x05,
+			                          0xB8, 0x06, 0x00, 0x00, 0x00, 0xC3};
 			// +0x40: the setter's colour pick.
 			std::vector<uint8_t> s;
-			s.insert(s.end(), {0x83, 0xFB, 0x08, 0x7C, 0x00});             // cmp ebx,8 ; jl orig
+			s.insert(s.end(), {0x83, 0xFB, 0x06, 0x7C, 0x00});             // cmp ebx,6 ; jl orig
 			const size_t j1 = s.size() - 1;
 			s.insert(s.end(), {0x83, 0xFB, 0x0C, 0x73, 0x00});             // cmp ebx,12 ; jae orig
 			const size_t j2 = s.size() - 1;
@@ -12266,7 +12345,7 @@ namespace splitscreen
 				const auto* p = reinterpret_cast<const uint8_t*>(&a);
 				s.insert(s.end(), p, p + 8);
 			}
-			s.insert(s.end(), {0x4D, 0x8B, 0x44, 0xD8, 0xC0});             // mov r8,[r8+rbx*8-0x40]
+			s.insert(s.end(), {0x4D, 0x8B, 0x44, 0xD8, 0xD0});             // mov r8,[r8+rbx*8-0x30]
 			s.insert(s.end(), {0x4D, 0x85, 0xC0, 0x75, 0x00});             // test r8,r8 ; jnz done
 			const size_t j4 = s.size() - 1;
 			const size_t orig = s.size();
@@ -12284,11 +12363,11 @@ namespace splitscreen
 			s[j3] = static_cast<uint8_t>(orig - (j3 + 1));
 			s[j4] = static_cast<uint8_t>(done - (j4 + 1));
 			// +0x100: the clear's colour pick (rbp = view set, rbx = cmd state,
-			// rdi = context). Sidecar for RT 9 slices 8..11, otherwise the stock
+			// rdi = context). Sidecar for RT 9 slices 6..11, otherwise the stock
 			// inline[slice] with the index clamped to 7 like the setter.
 			std::vector<uint8_t> k;
 			k.insert(k.end(), {0x8B, 0x93, 0xC8, 0x80, 0x00, 0x00});       // mov edx,[rbx+0x80C8]
-			k.insert(k.end(), {0x83, 0xFA, 0x08, 0x7C, 0x00});             // cmp edx,8 ; jl orig
+			k.insert(k.end(), {0x83, 0xFA, 0x06, 0x7C, 0x00});             // cmp edx,6 ; jl orig
 			const size_t k1 = k.size() - 1;
 			k.insert(k.end(), {0x83, 0xFA, 0x0C, 0x73, 0x00});             // cmp edx,12 ; jae clamp
 			const size_t k2 = k.size() - 1;
@@ -12301,11 +12380,11 @@ namespace splitscreen
 				const auto* p = reinterpret_cast<const uint8_t*>(&a);
 				k.insert(k.end(), p, p + 8);
 			}
-			k.insert(k.end(), {0x48, 0x8B, 0x54, 0xD0, 0xC0});             // mov rdx,[rax+rdx*8-0x40]
+			k.insert(k.end(), {0x48, 0x8B, 0x54, 0xD0, 0xD0});             // mov rdx,[rax+rdx*8-0x30]
 			k.insert(k.end(), {0x48, 0x85, 0xD2, 0x75, 0x00});             // test rdx,rdx ; jnz done
 			const size_t k4 = k.size() - 1;
 			const size_t kclamp = k.size();
-			k.insert(k.end(), {0xBA, 0x07, 0x00, 0x00, 0x00});             // mov edx,7
+			k.insert(k.end(), {0xBA, 0x05, 0x00, 0x00, 0x00});             // mov edx,5 (last inline view)
 			const size_t korig = k.size();
 			k.insert(k.end(), {0x48, 0x8B, 0x54, 0xD5, 0x00});             // mov rdx,[rbp+rdx*8]
 			const size_t kdone = k.size();
@@ -12386,11 +12465,11 @@ namespace splitscreen
 				++done_w;
 			}
 			sun_slices_grown = true;
-			sun_grow_result = "sun shadow: RT 5/9 6 -> 12 slices (4 view slots), RT 9 slices 8..11 via sidecar views";
+			sun_grow_result = "sun shadow: RT 5/9 6 -> 12 slices (4 view slots), RT 9 slices 6..11 via sidecar views";
 			return true;
 		}
 
-		// Renderer loop: RT 9's views for slices 8..11, remade whenever the target
+		// Renderer loop: RT 9's views for slices 6..11, remade whenever the target
 		// is (re)created (slice 0's view pointer changes). Old views are released
 		// one tick later, never while the render thread may still pick them.
 		void maintain_sun_trans_views()
@@ -12430,7 +12509,7 @@ namespace splitscreen
 				sun_trans_extra[i] = nullptr;
 			}
 			sun_trans_seen_v0 = v0;
-			if (!v0 || slices <= 8)
+			if (!v0 || slices <= 6)
 			{
 				return;
 			}
@@ -12447,14 +12526,14 @@ namespace splitscreen
 			uint32_t made = 0;
 			if (res && dev)
 			{
-				for (uint32_t sl = 8; sl < slices && sl < 8 + std::size(sun_trans_extra); ++sl)
+				for (uint32_t sl = 6; sl < slices && sl < 6 + std::size(sun_trans_extra); ++sl)
 				{
 					d.Texture2DArray.FirstArraySlice = sl;
 					d.Texture2DArray.ArraySize = 1;
 					ID3D11RenderTargetView* v = nullptr;
 					if (SUCCEEDED(dev->CreateRenderTargetView(res, &d, &v)) && v)
 					{
-						sun_trans_extra[sl - 8] = v;
+						sun_trans_extra[sl - 6] = v;
 						++made;
 					}
 				}
@@ -12468,7 +12547,7 @@ namespace splitscreen
 				dev->Release();
 			}
 			trace_line l;
-			l.str("sun shadow: RT 9 sidecar views for slices 8..");
+			l.str("sun shadow: RT 9 sidecar views for slices 6..");
 			l.dec(slices - 1u);
 			l.str(": ");
 			l.dec(made);
@@ -12761,7 +12840,7 @@ namespace splitscreen
 		constexpr uint32_t percg_old_size = percg_old_slots * percg_stride;  // 0x5770
 		constexpr uint32_t percg_new_size = percg_new_slots * percg_stride;  // 0xAEE0
 
-		constexpr uint32_t percg_walker_count_rva = 0x02D2D76A;
+		constexpr uint32_t percg_walker_count_rva = 0x02D2CC1A;
 		constexpr uint8_t percg_walker_expected[] = {0xBD, 0x01, 0x00, 0x00, 0x00};
 
 		struct percg_ref
@@ -12777,7 +12856,7 @@ namespace splitscreen
 		constexpr percg_ref percg_refs[] = {
 			{0x010EB4F0, 7, 3, 0x0, true, {0x48, 0x8D, 0x15, 0x49, 0x26, 0xBC, 0x03}},
 			{0x010F30C2, 7, 3, 0x0, true, {0x48, 0x8D, 0x05, 0x77, 0xAA, 0xBB, 0x03}},
-			{0x02D2D76F, 7, 3, 0x830, true, {0x48, 0x8D, 0x1D, 0xFA, 0x0B, 0xF8, 0x01}},
+			{0x02D2CC1F, 7, 3, 0x830, true, {0x48, 0x8D, 0x1D, 0x4A, 0x17, 0xF8, 0x01}},
 			{0x010CD118, 12, 4, 0x2BB0, false, {0x42, 0xC7, 0x84, 0x30, 0xF0, 0x06, 0xCB, 0x04, 0xFF, 0xFF, 0xFF, 0xFF}},
 			{0x010CD124, 8, 4, 0x2BA0, false, {0x4A, 0x89, 0x8C, 0x30, 0xE0, 0x06, 0xCB, 0x04}},
 			{0x010CD12C, 8, 4, 0x2BA8, false, {0x4A, 0x89, 0x8C, 0x30, 0xE8, 0x06, 0xCB, 0x04}},
@@ -12968,7 +13047,7 @@ namespace splitscreen
 		// 0x0283AA50 and 0x01322080 per client and touches none of these arrays,
 		// so widening it needs its own rule-4 classification of what those two
 		// functions write. Left alone deliberately.
-		constexpr uint32_t uiroot_bound_rva = 0x01F1D2F7;
+		constexpr uint32_t uiroot_bound_rva = 0x01F1CC37;
 		constexpr uint8_t uiroot_bound_expected[] = {0x83, 0xFB, 0x02};
 
 		// The SECOND `cmp ebx,2` (0x01F2945B), classified 2026-08-25 by the
@@ -12978,7 +13057,7 @@ namespace splitscreen
 		// at 2, context 2 is never constructed and every later read of it
 		// derefs NULL (the crash, and the 6-FPS menu). Safe to widen only
 		// after the roots are relocated - hence applied in the same function.
-		constexpr uint32_t uiroot_bound2_rva = 0x01F1D39B;
+		constexpr uint32_t uiroot_bound2_rva = 0x01F1CCDB;
 		constexpr uint8_t uiroot_bound2_expected[] = {0x83, 0xFB, 0x02};
 
 		struct uiroot_ref
@@ -12992,26 +13071,26 @@ namespace splitscreen
 		};
 
 		constexpr uiroot_ref uiroot_refs[] = {
-			{0x01F1C88C, 7, 3, 0x00, true, {0x48, 0x8D, 0x0D, 0x1D, 0x69, 0x34, 0x14}},
-			{0x01F1CA95, 8, 3, 0xAC, false, {0x80, 0xBC, 0x38, 0x5C, 0x32, 0x26, 0x16, 0x00}},
-			{0x01F1CA9F, 7, 3, 0x8C, false, {0x4C, 0x8D, 0x87, 0x3C, 0x32, 0x26, 0x16}},
-			{0x01F1CB2C, 8, 3, 0xAC, false, {0x80, 0xBC, 0x38, 0x5C, 0x32, 0x26, 0x16, 0x00}},
-			{0x01F1CB36, 7, 3, 0x8C, false, {0x4C, 0x8D, 0x87, 0x3C, 0x32, 0x26, 0x16}},
-			{0x01F1CCA6, 8, 3, 0xAC, false, {0x80, 0xBC, 0x28, 0x5C, 0x32, 0x26, 0x16, 0x00}},
-			{0x01F1CCB0, 7, 3, 0x8C, false, {0x48, 0x8D, 0x9D, 0x3C, 0x32, 0x26, 0x16}},
-			{0x01F1CE5E, 7, 3, 0x00, true, {0x48, 0x8D, 0x05, 0x4B, 0x63, 0x34, 0x14}},
-			{0x01F1D0A8, 7, 3, 0x00, true, {0x48, 0x8D, 0x2D, 0x01, 0x61, 0x34, 0x14}},
-			{0x01F1D24E, 7, 3, 0x80, true, {0x48, 0x8D, 0x35, 0xDB, 0x5F, 0x34, 0x14}},
-			{0x01F1D3F5, 7, 3, 0xAC, true, {0x48, 0x8D, 0x1D, 0x60, 0x5E, 0x34, 0x14}},
-			{0x01F1D3FC, 7, 3, 0x8C, true, {0x48, 0x8D, 0x35, 0x39, 0x5E, 0x34, 0x14}},
-			{0x01F1DEF2, 7, 3, 0x00, true, {0x48, 0x8D, 0x05, 0xB7, 0x52, 0x34, 0x14}},
-			{0x01F220D9, 7, 3, 0x00, true, {0x48, 0x8D, 0x05, 0xD0, 0x10, 0x34, 0x14}},
-			{0x01F25FD5, 7, 3, 0x00, true, {0x48, 0x8D, 0x15, 0xD4, 0xD1, 0x33, 0x14}},
-			{0x01F263D3, 9, 4, 0xAC, false, {0x42, 0x80, 0xBC, 0x39, 0x5C, 0x32, 0x26, 0x16, 0x00}},
-			{0x01F263DE, 7, 3, 0x8C, false, {0x4D, 0x8D, 0x87, 0x3C, 0x32, 0x26, 0x16}},
-			{0x01F26AE8, 7, 3, 0x00, true, {0x4C, 0x8D, 0x2D, 0xC1, 0xC6, 0x33, 0x14}},
-			{0x01F27174, 7, 3, 0xAC, true, {0x48, 0x8D, 0x3D, 0xE1, 0xC0, 0x33, 0x14}},
-			{0x01F2717B, 7, 3, 0x8C, true, {0x48, 0x8D, 0x35, 0xBA, 0xC0, 0x33, 0x14}},
+			{0x01F1C1CC, 7, 3, 0x00, true, {0x48, 0x8D, 0x0D, 0xDD, 0x6F, 0x34, 0x14}},
+			{0x01F1C3D5, 8, 3, 0xAC, false, {0x80, 0xBC, 0x38, 0x5C, 0x32, 0x26, 0x16, 0x00}},
+			{0x01F1C3DF, 7, 3, 0x8C, false, {0x4C, 0x8D, 0x87, 0x3C, 0x32, 0x26, 0x16}},
+			{0x01F1C46C, 8, 3, 0xAC, false, {0x80, 0xBC, 0x38, 0x5C, 0x32, 0x26, 0x16, 0x00}},
+			{0x01F1C476, 7, 3, 0x8C, false, {0x4C, 0x8D, 0x87, 0x3C, 0x32, 0x26, 0x16}},
+			{0x01F1C5E6, 8, 3, 0xAC, false, {0x80, 0xBC, 0x28, 0x5C, 0x32, 0x26, 0x16, 0x00}},
+			{0x01F1C5F0, 7, 3, 0x8C, false, {0x48, 0x8D, 0x9D, 0x3C, 0x32, 0x26, 0x16}},
+			{0x01F1C79E, 7, 3, 0x00, true, {0x48, 0x8D, 0x05, 0x0B, 0x6A, 0x34, 0x14}},
+			{0x01F1C9E8, 7, 3, 0x00, true, {0x48, 0x8D, 0x2D, 0xC1, 0x67, 0x34, 0x14}},
+			{0x01F1CB8E, 7, 3, 0x80, true, {0x48, 0x8D, 0x35, 0x9B, 0x66, 0x34, 0x14}},
+			{0x01F1CD35, 7, 3, 0xAC, true, {0x48, 0x8D, 0x1D, 0x20, 0x65, 0x34, 0x14}},
+			{0x01F1CD3C, 7, 3, 0x8C, true, {0x48, 0x8D, 0x35, 0xF9, 0x64, 0x34, 0x14}},
+			{0x01F1D832, 7, 3, 0x00, true, {0x48, 0x8D, 0x05, 0x77, 0x59, 0x34, 0x14}},
+			{0x01F21A19, 7, 3, 0x00, true, {0x48, 0x8D, 0x05, 0x90, 0x17, 0x34, 0x14}},
+			{0x01F25915, 7, 3, 0x00, true, {0x48, 0x8D, 0x15, 0x94, 0xD8, 0x33, 0x14}},
+			{0x01F25D13, 9, 4, 0xAC, false, {0x42, 0x80, 0xBC, 0x39, 0x5C, 0x32, 0x26, 0x16, 0x00}},
+			{0x01F25D1E, 7, 3, 0x8C, false, {0x4D, 0x8D, 0x87, 0x3C, 0x32, 0x26, 0x16}},
+			{0x01F26428, 7, 3, 0x00, true, {0x4C, 0x8D, 0x2D, 0x81, 0xCD, 0x33, 0x14}},
+			{0x01F26AB4, 7, 3, 0xAC, true, {0x48, 0x8D, 0x3D, 0xA1, 0xC7, 0x33, 0x14}},
+			{0x01F26ABB, 7, 3, 0x8C, true, {0x48, 0x8D, 0x35, 0x7A, 0xC7, 0x33, 0x14}},
 		};
 
 		bool lui_roots_relocated = false;
@@ -13194,8 +13273,8 @@ namespace splitscreen
 			// to UIRootFull. The loop only adds a HUD for ACTIVE controllers.
 			struct ui_bound { uint32_t rva; uint8_t modrm; };
 			constexpr ui_bound ui_bounds[] = {
-				{0x01F2720D, 0xFB},   // cmp ebx,2
-				{0x01F1D454, 0xFF},   // cmp edi,2  - HUD menus (see above)
+				{0x01F26B4D, 0xFB},   // cmp ebx,2
+				{0x01F1CD94, 0xFF},   // cmp edi,2  - HUD menus (see above)
 			};
 			for (const auto& ub : ui_bounds)
 			{
@@ -13260,20 +13339,20 @@ namespace splitscreen
 		constexpr uint32_t perctrl_old_count = 2;
 		constexpr uint32_t perctrl_new_count = 4;
 		constexpr entcoll_site perctrl_sites[] = {
-			{0x01F155CD, 3, 7, true , 0x8},    // lea rcx,[+8]    subscribers++
-			{0x01F1AC10, 3, 7, true , 0x4},    // lea rcx,[+4]    float getter
-			{0x01F1CD4C, 5, 9, false, 0xC},    // mulss xmm1,[rbp+rbx*4+RVA+0xC]
-			{0x01F1CD78, 5, 9, false, 0x10},   // mulss xmm1,[rbp+rbx*4+RVA+0x10]
-			{0x01F1D0D1, 3, 7, true , 0x0},    // lea r14,[base]  init clear
-			{0x01F1D75E, 3, 8, false, 0x0},    // cmp byte [rcx+rax*4+RVA],0
-			{0x01F1D7A0, 3, 7, true , 0x1},    // lea rcx,[+1]    UI_CoD_IsUIActive
-			{0x01F1FD2E, 3, 7, true , 0x0},    // lea rax,[base]  flag setter
-			{0x01F21A23, 6, 10, false, 0xC},   // movss [r14+rax*4+RVA+0xC],xmm6
-			{0x01F21A2D, 6, 10, false, 0x10},  // movss [r14+rax*4+RVA+0x10],xmm7
-			{0x01F2203D, 3, 7, true , 0x8},    // lea rcx,[+8]    subscribers--
-			{0x01F26CA7, 3, 7, true , 0x1},    // lea rax,[+1]
+			{0x01F14F0D, 3, 7, true , 0x8},    // lea rcx,[+8]    subscribers++
+			{0x01F1A550, 3, 7, true , 0x4},    // lea rcx,[+4]    float getter
+			{0x01F1C68C, 5, 9, false, 0xC},    // mulss xmm1,[rbp+rbx*4+RVA+0xC]
+			{0x01F1C6B8, 5, 9, false, 0x10},   // mulss xmm1,[rbp+rbx*4+RVA+0x10]
+			{0x01F1CA11, 3, 7, true , 0x0},    // lea r14,[base]  init clear
+			{0x01F1D09E, 3, 8, false, 0x0},    // cmp byte [rcx+rax*4+RVA],0
+			{0x01F1D0E0, 3, 7, true , 0x1},    // lea rcx,[+1]    UI_CoD_IsUIActive
+			{0x01F1F66E, 3, 7, true , 0x0},    // lea rax,[base]  flag setter
+			{0x01F21363, 6, 10, false, 0xC},   // movss [r14+rax*4+RVA+0xC],xmm6
+			{0x01F2136D, 6, 10, false, 0x10},  // movss [r14+rax*4+RVA+0x10],xmm7
+			{0x01F2197D, 3, 7, true , 0x8},    // lea rcx,[+8]    subscribers--
+			{0x01F265E7, 3, 7, true , 0x1},    // lea rax,[+1]
 		};
-		constexpr uint32_t perctrl_clear_rva = 0x01F1D0CD;                    // lea r8d,[rdx+0x28]
+		constexpr uint32_t perctrl_clear_rva = 0x01F1CA0D;                    // lea r8d,[rdx+0x28]
 		constexpr uint8_t perctrl_clear_stock[] = {0x44, 0x8D, 0x42, 0x28};
 		const char* perctrl_result = "s_perController: not attempted";
 		size_t perctrl_new = 0;
@@ -13322,6 +13401,227 @@ namespace splitscreen
 			perctrl_result = "s_perController [2] -> [4] (12 sites, init clear 0x28 -> 0x50)";
 			note("[splitscreen] s_perController [2] -> [4] at RVA 0x%08X\n",
 			     static_cast<uint32_t>(fresh_abs - b));
+			return true;
+		}
+
+		// ============ LUI target tables [2 clients] -> [4] (2026-09-28, 4-player MP with bots) ============
+		//
+		// 4-player MP crashes (20:03 with the sun change OFF, and the earlier
+		// ones) came from four per-local-client LUI tables that the PC sized for
+		// two clients; PS4 (RULE ZERO, ps4_globals) keeps them for four, in the
+		// same order: s_weakpointIndicators weakpointIndicatorData[40] (x0x14),
+		// s_reticleData ReticleData[4] (x8), s_rocketLauncherModels [4] (x4),
+		// s_armBladeModels ArmBladeModels[16] (x0x18). PC: 0x1626BDB0 [20],
+		// 0x1626BF40 [2], 0x1626BF58 [2], 0x1626BF60 [8]; all indexed per client:
+		// weakpoints lc*10+i (setup 0x01FF9DB0, `cmp rcx,0xa`), reticle [lc]
+		// (0x02000CF9, r15 = lc), rocket launcher [lc] (setup 0x0200CC6D ->
+		// GetLocalClientNum), arm blade lc*4+i (0x01FFA70C, `lea edi,[r13*4]`).
+		// Clients 2/3 wrote each table's tail over the next one, and the arm
+		// blade tail over the UI model globals from 0x1626C020 on (string-hunk
+		// pointer 0x1626C030, global model, controller roots). Dump 20:03:53:
+		// the arm-blade render 0x01FFF23A on slot 9 (client 2), from entity
+		// number read out of those globals. Bots use the specialist weapons, so
+		// the tables fill as soon as they play.
+		// scratch array_refs.py per table: 48 real references (below), static
+		// initialisers 0x02E9FF21.. skipped (they ran; the new blocks are set to
+		// the same values here), 8 Arxan-section candidates all non-instructions.
+		// Loop bounds: arm-blade clear 0x01FFA6DE `cmp rax,8` -> 16, rocket clear
+		// 0x0200CA1C `cmp rcx,2` -> 4; the per-client loops (4 / 10 records) are
+		// already right. Applied at startup, before any HUD element exists.
+		struct lui_table
+		{
+			const char* name;
+			uint32_t base;
+			uint32_t stride;
+			uint32_t old_count;
+			uint32_t new_count;
+			const entcoll_site* sites;
+			size_t site_count;
+		};
+		constexpr entcoll_site lui_armblade_sites[] = {
+			{0x01FF9FF3, 3, 7, true, 0x10}, {0x01FFA053, 3, 7, true, 0x0}, {0x01FFA0D7, 3, 7, true, 0x0},
+			{0x01FFA157, 3, 7, true, 0x0}, {0x01FFBA12, 4, 8, false, 0x4}, {0x01FFEB9D, 5, 9, false, 0x8},
+			{0x01FFEBAB, 5, 9, false, 0xC}, {0x01FFEBB4, 5, 9, false, 0x10}, {0x01FFEBC5, 4, 8, false, 0x0},
+			{0x01FFEBE7, 3, 7, false, 0x14}, {0x01FFEBEE, 3, 7, false, 0x14}, {0x01FFEC0A, 3, 11, false, 0x4},
+			{0x01FFEC15, 3, 11, false, 0x14}, {0x01FFEC20, 4, 8, false, 0x8}, {0x0200C192, 3, 7, true, 0x0},
+			{0x0200C3E6, 3, 7, true, 0x0},
+		};
+		constexpr entcoll_site lui_rocket_sites[] = {
+			{0x01FFA1A7, 3, 7, true, 0x0}, {0x0200BFDE, 4, 8, false, 0x0}, {0x0200BFFF, 4, 8, false, 0x2},
+			{0x0200C25E, 5, 9, false, 0x0}, {0x0200C343, 3, 7, true, 0x0}, {0x0200C5C9, 3, 7, true, 0x0},
+		};
+		constexpr entcoll_site lui_reticle_sites[] = {
+			{0x01FFA187, 3, 7, true, 0x0}, {0x02000639, 4, 9, false, 0x0}, {0x02000689, 6, 10, false, 0x4},
+			{0x020006B7, 4, 8, false, 0x0}, {0x020006C1, 6, 10, false, 0x4}, {0x020006DA, 6, 10, false, 0x4},
+			{0x020006E6, 4, 8, false, 0x0}, {0x020006F0, 6, 10, false, 0x4}, {0x0200071B, 6, 10, false, 0x4},
+			{0x02000760, 4, 8, false, 0x4}, {0x0200078E, 6, 10, false, 0x4}, {0x020007C1, 6, 10, false, 0x4},
+		};
+		constexpr entcoll_site lui_weakpoint_sites[] = {
+			{0x01FDF700, 3, 7, true, 0x0}, {0x01FED34C, 5, 9, false, 0x4}, {0x01FED355, 4, 8, false, 0x0},
+			{0x01FEEDC5, 4, 8, false, 0x0}, {0x01FEEE37, 4, 8, false, 0x0}, {0x01FEEEAD, 6, 10, false, 0x8},
+			{0x01FEEEC9, 6, 10, false, 0xC}, {0x01FEEF28, 5, 9, false, 0x4}, {0x01FEEF50, 5, 9, false, 0x4},
+			{0x01FEEF65, 4, 8, false, 0x0}, {0x01FF2847, 5, 9, false, 0x10}, {0x01FF2868, 5, 9, false, 0x10},
+			{0x01FF96E5, 3, 7, true, 0x6}, {0x01FF9734, 3, 7, true, 0x0},
+		};
+		constexpr lui_table lui_tables[] = {
+			{"weakpoints", 0x1626BDB0, 0x14, 20, 40, lui_weakpoint_sites, std::size(lui_weakpoint_sites)},
+			{"reticle", 0x1626BF40, 0x8, 2, 4, lui_reticle_sites, std::size(lui_reticle_sites)},
+			{"rocket launcher", 0x1626BF58, 0x4, 2, 4, lui_rocket_sites, std::size(lui_rocket_sites)},
+			{"arm blade", 0x1626BF60, 0x18, 8, 16, lui_armblade_sites, std::size(lui_armblade_sites)},
+		};
+		struct lui_bound
+		{
+			uint32_t rva;
+			uint8_t stock[4];
+			uint8_t value;
+		};
+		constexpr lui_bound lui_bounds[] = {
+			{0x01FFA01E, {0x48, 0x83, 0xF8, 0x08}, 0x10},   // arm-blade clear: cmp rax,8
+			{0x0200C35C, {0x48, 0x83, 0xF9, 0x02}, 0x04},   // rocket-launcher clear: cmp rcx,2
+		};
+		const char* lui_tables_result = "LUI target tables: not attempted";
+		bool lui_tables_moved = false;
+
+		bool relocate_lui_target_tables()
+		{
+			if (lui_tables_moved)
+			{
+				return true;
+			}
+			const auto b = base();
+			for (const auto& bd : lui_bounds)
+			{
+				const auto* p = reinterpret_cast<const uint8_t*>(b + bd.rva);
+				if (!readable(p, sizeof(bd.stock)) || std::memcmp(p, bd.stock, sizeof(bd.stock)) != 0)
+				{
+					lui_tables_result = "LUI target tables: NOT moved - a loop bound differs";
+					return false;
+				}
+			}
+			// All four or none: one table moved alone would still be overrun by its
+			// neighbour's client 2/3 entries.
+			static int32_t saved[std::size(lui_tables)][16]{};
+			size_t moved = 0;
+			const auto rollback = [&]
+			{
+				for (size_t t = 0; t < moved; ++t)
+				{
+					for (size_t j = 0; j < lui_tables[t].site_count; ++j)
+					{
+						auto* insn = reinterpret_cast<uint8_t*>(b + lui_tables[t].sites[j].rva);
+						write_bytes(insn + lui_tables[t].sites[j].disp_off, &saved[t][j], sizeof(int32_t));
+					}
+				}
+			};
+			for (const auto& t : lui_tables)
+			{
+				const size_t bytes = static_cast<size_t>(t.new_count) * t.stride;
+				auto* fresh = static_cast<uint8_t*>(allocate_near_module(bytes));
+				if (!fresh || t.site_count > 16)
+				{
+					rollback();
+					lui_tables_result = "LUI target tables: NOT moved - allocation failed";
+					return false;
+				}
+				// No HUD element exists yet: the state every table starts in. The arm
+				// blade marks a free record with entity 0x3FF (its static init and
+				// clear 0x01FFA6B0); the others start zeroed.
+				std::memset(fresh, 0, bytes);
+				if (t.base == 0x1626BF60)
+				{
+					for (uint32_t r = 0; r < t.new_count; ++r)
+					{
+						const int32_t none = 0x3FF;
+						std::memcpy(fresh + r * t.stride + 4, &none, sizeof(none));
+					}
+				}
+				if (!rewrite_entcoll(t.sites, t.site_count, t.base, reinterpret_cast<size_t>(fresh), saved[moved]))
+				{
+					rollback();
+					lui_tables_result = "LUI target tables: NOT moved - a reference did not match (rolled back)";
+					return false;
+				}
+				++moved;
+			}
+			size_t bounds_done = 0;
+			for (const auto& bd : lui_bounds)
+			{
+				if (!write_bytes(reinterpret_cast<uint8_t*>(b + bd.rva + 3), &bd.value, 1))
+				{
+					for (size_t k = 0; k < bounds_done; ++k)
+					{
+						write_bytes(reinterpret_cast<uint8_t*>(b + lui_bounds[k].rva + 3), &lui_bounds[k].stock[3], 1);
+					}
+					rollback();
+					lui_tables_result = "LUI target tables: NOT moved - a bound write failed (rolled back)";
+					return false;
+				}
+				++bounds_done;
+			}
+			lui_tables_moved = true;
+			lui_tables_result = "LUI target tables -> [4 clients]: weakpoints 20->40, reticle 2->4, rocket 2->4, "
+			                    "arm blade 8->16 (48 sites, 2 bounds)";
+			return true;
+		}
+
+		// ============ per-client 32-entity marker blocks [2] -> [4] (2026-09-28) ============
+		//
+		// The second 4-player MP corruption (crash 19:05, caught live at 20:21:27
+		// by scratch media_watch.py with the LUI tables already fixed): records of
+		// 0x50 written over the cgame media table from 0x04749620. Live, the
+		// players' own blocks sit right before it: 0x04748220 + lc*0xA00, 32
+		// records of 0x50 per client ({time 1400, alpha 0.7, ..., origin,
+		// entity number +0x30, 0x3FF = free}; bots 9 and 10 showed in client 1's
+		// and client 2's blocks alike). PC indexes them lc*0xA00 everywhere:
+		// init 0x00220440 (per client: +0x18 = +0x1C = 1, +0x30 = 0x3FF - the
+		// exact corruption pattern), 0x002287C0, 0x00228860, 0x00228880,
+		// 0x00233BA4; loops are the 32 records of one client, none over clients.
+		// Only two blocks exist, so clients 2/3 wrote the media table (material
+		// pointers) - the 19:05 crash read one of them. Not a top-level PS4
+		// global of this shape (per-client cg data there); the size follows the
+		// per-client use. scratch array_refs.py: 5 real references, 32 Arxan
+		// candidates none an instruction; 0x04748210/18 are separate globals.
+		constexpr uint32_t cg_marks_base = 0x04748220;
+		constexpr uint32_t cg_marks_block = 0xA00;
+		constexpr entcoll_site cg_marks_sites[] = {
+			{0x00220447, 3, 7, true, 0x38},   // lea rax,[+0x38]   per-client init
+			{0x002287DD, 3, 7, true, 0x8},    // lea rax,[+0x8]
+			{0x00228863, 3, 7, true, 0x0},    // lea rcx,[base]    block getter
+			{0x00228883, 3, 7, true, 0x0},    // lea rcx,[base]    find by entity
+			{0x00233BA4, 3, 7, false, 0x0},   // lea rbx,[rax+RVA]
+		};
+		const char* cg_marks_result = "cg marker blocks: not attempted";
+		bool cg_marks_moved = false;
+
+		bool relocate_cg_marker_blocks()
+		{
+			if (cg_marks_moved)
+			{
+				return true;
+			}
+			const auto b = base();
+			auto* fresh = static_cast<uint8_t*>(allocate_near_module(4 * cg_marks_block));
+			if (!fresh)
+			{
+				cg_marks_result = "cg marker blocks: NOT moved - allocation failed";
+				return false;
+			}
+			std::memset(fresh, 0, 4 * cg_marks_block);   // blocks 2/3: the per-client init sets them up
+			if (!readable(reinterpret_cast<const void*>(b + cg_marks_base), 2 * cg_marks_block))
+			{
+				cg_marks_result = "cg marker blocks: NOT moved - old blocks unreadable";
+				return false;
+			}
+			std::memcpy(fresh, reinterpret_cast<const void*>(b + cg_marks_base), 2 * cg_marks_block);
+			static int32_t saved[std::size(cg_marks_sites)]{};
+			if (!rewrite_entcoll(cg_marks_sites, std::size(cg_marks_sites), cg_marks_base,
+			                     reinterpret_cast<size_t>(fresh), saved))
+			{
+				cg_marks_result = "cg marker blocks: NOT moved - a reference did not match";
+				return false;
+			}
+			cg_marks_moved = true;
+			cg_marks_result = "cg marker blocks [2] -> [4] x 0xA00 (5 sites)";
 			return true;
 		}
 
@@ -13804,12 +14104,12 @@ namespace splitscreen
 		// named by the PS4 symbol at 0xCA5C70 and exposed on PC by
 		// Engine.LobbyHostAddLocal. Its first argument is explicitly `actionId`;
 		// zero is the PC binding's valid default and only tags the UI result.
-		constexpr uint32_t lobby_host_add_local_rva = 0x01ECB1B0;
-		constexpr uint32_t lobby_get_session_rva = 0x01ED0AA0;
-		constexpr uint32_t lobby_get_client_by_xuid_rva = 0x01EF3FE0;
-		constexpr uint32_t live_user_get_xuid_rva = 0x01EBAF40;
-		constexpr uint32_t mutable_client_info_rva = 0x01EBF1C0;
-		constexpr uint32_t lobby_update_client_rva = 0x01EF5C50;
+		constexpr uint32_t lobby_host_add_local_rva = 0x01ECAAF0;
+		constexpr uint32_t lobby_get_session_rva = 0x01ED03E0;
+		constexpr uint32_t lobby_get_client_by_xuid_rva = 0x01EF3920;
+		constexpr uint32_t live_user_get_xuid_rva = 0x01EBA880;
+		constexpr uint32_t mutable_client_info_rva = 0x01EBEB00;
+		constexpr uint32_t lobby_update_client_rva = 0x01EF5590;
 		constexpr int game_lobby_type = 1;
 
 		constexpr uint8_t lobby_host_add_local_bytes[] = {
@@ -13839,12 +14139,21 @@ namespace splitscreen
 			return readable(p, N) && std::memcmp(p, expected, N) == 0;
 		}
 
+		// LiveUser_GetXuid is safe to call for controllers 2/3 when it is the
+		// engine's own code, or when a host client replaced it and the mod put
+		// the engine back for 2/3 (splitscreen_ezz.hpp).
+		bool live_user_get_xuid_callable()
+		{
+			return engine_bytes_match(live_user_get_xuid_rva, live_user_get_xuid_bytes)
+				|| (ezz::get_xuid_chained() && live_user_get_xuid_rva == ezz::get_xuid_rva);
+		}
+
 		bool lobby_enrollment_api_matches()
 		{
 			return engine_bytes_match(lobby_host_add_local_rva, lobby_host_add_local_bytes)
 				&& engine_bytes_match(lobby_get_session_rva, lobby_get_session_bytes)
 				&& engine_bytes_match(lobby_get_client_by_xuid_rva, lobby_get_client_bytes)
-				&& engine_bytes_match(live_user_get_xuid_rva, live_user_get_xuid_bytes);
+				&& live_user_get_xuid_callable();
 		}
 
 		// LobbyBase_GetNetworkMode (PS4 0xCBFB40, 7 B) is PC 0x01EE8160:
@@ -13855,9 +14164,9 @@ namespace splitscreen
 		// branches on this value (`cmp eax,1` LAN, `cmp eax,2` LIVE). Names from
 		// PS4 LobbyTypes_GetLobbyNetworkModeName 0xCC55B0: 0 LOCAL, 1 LAN, 2 LIVE.
 		// Measured: BOIII main menu 2 (LIVE); Zombies PRIVATE GAME lobby 1 (LAN).
-		constexpr uint32_t lobby_get_network_mode_rva = 0x01EDBEB0;
+		constexpr uint32_t lobby_get_network_mode_rva = 0x01EDB7F0;
 		constexpr uint8_t lobby_get_network_mode_bytes[] = {
-			0x8B, 0x05, 0x66, 0x24, 0x7F, 0x13, 0xC3,
+			0x8B, 0x05, 0x26, 0x2B, 0x7F, 0x13, 0xC3,
 		};
 		constexpr int lobby_network_local = 0;
 		constexpr int lobby_network_lan = 1;
@@ -13940,7 +14249,7 @@ namespace splitscreen
 		{
 			return engine_bytes_match(lobby_get_session_rva, lobby_get_session_bytes)
 				&& engine_bytes_match(lobby_get_client_by_xuid_rva, lobby_get_client_bytes)
-				&& engine_bytes_match(live_user_get_xuid_rva, live_user_get_xuid_bytes)
+				&& live_user_get_xuid_callable()
 				&& engine_bytes_match(mutable_client_info_rva, mutable_client_info_bytes)
 				&& engine_bytes_match(lobby_update_client_rva, lobby_update_client_bytes);
 		}
@@ -14180,7 +14489,7 @@ namespace splitscreen
 		// controller 2 is already poll-ready, the original loop sees and adds it
 		// in the same pass. If not, the later single-client path above handles it
 		// without ever repeating the plural function or corrupting +0xF0.
-		constexpr uint32_t lobby_add_all_rva = 0x01ECB1C0;
+		constexpr uint32_t lobby_add_all_rva = 0x01ECAB00;
 		constexpr uint8_t lobby_add_all_prologue[] = {
 			0x48, 0x8B, 0xC4, 0x57, 0x41, 0x54, 0x41, 0x55,
 			0x41, 0x56, 0x41, 0x57, 0x48, 0x81, 0xEC, 0xB0,
@@ -14260,7 +14569,7 @@ namespace splitscreen
 		//
 		// Every call of 0x01E0C960 is logged with its stack to
 		// splitscreen_ui_trace.txt, so the button's real path is on record.
-		constexpr uint32_t lobbyvm_local_leave_rva = 0x01EE4200;
+		constexpr uint32_t lobbyvm_local_leave_rva = 0x01EE3B40;
 		constexpr uint8_t lobbyvm_local_leave_prologue[] = {
 			0x40, 0x57,                                  // push rdi
 			0x48, 0x81, 0xEC, 0xB0, 0x00, 0x00, 0x00,    // sub rsp, 0xB0
@@ -14272,16 +14581,16 @@ namespace splitscreen
 			0x48, 0x89, 0x74, 0x24, 0x20,                // mov [rsp+20h], rsi
 			0x57, 0x41, 0x56, 0x41, 0x57,                // push rdi / r14 / r15
 		};
-		constexpr uint32_t lobby_host_is_host_rva = 0x01ECCDC0;
+		constexpr uint32_t lobby_host_is_host_rva = 0x01ECC700;
 		constexpr uint8_t lobby_host_is_host_bytes[] = {
 			0x48, 0x83, 0xEC, 0x28, 0xE8, 0xD7, 0x3C, 0x00, 0x00,   // call 0x01EDCDD0
 		};
-		constexpr uint32_t lobby_host_remove_client_rva = 0x01ECD910;
+		constexpr uint32_t lobby_host_remove_client_rva = 0x01ECD250;
 		constexpr uint8_t lobby_host_remove_client_bytes[] = {
 			0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74,
 			0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20,
 		};
-		constexpr uint32_t local_client_left_reason_rva = 0x02FB1848;
+		constexpr uint32_t local_client_left_reason_rva = 0x02FB1758;
 		constexpr char local_client_left_reason[] = "Local Client Left.";
 		utils::hook::detour lobbyvm_local_leave_hook;
 		utils::hook::detour guest_signin_hook;
@@ -14505,7 +14814,7 @@ namespace splitscreen
 		// block is carved for fewer clients than max(a, b) + 1, the swap reads
 		// and writes past it. Logs both indices, cl_maxLocalClients, whether the
 		// connection block exists, and both clients' flags before and after.
-		constexpr uint32_t swap_clients_rva = 0x020E4090;
+		constexpr uint32_t swap_clients_rva = 0x020E39D0;
 		constexpr uint8_t swap_clients_prologue[] = {
 			0x89, 0x54, 0x24, 0x10,                               // mov [rsp+0x10], edx
 			0x89, 0x4C, 0x24, 0x08,                               // mov [rsp+8], ecx
@@ -14886,7 +15195,7 @@ namespace splitscreen
 		// semantically: PS4 CL_SetupClientsForIngame calls SetAllUsedActive
 		// immediately before CL_AllocatePerLocalClientMemory and the connect
 		// loop, which is exactly the window CL_Init(2) needs.
-		constexpr uint32_t set_active_rva = 0x027C2080;
+		constexpr uint32_t set_active_rva = 0x027C19C0;
 		constexpr uint8_t set_active_prologue[] = {
 			0x48, 0x89, 0x5C, 0x24, 0x08, // mov [rsp+8], rbx
 			0x48, 0x89, 0x74, 0x24, 0x10, // mov [rsp+0x10], rsi
@@ -15263,7 +15572,7 @@ namespace splitscreen
 			start_op_hook.invoke<void>(controller, operation, files);
 		}
 
-		constexpr uint32_t clear_storage_rva = 0x02219640;
+		constexpr uint32_t clear_storage_rva = 0x02218F80;
 		constexpr uint8_t clear_storage_prologue[] = {0x48, 0x89, 0x6C, 0x24, 0x20, 0x56};
 		bool clear_storage_ok = false;
 		bool guests_cleared = false;
@@ -15281,7 +15590,7 @@ namespace splitscreen
 			set_status(35, 1);
 		}
 
-		constexpr uint32_t per_controller_update_rva = 0x01E1A1A0;
+		constexpr uint32_t per_controller_update_rva = 0x01E19AE0;
 		constexpr uint8_t per_controller_update_prologue[] = {0x48, 0x8B, 0xC4, 0x55, 0x41, 0x54};
 		utils::hook::detour per_controller_update_hook;
 		bool per_controller_update_hooked = false;
@@ -15296,7 +15605,7 @@ namespace splitscreen
 		// and opData points into s_localFileOpData, so (opData - base) / 0x1820
 		// IS the controller the task belongs to.
 		constexpr uint32_t task_head_rva = 0x17A12A30;
-		constexpr uint32_t gamerprofile_def_rva = 0x02FD3EF8;
+		constexpr uint32_t gamerprofile_def_rva = 0x02FD3E08;
 
 		// Which guest controller has a wedged gamer-profile task, or -1.
 		//
@@ -15618,13 +15927,13 @@ namespace splitscreen
 			{0x01359B92, {0x48, 0x8D, 0x0D, 0x17, 0x21, 0x00, 0x04}},
 			{0x0135A27B, {0x48, 0x8D, 0x15, 0x2E, 0x1A, 0x00, 0x04}},
 			{0x0135D1BB, {0x48, 0x8D, 0x15, 0xEE, 0xEA, 0xFF, 0x03}},
-			{0x027C1DDE, {0x4C, 0x8D, 0x0D, 0xCB, 0x9E, 0xB9, 0x02}},
-			{0x027C1E49, {0x48, 0x8D, 0x15, 0x60, 0x9E, 0xB9, 0x02}},
-			{0x027C1F50, {0x48, 0x8D, 0x0D, 0x59, 0x9D, 0xB9, 0x02}},
-			{0x020ED0CF, {0x48, 0x8D, 0x15, 0xE2, 0xEB, 0x26, 0x03}},
-			{0x027C1CD7, {0x48, 0x8D, 0x0D, 0xDA, 0x9F, 0xB9, 0x02}},
-			{0x027C1D10, {0x48, 0x8D, 0x0D, 0xA1, 0x9F, 0xB9, 0x02}},
-			{0x027C1D50, {0x48, 0x8D, 0x0D, 0x61, 0x9F, 0xB9, 0x02}},
+			{0x027C171E, {0x4C, 0x8D, 0x0D, 0x8B, 0xA5, 0xB9, 0x02}},
+			{0x027C1789, {0x48, 0x8D, 0x15, 0x20, 0xA5, 0xB9, 0x02}},
+			{0x027C1890, {0x48, 0x8D, 0x0D, 0x19, 0xA4, 0xB9, 0x02}},
+			{0x020ECA0F, {0x48, 0x8D, 0x15, 0xA2, 0xF2, 0x26, 0x03}},
+			{0x027C1617, {0x48, 0x8D, 0x0D, 0x9A, 0xA6, 0xB9, 0x02}},
+			{0x027C1650, {0x48, 0x8D, 0x0D, 0x61, 0xA6, 0xB9, 0x02}},
+			{0x027C1690, {0x48, 0x8D, 0x0D, 0x21, 0xA6, 0xB9, 0x02}},
 		};
 
 		// CONNECT-GATE TRACER - read-only, answers one question exactly.
@@ -15650,7 +15959,7 @@ namespace splitscreen
 		// Read from outside via the call target itself (activation_watch.py
 		// resolves the cave through this very call site), so it needs no status
 		// slot and survives the dead async pipeline.
-		constexpr uint32_t is_active_rva = 0x027C1FA0;
+		constexpr uint32_t is_active_rva = 0x027C18E0;
 		constexpr uint32_t client_ui_actives_rva = 0x05359BC0;
 		constexpr uint8_t is_active_bytes[] = {
 			0x48, 0x63, 0xC1,                         // movsxd rax, ecx
@@ -15817,7 +16126,7 @@ namespace splitscreen
 			uint32_t done = 0;
 			const auto b = base();
 
-			auto* disconnect_bound = reinterpret_cast<uint8_t*>(b + 0x020F0E57);
+			auto* disconnect_bound = reinterpret_cast<uint8_t*>(b + 0x020F0797);
 			constexpr uint8_t disconnect_old[] = {0x83, 0xFF, 0x02};
 			if (readable(disconnect_bound, sizeof(disconnect_old))
 			    && std::memcmp(disconnect_bound, disconnect_old, sizeof(disconnect_old)) == 0)
@@ -15861,10 +16170,10 @@ namespace splitscreen
 			// pointers and a static stringstream (CLAUDE.md rule 4).
 			struct shutdown_site { uint32_t rva; uint8_t modrm; const char* what; bool needs_uiinfo; };
 			constexpr shutdown_site com_shutdown_sites[] = {
-				{0x020F188E, 0xFF, "Com_ShutdownInternal disconnect loop", false},
-				{0x020F1F4B, 0xFB, "inlined Com_ShutdownInternal disconnect loop", false},
-				{0x020F18D9, 0xFB, "Com_ShutdownInternal UI close loop", true},
-				{0x020F1F9C, 0xFB, "inlined Com_ShutdownInternal UI close loop", true},
+				{0x020F11CE, 0xFF, "Com_ShutdownInternal disconnect loop", false},
+				{0x020F188B, 0xFB, "inlined Com_ShutdownInternal disconnect loop", false},
+				{0x020F1219, 0xFB, "Com_ShutdownInternal UI close loop", true},
+				{0x020F18DC, 0xFB, "inlined Com_ShutdownInternal UI close loop", true},
 			};
 			for (const auto& s : com_shutdown_sites)
 			{
@@ -16012,12 +16321,12 @@ namespace splitscreen
 		// The loop bound at 0x0283ABB5 is deliberately LEFT AT 2: widening it
 		// would make the loop write `or dword [rbx], esi` into clientUIActives[2],
 		// which does not exist.
-		constexpr size_t active_count_rva = 0x027C20CD;
+		constexpr size_t active_count_rva = 0x027C1A0D;
 		constexpr uint8_t active_count_bytes[] = {
-			0x40, 0x84, 0x35, 0xEC, 0x7A, 0xB9, 0x02, // test byte [rip+..], sil
+			0x40, 0x84, 0x35, 0xAC, 0x81, 0xB9, 0x02, // test byte [rip+..], sil
 			0xB8, 0x00, 0x00, 0x00, 0x00,             // mov eax, 0
 			0x0F, 0x45, 0xC6,                         // cmovne eax, esi
-			0x40, 0x84, 0x35, 0x55, 0x8B, 0xB9, 0x02, // test byte [rip+..], sil
+			0x40, 0x84, 0x35, 0x15, 0x92, 0xB9, 0x02, // test byte [rip+..], sil
 			0x74, 0x02,                               // je +2
 			0xFF, 0xC0,                               // inc eax
 		};
@@ -16555,6 +16864,19 @@ namespace splitscreen
 				return false; // image not settled yet - try again
 			}
 
+			// Behind ezz BOIII: controllers 2/3 get the engine's own XUID and
+			// name code back, local clients 2/3 get cgame memory of their own
+			// (splitscreen_ezz.hpp). Nothing happens on official BOIII.
+			{
+				const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base());
+				const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base() + dos->e_lfanew);
+				ezz::install(base());
+				ezz::install_pools(base(), nt->OptionalHeader.SizeOfImage, &allocate_near_module);
+				const auto mask = ezz::install_client_command_guard(base());
+				note("host chain: mask 0x%X (1 GetXuid, 2 UserGetXuid, 4 GetClientName, "
+				     "16/32/64 cg/cgs/viewmodel pools, 128 entity pools, 256 ClientCommand guard)", mask);
+			}
+
 			// Reserve this while near address space is still available, but do not
 			// copy or repoint s_gamePads yet. Activating the relocation here crashed
 			// pre-menu gamepad init at RVA 0x022E9550. The lobby-time preparation
@@ -16670,6 +16992,24 @@ namespace splitscreen
 				trace_line pc;
 				pc.str(perctrl_result);
 				trace_write(pc);
+			}
+
+			// Weakpoint / reticle / rocket-launcher / arm-blade HUD tables are sized
+			// for two clients; clients 2/3 overran them into the UI model globals.
+			if (fix_enabled("luitables"))
+			{
+				relocate_lui_target_tables();
+				trace_line lt;
+				lt.str(lui_tables_result);
+				trace_write(lt);
+			}
+			// Per-client 32-entity marker blocks: clients 2/3 wrote the media table.
+			if (fix_enabled("cgmarks"))
+			{
+				relocate_cg_marker_blocks();
+				trace_line cm;
+				cm.str(cg_marks_result);
+				trace_write(cm);
 			}
 
 			// The unnamed per-client CG/UI context array (0x04D2CB40, stride
@@ -16892,6 +17232,7 @@ namespace splitscreen
 			relocate_batch15();
 			relocate_batch16();
 			relocate_batch17();
+			relocate_batch18();
 			relocate_lightq();
 			// Before R_Init allocates the culler object (see grow_umbra_client_arrays).
 			grow_umbra_client_arrays();
@@ -16899,15 +17240,18 @@ namespace splitscreen
 			install_ui_trace();
 			install_guest_copy();
 			widen_csc_lc_checks();
+			widen_filter_pass_lc_check();
 			gate_lensflares_for_extra_clients();
 			// Before the clamp: it bounds the slot by the slices this creates.
-			// OPT-IN (BO3_SUN4=on) until verified: 401d038 and 61b0c41 crashed
-			// entering a 4-player round, and the next run (a32ed5d) died later on
-			// a stray write over the cgame media table whose writer is not
-			// identified yet. Without it players 2-4 share sun-shadow slot 1.
+			// ON by default since 2026-09-28 20:39 (verified: 10 min 4-player MP with
+			// bots, no crash, burst test turning player 4: panes 2/3 0.4 instead of
+			// 4.9; confirmed by eye in a real game). The crashes that made it
+			// opt-in for a while were the LUI target tables and the cg marker
+			// blocks (relocate_lui_target_tables / relocate_cg_marker_blocks), not
+			// this change. BO3_SUN4=off keeps the shared slot 1.
 			char sun4_env[8] = {};
 			GetEnvironmentVariableA("BO3_SUN4", sun4_env, sizeof(sun4_env));
-			if (std::strcmp(sun4_env, "on") == 0)
+			if (std::strcmp(sun4_env, "off") != 0)
 			{
 				grow_sun_shadow_slices();
 				trace_line sg;
@@ -17394,11 +17738,25 @@ namespace splitscreen
 			}
 
 			// Verify the expected prologue before detouring, same rule as the
-			// byte patches: fail safe, never fail dirty.
+			// byte patches: fail safe, never fail dirty. ezz BOIII detours
+			// Storage_Pump itself (a lock around the original); its 5-byte jump
+			// with the rest of the prologue intact is accepted too - MinHook
+			// moves that jump into this detour's trampoline, so invoke() runs
+			// ezz's locked pump.
 			const auto pump = base() + storage_pump_rva;
-			if (targets_ok && std::memcmp(reinterpret_cast<const void*>(pump), storage_pump_prologue,
-			                              sizeof(storage_pump_prologue)) == 0)
+			static constexpr uint8_t storage_pump_after_host_jump[] = {0x40, 0x48, 0x63, 0xF9, 0x8B, 0xCF, 0xE8};
+			const bool pump_is_engine = std::memcmp(reinterpret_cast<const void*>(pump), storage_pump_prologue,
+			                                        sizeof(storage_pump_prologue)) == 0;
+			const bool pump_is_hosted = !pump_is_engine
+				&& ezz::host_jump_then(base(), storage_pump_rva, storage_pump_after_host_jump,
+				                       sizeof(storage_pump_after_host_jump));
+			if (targets_ok && (pump_is_engine || pump_is_hosted))
 			{
+				if (pump_is_hosted)
+				{
+					ezz::chained |= 8;
+					note("host chain: Storage_Pump stacked on the host's detour");
+				}
 				storage_pump_hook.create(reinterpret_cast<void*>(pump), storage_pump_stub);
 				storage_pump_hooked = true;
 				set_status(22, 1);

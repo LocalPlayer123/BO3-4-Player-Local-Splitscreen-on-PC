@@ -1,5 +1,5 @@
--- DEV-ONLY (2026-09-28, not shipped): enable MULTIPLAYER in the offline main
--- menu. Stock CoD.LobbyButtons.MP_LAN.disabledFunc (traced with zz_mpprobe)
+-- Shipped since v1.1 (2026-09-28): enable MULTIPLAYER in the offline main
+-- menu (4-player local custom games, with bots). Stock CoD.LobbyButtons.MP_LAN.disabledFunc (traced with zz_mpprobe)
 -- checks IsMpOwned, GetLobbyNetworkMode, IsShipBuild, IsUsingMods: the retail
 -- PC build disables offline MP unless a mod is loaded. This keeps only the
 -- ownership check. No io/os, no tracing - nothing held in LUI memory.

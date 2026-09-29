@@ -1,156 +1,180 @@
 # Open problems
 
-Everything known to be broken, unverified or unfinished. All addresses are
-image RVAs of `BlackOps3.exe` build **0x06517980** (PE checksum) unless marked
-otherwise. "Measured" means read from the live process or a minidump; nothing
-here is guessed.
+Everything known to be broken, unverified or unfinished, sorted by kind.
+Addresses are image RVAs of `BlackOps3.exe` build **0x06531394** (PE
+checksum; the exe ezz BOIII 3.0 runs, which the code targets since 2.0).
+Most points were measured on the previous build 0x06517980 and translated
+with a build-to-build instruction map; the method is given where it matters.
+Nothing here is guessed: each point says what was measured.
 
-A method that saved a lot of time: the PS4 debug build of the same game
-(full symbols, unoptimised, per-client arrays still `[4]`) answers most "what is
-this array / how big should it be" questions. Its struct sizes differ from PC,
-names and logic do not.
+For merging into ezz BOIII natively, see [EZZ_REQUIRED_CHANGES.md](EZZ_REQUIRED_CHANGES.md).
 
----
-
-## 1. Crash: stray write over the cgame media table (4-player MP) - NOT FIXED
-
-Seen once, 4-player offline Multiplayer (game mode 1), a few minutes into the
-match. The crash itself:
-
-* `0x01F285B2 test dword [r12+8], 0x1000`, AV reading `0x100000009`.
-* Call chain `0x02038E61 -> 0x0279C130 -> 0x01F28550`. The pointer is a material
-  chosen at `0x02038A56`: `[0x04749900]`, or `[0x04749908]` when bit 51 of the
-  per-client UI visibility bits is set. `[0x04749908]` held `0x0000000100000001`.
-
-The real problem is a memory corruption. Comparing the crash dump with an
-earlier dump of the same build:
-
-* `0x04749688 .. 0x04749FE8` (0x960 bytes) was overwritten by **30 records of
-  0x50 bytes** (= 2 x 15 x 0x50, i.e. plausibly two local clients' worth of a
-  15-record per-client block). Each record: dword +0 = 1, dword +4 = 1, qword
-  +0x20 = 0, dword +0x2C = 0, byte +0x38 = 0, dword +0x3C = 0, qword +0x40 = 0;
-  the other bytes untouched.
-* That range is part of the cgame media table (material pointers registered
-  by `0x00243847 .. 0x002438B7`); no instruction in the image addresses it
-  except those registrations - so it is an indexed write from somewhere else,
-  most likely a per-local-client array that is still `[2]` on PC and has a
-  15 x 0x50 block per client, written for clients 2 and 3.
-* Not found yet: the writer. Candidates to check first are record
-  initialisers with stride 0x50 and 15 entries per client.
-* The run had the experimental 4-slot sun shadows enabled (see 2). They are the
-  newest change, so they are now **opt-in** - but they are not proven to be
-  the cause, and the corruption may also be specific to that game mode.
-
-## 2. Sun shadows: players 2-4 share one shadow slot - PARTIALLY DONE
-
-The PC renders sun shadows per view into render target 5 (depth,
-`SHADOWMAP_SUN_1P`) and 9 (colour, `SHADOWMAP_TRANS_1P`) with 3 partitions per
-view, created with 6 slices = 2 views. The component clamps views 2-4 to slot 1
-(otherwise the 3rd view indexes slice 6+, which crashed in d3d11). Result:
-views 2-4 overwrite each other's shadows - shimmering / blocky shadow patches.
-
-The PS4 renders every view into the same 3 slices but finishes one view before
-the next; the PC does not (tried: everyone in slot 0 spreads the problem to
-player 1 too).
-
-**Implemented, opt-in with `BO3_SUN4=on`, NOT verified:** 12 slices for RT 5/9
-(descriptor stores `0x01CD1357` / `0x01CD140A` via caves - the shared
-`mov r8d,6` at `0x01CD12AD` also supplies RT 6's id), RT 9's colour views for
-slices 8-11 in a sidecar (the view set has only 8 inline slots,
-`0x01CD53D0` builds per-slice views only for 2..7 slices), and the two places
-that pick a colour view by slice take the sidecar: `R_SetRenderTargetSlice`
-`0x01CF550D` and the clear `0x01CF367D` (the first version missed the clear
-and crashed in d3d11). Live values were checked (12 depth views, 8 inline +
-4 sidecar colour views). The visual result was never seen - the test runs
-ended in problem 1 or in the pool crash that is now fixed.
-
-## 3. Blocky, wrongly lit patches on panes 3 and 4 - NOT FIXED
-
-Der Eisendrache, hangar interior: panes 3/4 show grid-aligned rectangles where
-the wall is lit and the rest dark (staircase edges). Stable per camera pose (no
-flicker), reproducible; panes 1/2 looking at the same place are clean. Looks
-like tile-based light culling data for views 3/4. Leads, none verified:
-
-* PS4 `GfxLightingData` holds per-view tile/cull data
-  (hTileGlobals, cullConstantsPack, ...); the PS4 ring is 32 deep, the PC ring
-  4 deep - growing it was planned.
-* A per-view index at view `+0xB267C` feeds `1 << idx` masks (`0x01CB95E7`) -
-  check every mask / array that index reaches for a 2- or 3-view size.
-
-## 4. Real controllers as players 3/4 (Steam Input)
-
-With Steam Input on (required - off, the game sees no controller), Steam
-decides the in-process XInput order and it changed between launches. Only
-tested with two physical pads plus virtual ones. Needs community testing.
-
-## 5. Occasional silent exit ~20 s after launch
-
-The game sometimes exits with code 0 about 20 s after start, no dialog, no
-dump. The component's startup completes first; the exit happens inside the
-game's own `Com_Init` (UI init never runs). Intermittent; starting again
-works. Cause unknown.
-
-## 6. Crash when closing the game (not splitscreen code)
-
-Closing the window (WM_CLOSE / Alt+F4) can crash at shutdown: AV reading 0 in
-the CRT's `_getstream` (`0x02BDD406` on this build) on a worker thread that is
-scanning another process's image while the CRT tears its stream table down.
-The menu QUIT is usually clean. Not caused by the mod as far as measured;
-not re-checked on this game build.
-
-## 7. One-off boot crash (seen once)
-
-11 s after launch: EXECUTE AV at an address outside every module. The game's
-copy routine `0x02BC4EB0` started with a `jmp` into a hook page ~2 GB below the
-image (present in an image dump taken while the mod was inactive, so not the
-mod's), and that page was gone. Called from `0x01CA5F1C`. The next launch was
-fine.
-
-## 8. Offline Multiplayer needs a Lua switch
-
-The retail PC build greys out MULTIPLAYER in the offline menu unless a mod is
-loaded (`CoD.LobbyButtons.MP_LAN.disabledFunc` checks ownership, network mode,
-ship build and "using mods"). `src/ui_scripts_optional/zz_mplan` keeps only the
-ownership check. With it, 4-player offline MP works (lobby, class selection,
-spawns, HUD per pane). It is not part of the player package yet.
-
-## 9. Lobby UI polish
-
-* The PC-only "Activate Splitscreen" button could read "Press A to join"
-  when a seat is free, like the console (`SplitscreenLobbyButtonPC`).
-* ESC on the keyboard opens the pause menu for every local player; each guest
-  closes their own with B. Unknown whether that is stock PC behaviour.
-* Pad input is ignored while the game window is not in the foreground (stock).
-
-## 10. Untested
-
-Bots in MP custom games; maps other than Der Eisendrache, Shadows of Evil,
-The Giant (Zombies) and Safeguard / one other mode (MP); two-player online
-play with the mod present on current BOIII.
-
-## 11. Game build
-
-Every address targets game build 0x06517980. If BOIII ships a different
-`BlackOps3.exe`, the component stands down (the game runs normally) and all
-RVAs - in `splitscreen.cpp` and the generated `splitscreen_reloc.hpp` - must be
-re-mapped.
-
-## 12. Known small gaps from the build port
-
-A few per-client relocation tables have references that were never rewritten
-on either build (players' key bindings 167, voice 12, gamepads 7, client UI
-2). They have never caused a fault. Do not "fix" them without checking what
-the unrewritten references do.
+A method that saved a lot of time: the PS4 debug build of the same game (full
+symbols, unoptimised, per-client arrays still `[4]`) answers most "what is this
+array / how big should it be" questions. Its struct sizes differ from PC,
+names and logic do not. Almost every bug below and in the history was a
+per-local-client array that the PC sized for 2 clients - see the last section.
 
 ---
 
-## Fixed recently (for context)
+## A. Real bugs, not fixed
 
-* Player 4's pane turned grey mid-round: the LUI per-controller state
-  (`s_perController`) is `[2]` on PC; controller 3's "UI active" byte lay in a
-  button-glyph text buffer. Relocated to `[4]`.
-* 4-player MP round entry crashed on a full `ClientCache_ClientPool`
-  (per-player-entity caches, sized for 2 local clients on PC) - doubled.
-* MP HUD of players 3/4 (Lua `GetClientNum` answered -1 for controllers 2/3),
-  "Failed to host lobby" with 3-4 players seated, UI model pool / string hunk
-  exhaustion with 4 class-selection menus, command buffers for clients 2/3.
+### A1. One crash in the main menu (seen once)
+40 s after launch, before any match: AV in a linked-list walk at `0x01D60534`
+(list node pointer read as `0x9A1`), called from `0x01D43F51`. It happened in a
+build that still had the two memory-corruption bugs fixed below (B1, B2), so it
+may be the same family - but those two only write during a match. Not seen
+again since.
+
+### A2. Blocky, wrongly lit patches on panes 3/4 (Der Eisendrache)
+Hangar interior: grid-aligned rectangles on the upper walls, panes 3/4 only.
+Not re-tested since the sun-shadow change (B3); A4/A6 are the better leads.
+(`view+0xB267C` is the light-state index, copied from the refdef at
+`0x01CE01D0` - not a view index.)
+
+### A4. MP: panes 3/4 look overexposed
+Panes 3 and 4 looked too bright in Multiplayer (seen together with player 3's
+white HUD panels, which are fixed - B7). Not re-measured since that fix.
+Earlier measurements: exposure records `[5]` are relocated and selected per
+client (`0x01C5FC0C`); luminance target RT 35 (56x32) is shared by all views.
+Test trap: idle test players stand still, so a symptom looks "latched".
+
+### A5. Garbled name for a 3rd controller joining in the main menu
+Frontend join of controllers 1-3 within ~2 s: seat 2's lobby member row
+(stride 0x490) gets xuid = a vtable pointer (image `+0x303BD98`), whose bytes
+show as the name (`+0x303BCA8` in 0x06531394). A per-controller xuid source
+still sized `[2]` is read on that path (slot 2 = a foreign object). Joins made inside the ZM/MP lobby get
+correct identities.
+
+### A6. Umbra visibility: two per-client int arrays still `[2]`
+`umbraGlob+0x12DC48` and `+0x12DC50` (PS4 `UmbraGlob.clientGates[4]`,
+`viewCount[4]`). Client 2 writes `+0x12DC48[2]` = `+0x12DC50[0]` (client 0's
+slot), client 3 the same for client 1; clients 2/3 read their `+0x12DC50`
+entry from padding (0). Users: `0x01C8CC72`, `0x01C8DA64`, `0x01C8DB20`,
+`0x01C8DB68`, `0x01C8CBB2` (same addresses in both builds). Relocate after a
+full reference scan.
+
+### A7. User reports, not reproduced yet
+Hit indicator texture missing; players 1 and 2 sharing one controller with
+mixed third-party + Xbox pads (one pad probably seen through two APIs).
+
+### A3. Occasional silent exit ~20 s after launch
+Exit code 0, no dialog, no dump, inside the game's own `Com_Init` (the
+component's startup completes first). Intermittent; starting again works.
+
+## B. Fixed (listed because they show where to look next)
+
+### B5. ezz only: ClientCommand hangs the server in 6 of 16 launches (2.0)
+ezz detours `ClientCommand` (`0x0193DFC0`) and calls the original from
+boiii.exe. The function opens with an Arxan caller check: bits 12..15 of the
+PEB address pick one of 16 variants (jump table `0x019402E8`); nine test the
+return address against the image, and a caller outside it drives the check's
+state machine into an endless two-state loop (variant 2: loop
+`0x0193E400..0x0193E557`). boiii.exe is mapped above the image, so variants
+0/2/5/6/11/12 hang: "Connection Interrupted" on the first client command.
+The component nops the nine `cmova/cmovb edx, r10d` that load the failing
+state (`splitscreen_ezz.hpp`, `install_client_command_guard`). Affects every
+ezz user, with or without this mod - reported as EZZ_REQUIRED_CHANGES item 12.
+
+### B6. 4-player MP freeze / crash: Con_ClearNotify (2.0)
+`Con_ClearNotify` (`0x01339210`, a leaf without unwind data, so the first
+reference scan missed it) cleared local clients 2/3's game-message windows
+through the whole `con` struct, i.e. inside the OLD `con.messageBuffer[2]`
+tail - which is the 32 KB print queue. Its reader then copied 0x5F72 bytes
+onto a stack buffer (crash) or stalled (freeze). Called only from a
+server-command handler, so Zombies never hit it. 8 con-relative sites added.
+
+### B8. Screen filters missing for players 3/4 (2.0)
+`CScr_SetFilterPassEnabled` (`0x0039DB30`) rejected local clients above 1
+(`cmp r9d, edi` against a register holding 1, own error line "called with an
+invalid local client", which flooded ezz's console). PS4 accepts 0..4 and the
+function only touches the client's cg_t. Widened to 3 (`cmp eax, 3`).
+
+### B7. MP: player 3's HUD panels drawn as white blocks (2.0)
+The PC saves the first 6 UI3D texture windows (0x438 bytes) per local client
+at `g_ui3dStack+0x58B0`, `[2]` (`R_UI3D_SetupBackendData` `0x01D100D0` saves,
+`R_UI3D_PerframeInit` `0x01D0FF20` restores): local client 2 saved and
+restored its HUD texture windows over the data behind the array. Relocated to
+`[4]` (4 sites).
+
+### B1. 4-player MP crash: HUD target tables sized for 2 players
+`s_weakpointIndicators` [20], `s_reticleData` [2], `s_rocketLauncherModels` [2],
+`s_armBladeModels` [8] at `0x1626BDB0..0x1626C020` (PS4: [40], [4], [4], [16]);
+all indexed per local client. Players 3/4 wrote each table's tail over the next
+and the arm-blade tail over the UI model globals (string hunk pointer, global
+model, controller roots). Triggered as soon as bots use specialist weapons.
+Now relocated (`relocate_lui_target_tables`).
+
+### B2. 4-player MP crash: per-client 32-entity marker blocks
+`0x04748220 + lc*0xA00` (32 records of 0x50 per client, only 2 blocks on PC);
+players 3/4 wrote over the cgame media table (material pointers).
+Now relocated (`relocate_cg_marker_blocks`).
+
+### B3. Sun shadows: players 2-4 shared one shadow slot
+Render targets 5 (`SHADOWMAP_SUN_1P`) and 9 (`SHADOWMAP_TRANS_1P`) now have 12
+slices = 4 views x 3 partitions; RT 9's colour views for slices 8-11 live in a
+sidecar because its view set has only 8 inline slots. Verified: no flicker,
+turning player 4 no longer changes panes 2/3. `BO3_SUN4=off` restores the
+shared slot.
+
+### B4. Earlier the same day
+Player 4's pane grey mid-round (`s_perController` [2]), round-start crash on a
+full `ClientCache_ClientPool` (per-player-entity caches), MP HUD of players 3/4,
+"Failed to host lobby" with 3-4 seated, UI model pool / string hunk too small
+for 4 class menus, command buffers for clients 2/3.
+
+## C. Not caused by the mod
+
+* **Crash when closing the game window** (WM_CLOSE / Alt+F4): AV reading 0 in
+  the CRT's `_getstream` (`0x02BDC8C6`) on a worker thread that scans another
+  process's image while the CRT tears down. The menu QUIT is usually clean.
+* **One-off boot crash**: the game's copy routine `0x02BC47F0` began with a
+  `jmp` into a hook page ~2 GB below the image (present while the mod was
+  inactive) and the page was gone. Seen once.
+
+## D. Known gaps (not broken today)
+
+* **Campaign cybercom lock-on table** (`setupCybercomLockon`, PC ~`0x1626AA30`,
+  index `lc*15 + i`, 0x20 records) is still sized for 2 players; PS4 keeps
+  `s_cybercomLockData[60]`. Campaign HUD only; 4-player campaign is untested.
+  Relocate it the same way as B1 before supporting campaign.
+* Port-audit leftovers (key bindings 167, voice 12, gamepads 7, client UI 2
+  references never rewritten on either build) - never caused a fault.
+* Only game build 0x06531394 (ezz BOIII). Other builds: the component stands
+  down; every RVA must be re-mapped. The CBServers client's build 0x06517980
+  was supported up to 1.1.
+* ezz: guests 3/4 show "(2)"/"(3)" instead of "(3)"/"(4)" after the name
+  (EZZ_REQUIRED_CHANGES item 10); the 4th controller's first A press in the
+  lobby is sometimes ignored (item 11).
+* Client-script builtins that still reject local clients 2/3 (not seen in
+  tests so far; each raises a script error for players 3/4 if a script calls
+  it): `CScr_LUIDisable` (`0x004259CF`), `CScr_GetDStat` (`0x00A187C2`),
+  `CScr_IsInHelicopter` (`0x00D8B0BF`) compare against a register holding 1,
+  so the generated immediate table does not cover them; `CScr_HasPerk` /
+  `CScr_GetPerks` (`0x00A22137` / `0x00A22072`) use `cmp eax, 2` with their
+  own "localClientNum out of range" error. PS4 accepts 0..3 in all of them.
+  LUIDisable goes through the key catcher (clientUIActives) - check that
+  before widening it.
+
+## E. Untested / wishes
+
+* Real controllers as players 3/4 (Steam Input decides the XInput order).
+* Maps other than Der Eisendrache, Shadows of Evil, The Giant (Zombies) and
+  Safeguard / Splash (MP).
+* Offline Multiplayer relies on `src/ui_scripts/zz_mplan` (retail greys
+  MULTIPLAYER out offline unless a mod is loaded); shipped since 1.1. With it
+  4-player offline MP with bots works (tested on Safeguard and one other mode).
+* Console-style "Press A to join" label on the PC-only splitscreen button.
+* ESC opens the pause menu on all four panes (possibly stock PC behaviour).
+
+## How to find the next one of these
+
+Almost everything above was a per-local-client array that the PC compiled for
+2 clients. Pattern that worked every time:
+1. Catch the crash dump (BOIII writes `minidumps\boiii-crash-*.zip`) or, for
+   silent corruption, snapshot a memory range and diff it live.
+2. Find the array: stride from the damage pattern, base from who indexes it
+   (`base + lc*stride`), size from the PS4 global of the same name.
+3. Collect EVERY instruction that addresses the array (scan functions and the
+   gaps between functions byte by byte - leaf functions have no unwind data),
+   classify every loop bound, relocate all references at once.

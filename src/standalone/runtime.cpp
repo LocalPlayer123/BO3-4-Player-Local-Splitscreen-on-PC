@@ -59,7 +59,7 @@ namespace game
 	bool Com_IsRunningUILevel()
 	{
 		// BOIII: symbol<bool()> Com_IsRunningUILevel{0x142148350, ...}
-		constexpr size_t com_is_running_ui_level_rva = 0x020EFFB0;
+		constexpr size_t com_is_running_ui_level_rva = 0x020EF8F0;
 		return reinterpret_cast<bool(*)()>(game_base + com_is_running_ui_level_rva)();
 	}
 
@@ -81,15 +81,19 @@ namespace release_policy
 		// (tools\launch_detached.ps1 -CgFrame): BO3_CG_FRAME=on, all other
 		// switches unset. Anything else - including the variables of the machine
 		// the mod is installed on - reads as not set.
+		const auto answer = [&](const char* value) -> DWORD
+		{
+			const auto len = static_cast<DWORD>(std::strlen(value));
+			if (!buffer || size <= len)
+			{
+				return len + 1;
+			}
+			std::memcpy(buffer, value, len + 1);
+			return len;
+		};
 		if (name && std::strcmp(name, "BO3_CG_FRAME") == 0)
 		{
-			constexpr char value[] = "on";
-			if (!buffer || size < sizeof(value))
-			{
-				return sizeof(value);
-			}
-			std::memcpy(buffer, value, sizeof(value));
-			return sizeof(value) - 1;
+			return answer("on");
 		}
 
 #ifdef SS_DIAG
@@ -98,6 +102,38 @@ namespace release_policy
 		{
 			return ::GetEnvironmentVariableA(name, buffer, size);
 		}
+		// DIAGNOSTIC BUILD ONLY: bisecting switches baked in by build.ps1 -Skip
+		// (/DSS_SKIP_<NAME>), for the component's BO3_SKIP_FIX / BO3_SUN4.
+		if (name && std::strcmp(name, "BO3_SKIP_FIX") == 0)
+		{
+			static char skip[128] = "";
+#ifdef SS_SKIP_LUITABLES
+			strcat_s(skip, "luitables,");
+#endif
+#ifdef SS_SKIP_CGMARKS
+			strcat_s(skip, "cgmarks,");
+#endif
+#ifdef SS_SKIP_PERCTRL
+			strcat_s(skip, "perctrl,");
+#endif
+			if (skip[0])
+			{
+				return answer(skip);
+			}
+		}
+#ifdef SS_SKIP_SUN4
+		if (name && std::strcmp(name, "BO3_SUN4") == 0)
+		{
+			return answer("off");
+		}
+#endif
+#ifdef SS_SUN_SLOT_MAX
+		if (name && std::strcmp(name, "BO3_SUN_SLOT_MAX") == 0)
+		{
+			static const char value[2] = {static_cast<char>('0' + SS_SUN_SLOT_MAX), 0};
+			return answer(value);
+		}
+#endif
 #endif
 		SetLastError(ERROR_ENVVAR_NOT_FOUND);
 		return 0;
@@ -454,7 +490,7 @@ namespace scheduler
 
 		// BOIII: r_end_frame_hook.create(0x142272B00_g, r_end_frame_stub).
 		// BOIII hooks the same function; MinHook chains onto its jump.
-		constexpr size_t r_end_frame_rva = 0x02216690;
+		constexpr size_t r_end_frame_rva = 0x02215FD0;
 		r_end_frame_hook.create(game_base + r_end_frame_rva, reinterpret_cast<void*>(&r_end_frame_stub));
 	}
 }
@@ -469,7 +505,7 @@ namespace runtime
 	{
 		// PE CheckSum of the one BlackOps3.exe the BOIII client runs
 		// (game::is_client() in BOIII). Every RVA in the component belongs to it.
-		constexpr DWORD supported_game_checksum = 0x06517980;
+		constexpr DWORD supported_game_checksum = 0x06531394;
 
 		bool is_supported_game(const HMODULE module)
 		{
