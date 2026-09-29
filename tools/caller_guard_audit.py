@@ -29,6 +29,9 @@ comp = os.path.join(ROOT, "component")
 if not os.path.isdir(comp):
     comp = os.path.join(ROOT, "src", "component")   # layout of the public repository
 srcs = [os.path.join(comp, f) for f in ("splitscreen.cpp", "splitscreen_ezz.hpp", "splitscreen_signin.hpp")]
+parts = os.path.join(comp, "splitscreen")
+if os.path.isdir(parts):
+    srcs += [os.path.join(parts, f) for f in sorted(os.listdir(parts)) if f.endswith(".inl")]
 text = "\n".join(open(p, encoding="utf-8").read() for p in srcs)
 
 consts = {m.group(1): int(m.group(2), 16) for m in re.finditer(r"constexpr\s+(?:uint32_t|size_t|uintptr_t|auto)\s+(\w+)\s*=\s*(0x[0-9A-Fa-f]+)", text)}

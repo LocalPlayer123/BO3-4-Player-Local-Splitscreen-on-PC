@@ -1,0 +1,222 @@
+// Guests start from player 1's classes and stats.
+// Part of splitscreen.cpp, included in order inside namespace splitscreen::{anon}.
+
+		// ---- Guests start from player 1's classes and stats ----
+		// As on console: PS4 Live_HandleClientSplitscreenSignin (0xC16080) calls
+		// LiveStats_CopyFromSponsor (0xC6A6B0) for a guest without stats, so the guest plays
+		// with the sponsor's level, unlocks and classes and keeps nothing. On PC one function
+		// reads every controller's "<name>_<controller>.cgp" (one call site, 0x58-byte file
+		// descriptors). The hook runs just before it and, for controllers 1..3, copies player 1's
+		// <name>_0.cgp over <name>_N.cgp for the loadout and stats files; the game then reads a
+		// real file through its own path. BO3_GUEST_COPY=off disables it.
+		constexpr uint32_t save_read_callsite = 0x0221806E;
+		constexpr uint32_t save_read_rva = 0x01C144B0;
+		constexpr size_t save_desc_stride = 0x58;
+		constexpr size_t save_desc_name_max = 0x40;
+		constexpr size_t save_desc_other_dir = 0x4C;
+		// Branch on the descriptor's "other directory" byte. BOIII (patch_players_folder_name)
+		// makes it a jmp (0xEB), so every file goes to boiii_players whatever the byte says.
+		constexpr uint32_t save_dir_branch_rva = 0x01C1451E;
+		constexpr uint32_t save_base_dvar_rva = 0x179E63E0;
+		constexpr uint32_t dvar_get_string_rva = 0x02262A70;
+		constexpr const char* sponsor_copy_names[] = {
+			"loadouts_zm_offline", "loadouts_mp_offline", "loadouts_cp_offline",
+			"stats_zm_offline", "stats_mp_offline", "stats_cp_offline",
+			"stats_cp_nightmare_offline", "stats_fr_offline",
+		};
+		bool guest_copy_installed = false;
+		constexpr uint32_t save_write_callsite = 0x02218049;   // same task layout as the read
+		constexpr uint32_t save_write_rva = 0x01C145C0;
+
+		// Trace only: which controller's files the game writes, and when.
+		void save_write_stub(const int controller, uint8_t* files, const int count)
+		{
+			reinterpret_cast<void (*)(int, uint8_t*, int)>(base() + save_write_rva)(controller, files, count);
+			trace_line l;
+			l.str("t=");
+			l.dec(GetTickCount64());
+			l.str(" save write: controller ");
+			l.dec(static_cast<uint64_t>(controller < 0 ? 0 : controller));
+			l.str(",");
+			for (int i = 0; files && i < count && i < 16; ++i)
+			{
+				const auto* desc = files + static_cast<size_t>(i) * save_desc_stride;
+				if (strnlen(reinterpret_cast<const char*>(desc), save_desc_name_max) < save_desc_name_max)
+				{
+					l.str(" ");
+					l.str(reinterpret_cast<const char*>(desc));
+				}
+			}
+			trace_write(l);
+		}
+
+		bool is_sponsor_copy_name(const char* name)
+		{
+			for (const auto* n : sponsor_copy_names)
+			{
+				if (std::strcmp(name, n) == 0)
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+
+		void save_read_stub(const int controller, uint8_t* files, const int count)
+		{
+			size_t copied = 0;
+			size_t missing = 0;
+			size_t failed = 0;
+			trace_line names;
+			if (controller >= 1 && controller < 4 && files && count > 0)
+			{
+				const auto b = base();
+				const bool dir_forced = *reinterpret_cast<const uint8_t*>(b + save_dir_branch_rva) == 0xEB;
+				const auto* dvar = *reinterpret_cast<void* const*>(b + save_base_dvar_rva);
+				const auto get_string = reinterpret_cast<const char* (*)(const void*)>(b + dvar_get_string_rva);
+				const char* root = dvar ? get_string(dvar) : nullptr;
+				for (int i = 0; root && *root && i < count; ++i)
+				{
+					const auto* desc = files + static_cast<size_t>(i) * save_desc_stride;
+					if (strnlen(reinterpret_cast<const char*>(desc), save_desc_name_max) >= save_desc_name_max)
+					{
+						names.str(" ?");
+						continue;
+					}
+					const auto* name = reinterpret_cast<const char*>(desc);
+					names.str(" ");
+					names.str(name);
+					if (!dir_forced && desc[save_desc_other_dir] != 0)
+					{
+						names.str("(other dir)");
+						continue;
+					}
+					if (!is_sponsor_copy_name(name))
+					{
+						continue;
+					}
+					names.str("*");
+					char src[MAX_PATH]{};
+					char dst[MAX_PATH]{};
+					const auto ns = std::snprintf(src, sizeof(src), "%s\\boiii_players\\%s_0.cgp", root, name);
+					const auto nd = std::snprintf(dst, sizeof(dst), "%s\\boiii_players\\%s_%d.cgp", root, name, controller);
+					if (ns <= 0 || nd <= 0 || ns >= MAX_PATH || nd >= MAX_PATH)
+					{
+						++failed;
+						continue;
+					}
+					if (GetFileAttributesA(src) == INVALID_FILE_ATTRIBUTES)
+					{
+						++missing;   // player 1 has no such file yet - leave the guest's alone
+						continue;
+					}
+					if (CopyFileA(src, dst, FALSE))
+					{
+						++copied;
+					}
+					else
+					{
+						++failed;
+					}
+				}
+			}
+
+			reinterpret_cast<void (*)(int, uint8_t*, int)>(base() + save_read_rva)(controller, files, count);
+
+			trace_line l;
+			l.str("t=");
+			l.dec(GetTickCount64());
+			l.str(" save read: controller ");
+			l.dec(static_cast<uint64_t>(controller < 0 ? 0 : controller));
+			l.str(controller < 0 ? " (negative)" : "");
+			l.str(", ");
+			l.dec(static_cast<uint64_t>(count < 0 ? 0 : count));
+			l.str(" files; from player 1: copied ");
+			l.dec(copied);
+			l.str(", player 1 missing ");
+			l.dec(missing);
+			l.str(", failed ");
+			l.dec(failed);
+			if (names.n)
+			{
+				l.str(" |");
+				names.b[names.n] = 0;
+				l.str(names.b);
+			}
+			trace_write(l);
+		}
+
+		void install_guest_copy()
+		{
+			trace_line l;
+			char env[16] = {};
+			GetEnvironmentVariableA("BO3_GUEST_COPY", env, sizeof(env));
+			if (std::strcmp(env, "off") == 0)
+			{
+				l.str("guest copy: OFF (BO3_GUEST_COPY=off)");
+				trace_write(l);
+				return;
+			}
+			if (guest_copy_installed)
+			{
+				return;
+			}
+			if (!call_site_targets(save_read_callsite, save_read_rva))
+			{
+				l.str("guest copy: NOT installed - 0x02274B9E is not call 0x01C20880");
+				trace_write(l);
+				return;
+			}
+			try
+			{
+				utils::hook::call(base() + save_read_callsite, save_read_stub);
+				if (call_site_targets(save_write_callsite, save_write_rva))
+				{
+					utils::hook::call(base() + save_write_callsite, save_write_stub);
+				}
+			}
+			catch (...)
+			{
+				l.str("guest copy: NOT installed - hook failed");
+				trace_write(l);
+				return;
+			}
+			guest_copy_installed = true;
+			l.str("guest copy: installed - controllers 1..3 read player 1's loadouts + stats");
+			trace_write(l);
+		}
+
+		// The game reads the saves only once, at boot, so each join re-reads the eight files for
+		// a fresh copy (PS4 CanPerformFileOp 0xF80F80 refuses nothing for a second read).
+		// Storage_Read (ecx controller, edx type, r8d slot -> bool) is entered at its own
+		// address so storage_read_stub's guest filter still applies. Types (PC property table):
+		//   11 loadouts_cp_offline  15 loadouts_mp_offline  20 loadouts_zm_offline
+		//    7 stats_cp_offline      9 stats_cp_nightmare_offline
+		//   13 stats_mp_offline     18 stats_zm_offline     22 stats_fr_offline
+		constexpr int sponsor_copy_types[] = {11, 15, 20, 7, 9, 13, 18, 22};
+
+		void reread_guest_saves(const int controller)
+		{
+			if (!guest_copy_installed || controller < 1 || controller > 3)
+			{
+				return;
+			}
+			const auto read = reinterpret_cast<bool (*)(int, int, int)>(base() + storage_read_rva);
+			uint32_t queued = 0;
+			for (size_t i = 0; i < std::size(sponsor_copy_types); ++i)
+			{
+				if (read(controller, sponsor_copy_types[i], 0))
+				{
+					queued |= 1u << i;
+				}
+			}
+			trace_line l;
+			l.str("t=");
+			l.dec(GetTickCount64());
+			l.str(" guest copy: controller ");
+			l.dec(static_cast<uint64_t>(controller));
+			l.str(" joined - re-read queued mask ");
+			l.hex(queued);
+			l.str(" of 0xFF (types 11 15 20 7 9 13 18 22)");
+			trace_write(l);
+		}

@@ -60,7 +60,11 @@ every RVA re-mapped (they are all in `splitscreen.cpp` /
 ## Repository layout
 
 ```
-src/component/splitscreen.cpp          the component (all engine patches)
+src/component/splitscreen.cpp          the component: readiness, try_apply (the order every patch
+                                       is applied in) and the component class
+src/component/splitscreen/*.inl        the patches by topic (core helpers, guest storage, sign-in,
+                                       panes, renderer, relocations, lobby, ...), #included in
+                                       order into splitscreen.cpp - one translation unit
 src/component/splitscreen_reloc.hpp    generated reference tables for the relocations
 src/component/splitscreen_signin.hpp   sign-in helpers
 src/component/splitscreen_ezz.hpp      ezz BOIII bridges (see docs/EZZ_REQUIRED_CHANGES.md)
