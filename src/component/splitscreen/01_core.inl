@@ -575,14 +575,45 @@
 		// initialised), so its entries are produced, not moved.
 		//
 		// Guests get a private copy of element 1's identity head plus their own
-		// XUID (element 1's + i) and name digit ('0' + i). Element 1, not 0: it is
-		// a signed-in secondary profile (+0x29 = 01), and existing that way at
-		// boot is what earns controller 1 its storage and stats readiness.
-		// Element 0 is the primary; copying it gave an empty name and a duplicate
-		// identity.
+		// XUID (element 1's + i) and gamertag. Element 1, not 0: it is a signed-in
+		// secondary profile (+0x29 = 01), and existing that way at boot is what
+		// earns controller 1 its storage and stats readiness. Element 0 is the
+		// primary; copying it gave an empty name and a duplicate identity.
 		constexpr size_t userdata_xuid = 0x00;
-		constexpr size_t userdata_name_digit = 0x11;
+		// char[32] (PS4 userData_t gamertag[32]); LiveUser_GetClientName returns +8.
+		constexpr size_t userdata_gamertag = 0x08;
+		constexpr size_t userdata_gamertag_size = 0x20;
 		constexpr size_t userdata_signedin = 0x30;
+
+		// "<name>(<controller + 1>)", the way ezz names local guests (live.cpp
+		// LiveUser_UserGetName), built from the donor's name without its own
+		// "(n)". The old version overwrote one fixed character with '0' + i: a
+		// duplicate "(2)" for controller 2, and wrong for any name whose digit
+		// did not sit at that offset.
+		void write_guest_gamertag(const size_t dst, const size_t donor, const size_t controller)
+		{
+			char name[userdata_gamertag_size + 1]{};
+			std::memcpy(name, reinterpret_cast<const void*>(donor + userdata_gamertag), userdata_gamertag_size);
+			size_t len = strnlen(name, userdata_gamertag_size);
+			if (len >= 3 && name[len - 1] == ')')
+			{
+				size_t k = len - 2;
+				while (k > 0 && name[k] >= '0' && name[k] <= '9')
+				{
+					--k;
+				}
+				if (name[k] == '(' && k < len - 2)
+				{
+					len = k;
+				}
+			}
+			const char suffix[] = {'(', static_cast<char>('1' + controller), ')'};
+			len = std::min(len, userdata_gamertag_size - 1 - sizeof(suffix));
+			char out[userdata_gamertag_size]{};
+			std::memcpy(out, name, len);
+			std::memcpy(out + len, suffix, sizeof(suffix));
+			std::memcpy(reinterpret_cast<void*>(dst + userdata_gamertag), out, sizeof(out));
+		}
 
 
 		// The copy cannot happen at post_unpack, where element 1 is still zeroed.
@@ -644,8 +675,7 @@
 				xuid += i;
 				std::memcpy(reinterpret_cast<void*>(dst + userdata_xuid), &xuid, sizeof(xuid));
 
-				*reinterpret_cast<char*>(dst + userdata_name_digit) =
-					static_cast<char>('0' + static_cast<int>(i));
+				write_guest_gamertag(dst, donor, i);
 			}
 
 			// Put the session in local-splitscreen mode, as the console does when
