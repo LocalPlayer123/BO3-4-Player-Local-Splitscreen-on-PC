@@ -37,10 +37,11 @@ console again, at runtime, without touching any file on disk:
    array usually lies on a foreign global; widening first only moves the crash).
 3. **Hooks** for the few places where the PC made a different, 2-player-only
    decision (pane geometry, sign-in of controllers 2/3, sun-shadow slots, ...):
-   C++ functions behind MinHook detours or rewritten `call` sites. Where there
-   is no call or function boundary to hook, a small machine-code cave built
-   from verified bytes remains (the sun-shadow loop cap and clear pick, the
-   snapshot guard, the 0x1E940 stride repair, ezz's entity-pool index).
+   C++ functions behind MinHook detours, rewritten `call` sites, or - where
+   there is no call or function boundary - a mid-function hook
+   (`splitscreen_midhook.hpp`: one shared trampoline hands all registers to a
+   C++ function and continues where it says; every build runs a native
+   self-test of it). No patch-specific machine code remains.
    `splitscreen_ezz.hpp` bridges the places where ezz BOIII itself is sized
    for two players (XUID table, name map, static cgame pools) and works
    around ezz's ClientCommand hook (see EZZ_REQUIRED_CHANGES.md).

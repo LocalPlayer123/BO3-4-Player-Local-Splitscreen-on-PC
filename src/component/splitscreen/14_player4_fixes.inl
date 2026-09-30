@@ -434,72 +434,28 @@
 			return active_count_installed;
 		}
 
+		// The 0x1E940 per-client base reaches this consumer through [rsp+0x50] and is
+		// delivered mangled (top 16 bits set) once client 2 exists (LOG.md, "THE 0x1E940
+		// BASE IS GENUINELY CORRUPT"). A mid-function hook on its `imul rcx,rcx,0x1E940`
+		// puts the table's real base into rax in that case; the imul then runs as stock,
+		// so the flags are the game's. Only a value that is clearly not a pointer is
+		// replaced: substituting always killed the process with the menu up.
+		void stride_repair_stub(midhook::context& ctx)
+		{
+			if (ctx.rax >> 48)
+			{
+				ctx.rax = *reinterpret_cast<const uint64_t*>(base() + base_table_rva);
+			}
+		}
+
 		bool install_stride_fix()
 		{
-			auto* site = reinterpret_cast<uint8_t*>(base() + stride_site_rva);
-			if (std::memcmp(site, stride_site_bytes, sizeof(stride_site_bytes)) != 0)
+			if (!midhook::install(base() + stride_site_rva, stride_site_bytes, sizeof(stride_site_bytes),
+			                      &stride_repair_stub, &allocate_near_module))
 			{
-				note("[splitscreen] stride fix: unexpected bytes at 0x%zX\n", stride_site_rva);
+				note("[splitscreen] stride fix: not installed at 0x%zX\n", stride_site_rva);
 				return false;
 			}
-
-			auto* cave = static_cast<uint8_t*>(allocate_near_module(0x100));
-			if (!cave)
-			{
-				return false;
-			}
-
-			auto* slots = cave + 0x80; // count, delivered, substituted
-			const auto cave_addr = reinterpret_cast<size_t>(cave);
-
-			std::vector<uint8_t> c;
-			const auto rip32 = [&](const size_t target)
-			{
-				const auto value = static_cast<int32_t>(target - (cave_addr + c.size() + 4));
-				const auto* p = reinterpret_cast<const uint8_t*>(&value);
-				c.insert(c.end(), p, p + 4);
-			};
-
-			// inc dword [executions] first, so every entry is counted
-			c.insert(c.end(), {0xFF, 0x05});
-			rip32(reinterpret_cast<size_t>(slots + 4));
-			// mov [delivered], rax
-			c.insert(c.end(), {0x48, 0x89, 0x05});
-			rip32(reinterpret_cast<size_t>(slots + 8));
-			// Repair only a value that is clearly not a pointer (top 16 bits set);
-			// substituting unconditionally killed the process with the menu up.
-			c.insert(c.end(), {0x50}); // push rax
-			c.insert(c.end(), {0x48, 0xC1, 0xE8, 0x30}); // shr rax, 48
-			c.insert(c.end(), {0x85, 0xC0}); // test eax, eax
-			c.insert(c.end(), {0x58}); // pop rax  (does not touch flags)
-			c.insert(c.end(), {0x74, 20}); // jz -> skip the 20-byte repair
-			// mov rax, [base_table]
-			c.insert(c.end(), {0x48, 0x8B, 0x05});
-			rip32(base() + base_table_rva);
-			// inc dword [count]
-			c.insert(c.end(), {0xFF, 0x05});
-			rip32(reinterpret_cast<size_t>(slots));
-			// mov [substituted], rax
-			c.insert(c.end(), {0x48, 0x89, 0x05});
-			rip32(reinterpret_cast<size_t>(slots + 16));
-			// The displaced imul last, so the flags seen afterwards are unchanged.
-			c.insert(c.end(), std::begin(stride_site_bytes), std::end(stride_site_bytes));
-			// jmp back
-			c.insert(c.end(), {0xE9});
-			rip32(base() + stride_site_rva + sizeof(stride_site_bytes));
-
-			std::memcpy(cave, c.data(), c.size());
-			std::memset(slots, 0, 0x30);
-
-			uint8_t patch[7] = {0xE9, 0, 0, 0, 0, 0x90, 0x90};
-			const auto rel = static_cast<int32_t>(cave_addr - (base() + stride_site_rva + 5));
-			std::memcpy(patch + 1, &rel, sizeof(rel));
-
-			if (!write_bytes(site, patch, sizeof(patch)))
-			{
-				return false;
-			}
-
 			return true;
 		}
 

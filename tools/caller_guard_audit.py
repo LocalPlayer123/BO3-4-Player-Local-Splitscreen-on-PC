@@ -28,7 +28,7 @@ img = open(IMAGE, "rb").read()
 comp = os.path.join(ROOT, "component")
 if not os.path.isdir(comp):
     comp = os.path.join(ROOT, "src", "component")   # layout of the public repository
-srcs = [os.path.join(comp, f) for f in ("splitscreen.cpp", "splitscreen_ezz.hpp", "splitscreen_addresses.hpp")]
+srcs = [os.path.join(comp, f) for f in ("splitscreen.cpp", "splitscreen_ezz.hpp", "splitscreen_midhook.hpp", "splitscreen_addresses.hpp")]
 parts = os.path.join(comp, "splitscreen")
 if os.path.isdir(parts):
     srcs += [os.path.join(parts, f) for f in sorted(os.listdir(parts)) if f.endswith(".inl")]

@@ -10,6 +10,7 @@
 #include "game/utils.hpp"
 #include "scheduler.hpp"
 #include "splitscreen_addresses.hpp"
+#include "splitscreen_midhook.hpp"
 
 #include <utils/hook.hpp>
 #include <utils/finally.hpp>
@@ -214,7 +215,7 @@ namespace splitscreen
 			// Keep the LUI renderer at two contexts - see hold_lui_context_count.
 			hold_lui_context_count();
 			// And make the HUD-refresh reader survive a client with no snapshot.
-			install_snapguard_cave();
+			install_snapguard();
 			// Move scene buffer B out of A[2]/A[3] before anything reads them.
 			relocate_scene_buffer_b();
 

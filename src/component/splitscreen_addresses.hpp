@@ -1478,6 +1478,7 @@ namespace splitscreen
 		0x48, 0x8B, 0x57, 0x30,   // mov rdx, [rdi+0x30]
 		0xF6, 0x02, 0x10,         // test byte [rdx], 0x10
 	};
+	static_assert(snapguard_rva + sizeof(snapguard_expected) == snapguard_resume);   // the midhook returns to the jne
 	inline constexpr uint32_t scene_a_rva = 0x0AE13DC8;
 	inline constexpr uint32_t scene_b_rva = 0x0AE13DD8;
 	inline constexpr uint32_t scene_size_rva = 0x0F43794C;
@@ -2544,7 +2545,6 @@ namespace splitscreen
 
 	inline constexpr uint32_t save_read_callsite = 0x0221806E;
 	inline constexpr uint32_t save_read_rva = 0x01C144B0;
-	inline constexpr uint32_t save_dir_branch_rva = 0x01C1451E;
 	inline constexpr uint32_t dvar_get_string_rva = 0x02262A70;
 
 	inline constexpr uint32_t save_base_dvar_rva = 0x179E63E0;

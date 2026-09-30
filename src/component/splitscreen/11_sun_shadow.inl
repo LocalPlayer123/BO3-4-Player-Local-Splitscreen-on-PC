@@ -76,6 +76,46 @@
 			return shadow;
 		}
 
+		// The colour-view loop's bound, reloaded from the record right after a 4-byte
+		// indirect call (no call to hook): `movzx eax, word [rsi+0xA86]` answers
+		// min(slices, 6), so the loop fills only the 6 inline views (6..11 are sidecars).
+		void sun_view_loop_stub(midhook::context& ctx)
+		{
+			const uint32_t slices = *reinterpret_cast<const uint16_t*>(ctx.rsi + 0xA86);
+			ctx.rax = slices < sun_slices_stock ? slices : sun_slices_stock;
+			ctx.rip = base() + sun_view_loop_rva + sizeof(sun_view_loop_stock);
+		}
+
+		// The clear's colour pick: the 20 stock bytes before `call [rax+0x190]`
+		// (ClearRenderTargetView). rbp is the view set, also walked as the depth array,
+		// so its lookup cannot be swapped like the setter's. RT 9 slices 6..11 get their
+		// sidecar view, other slices >= 6 inline[5] (the clear has no clamp of its own),
+		// slices below 6 inline[slice]; then rax, r8 and rcx as stock.
+		void sun_clear_pick_stub(midhook::context& ctx)
+		{
+			const auto slice = *reinterpret_cast<const uint32_t*>(ctx.rbx + 0x80C8);
+			const auto rt = *reinterpret_cast<const uint16_t*>(ctx.rbx + 0x80C0);
+			uint64_t index = slice;   // `mov edx,[rbx+0x80C8]` zero-extends
+			uint64_t view = 0;
+			if (static_cast<int32_t>(slice) >= static_cast<int32_t>(sun_slices_stock))
+			{
+				if (slice < sun_slices_wanted && rt == sun_trans_rt)
+				{
+					view = reinterpret_cast<uint64_t>(sun_trans_extra[slice - sun_slices_stock]);
+				}
+				index = 5;   // the last inline view
+			}
+			if (!view)
+			{
+				view = *reinterpret_cast<const uint64_t*>(ctx.rbp + index * 8);
+			}
+			ctx.rdx = view;
+			ctx.rax = *reinterpret_cast<const uint64_t*>(ctx.rdi);   // the context's vtable
+			ctx.r8 = ctx.rsi;
+			ctx.rcx = ctx.rdi;
+			ctx.rip = base() + sun_clear_rva + sizeof(sun_clear_stock);
+		}
+
 		bool grow_sun_shadow_slices()
 		{
 			if (sun_slices_grown)
@@ -99,62 +139,6 @@
 				note("[splitscreen] sun shadow 12 slices: NOT applied - bytes differ\n");
 				return false;
 			}
-			auto* cave = static_cast<uint8_t*>(allocate_near_module(0x80));
-			if (!cave)
-			{
-				note("[splitscreen] sun shadow 12 slices: NOT applied - allocation failed\n");
-				return false;
-			}
-			// Two picks have no call to hook, so they stay machine code:
-			// +0x00 the colour-view loop cap (the bound is reloaded from the record after
-			// a 4-byte indirect call): movzx eax,[rsi+0xA86] ; cmp eax,6 ; jbe +5 ; mov eax,6 ; ret
-			const uint8_t c_loop[] = {0x0F, 0xB7, 0x86, 0x86, 0x0A, 0x00, 0x00, 0x83, 0xF8, 0x06, 0x76, 0x05,
-			                          0xB8, 0x06, 0x00, 0x00, 0x00, 0xC3};
-			// +0x20 the clear's colour pick (rbp = view set, also walked as the depth
-			// array, rbx = cmd state): sidecar for RT 9 slices 6..11, else inline[slice],
-			// clamped.
-			std::vector<uint8_t> k;
-			k.insert(k.end(), {0x8B, 0x93, 0xC8, 0x80, 0x00, 0x00});       // mov edx,[rbx+0x80C8]
-			k.insert(k.end(), {0x83, 0xFA, 0x06, 0x7C, 0x00});             // cmp edx,6 ; jl orig
-			const size_t k1 = k.size() - 1;
-			k.insert(k.end(), {0x83, 0xFA, 0x0C, 0x73, 0x00});             // cmp edx,12 ; jae clamp
-			const size_t k2 = k.size() - 1;
-			k.insert(k.end(), {0x66, 0x83, 0xBB, 0xC0, 0x80, 0x00, 0x00, static_cast<uint8_t>(sun_trans_rt)});
-			k.insert(k.end(), {0x75, 0x00});                                 // cmp word [rbx+0x80C0],9 ; jne clamp
-			const size_t k3 = k.size() - 1;
-			k.insert(k.end(), {0x48, 0xB8});                                 // mov rax, &sun_trans_extra
-			{
-				const auto a = reinterpret_cast<uint64_t>(&sun_trans_extra[0]);
-				const auto* p = reinterpret_cast<const uint8_t*>(&a);
-				k.insert(k.end(), p, p + 8);
-			}
-			k.insert(k.end(), {0x48, 0x8B, 0x54, 0xD0, 0xD0});             // mov rdx,[rax+rdx*8-0x30]
-			k.insert(k.end(), {0x48, 0x85, 0xD2, 0x75, 0x00});             // test rdx,rdx ; jnz done
-			const size_t k4 = k.size() - 1;
-			const size_t kclamp = k.size();
-			k.insert(k.end(), {0xBA, 0x05, 0x00, 0x00, 0x00});             // mov edx,5 (last inline view)
-			const size_t korig = k.size();
-			k.insert(k.end(), {0x48, 0x8B, 0x54, 0xD5, 0x00});             // mov rdx,[rbp+rdx*8]
-			const size_t kdone = k.size();
-			k.insert(k.end(), {0x48, 0x8B, 0x07, 0x4C, 0x8B, 0xC6, 0x48, 0x8B, 0xCF});   // rax, r8, rcx as stock
-			k.insert(k.end(), {0xFF, 0x25, 0x00, 0x00, 0x00, 0x00});       // jmp [rip+0]
-			{
-				const uint64_t back = b + sun_clear_rva + sizeof(sun_clear_stock);
-				const auto* p = reinterpret_cast<const uint8_t*>(&back);
-				k.insert(k.end(), p, p + 8);
-			}
-			k[k1] = static_cast<uint8_t>(korig - (k1 + 1));
-			k[k2] = static_cast<uint8_t>(kclamp - (k2 + 1));
-			k[k3] = static_cast<uint8_t>(kclamp - (k3 + 1));
-			k[k4] = static_cast<uint8_t>(kdone - (k4 + 1));
-			if (0x20 + k.size() > 0x80
-				|| !write_bytes(cave + 0x00, c_loop, sizeof(c_loop))
-				|| !write_bytes(cave + 0x20, k.data(), k.size()))
-			{
-				note("[splitscreen] sun shadow 12 slices: NOT applied - cave write failed\n");
-				return false;
-			}
-
 			// The site bytes, all prepared before the first write.
 			const auto* setter_call_stock = sun_setter_premise + (sun_setter_call_rva - sun_setter_premise_rva);
 			uint8_t p_setter[5];
@@ -167,17 +151,16 @@
 				note("[splitscreen] sun shadow 12 slices: NOT applied - relay allocation failed\n");
 				return false;
 			}
-			const auto jump_or_call = [&](uint8_t op, uint32_t rva, size_t len, size_t cave_off, uint8_t* out)
-			{
-				std::memset(out, 0x90, len);
-				out[0] = op;
-				const auto rel = static_cast<int32_t>(reinterpret_cast<size_t>(cave + cave_off) - (b + rva + 5));
-				std::memcpy(out + 1, &rel, sizeof(rel));
-			};
 			uint8_t p_clear[sizeof(sun_clear_stock)];
-			jump_or_call(0xE9, sun_clear_rva, sizeof(p_clear), 0x20, p_clear);
 			uint8_t p_loop[sizeof(sun_view_loop_stock)];
-			jump_or_call(0xE8, sun_view_loop_rva, sizeof(p_loop), 0x00, p_loop);
+			if (!midhook::prepare(b + sun_clear_rva, sun_clear_stock, sizeof(p_clear), &sun_clear_pick_stub,
+			                      &allocate_near_module, p_clear)
+				|| !midhook::prepare(b + sun_view_loop_rva, sun_view_loop_stock, sizeof(p_loop), &sun_view_loop_stub,
+				                     &allocate_near_module, p_loop))
+			{
+				note("[splitscreen] sun shadow 12 slices: NOT applied - hook preparation failed\n");
+				return false;
+			}
 			const uint8_t p_check[] = {0x66, 0x83, 0xF8, static_cast<uint8_t>(sun_slices_wanted - 2)};
 
 			// All-or-nothing. Setter first: without sidecar views it acts as stock.

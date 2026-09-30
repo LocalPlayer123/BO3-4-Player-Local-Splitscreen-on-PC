@@ -377,57 +377,31 @@
 
 		// Snapshot guard in the HUD-refresh reader, which reads cg->nextSnap
 		// (+0x30). For client 2 it is NULL (CG_ProcessSnapshots stays bounded at
-		// 2; widening it gave zero panes). The cave sends NULL to the function's
-		// own "snapshot not usable -> return 0" exit, so nothing downstream runs.
+		// 2; widening it gave zero panes). The value exists only in rdi (the decrypted
+		// cg pointer) inside an Arxan-guarded function, so a mid-function hook on
+		// `mov rdx,[rdi+0x30]; test byte [rdx],0x10` sends NULL to the function's own
+		// "snapshot not usable -> return 0" exit; otherwise the stock bytes run.
 		bool snapguard_installed = false;
 
-		bool install_snapguard_cave()
+		void snapguard_stub(midhook::context& ctx)
 		{
-			if (snapguard_installed)
+			const auto next_snap = *reinterpret_cast<const uint64_t*>(ctx.rdi + 0x30);
+			if (next_snap == 0)
 			{
-				return true;
+				ctx.rdx = 0;   // as `mov rdx,[rdi+0x30]` leaves it
+				ctx.rip = base() + snapguard_ret0;
 			}
-			const auto b = base();
-			auto* site = reinterpret_cast<uint8_t*>(b + snapguard_rva);
-			if (!readable(site, sizeof(snapguard_expected))
-				|| std::memcmp(site, snapguard_expected,
-				               sizeof(snapguard_expected)) != 0)
+		}
+
+		bool install_snapguard()
+		{
+			if (!snapguard_installed)
 			{
-				return false;
+				snapguard_installed = midhook::install(base() + snapguard_rva, snapguard_expected,
+				                                       sizeof(snapguard_expected), &snapguard_stub,
+				                                       &allocate_near_module);
 			}
-			auto* cave = static_cast<uint8_t*>(allocate_near_module(0x40));
-			if (!cave)
-			{
-				return false;
-			}
-			const auto cave_addr = reinterpret_cast<size_t>(cave);
-			std::vector<uint8_t> c;
-			const auto rel32 = [&](const size_t tgt)
-			{
-				const auto v = static_cast<int32_t>(tgt - (cave_addr + c.size() + 4));
-				const auto* p = reinterpret_cast<const uint8_t*>(&v);
-				c.insert(c.end(), p, p + 4);
-			};
-			c.insert(c.end(), {0x48, 0x8B, 0x57, 0x30});   // mov rdx, [rdi+0x30]
-			c.insert(c.end(), {0x48, 0x85, 0xD2});         // test rdx, rdx
-			c.insert(c.end(), {0x0F, 0x84});               // jz -> return-0 exit
-			rel32(b + snapguard_ret0);
-			c.insert(c.end(), {0xF6, 0x02, 0x10});         // test byte [rdx], 0x10
-			c.insert(c.end(), {0xE9});                     // jmp resume (the jne)
-			rel32(b + snapguard_resume);
-			if (!write_bytes(cave, c.data(), c.size()))
-			{
-				return false;
-			}
-			uint8_t patch[7] = {0xE9, 0, 0, 0, 0, 0x90, 0x90};
-			const auto rel = static_cast<int32_t>(cave_addr - (b + snapguard_rva + 5));
-			std::memcpy(patch + 1, &rel, sizeof(rel));
-			if (!write_bytes(site, patch, sizeof(patch)))
-			{
-				return false;
-			}
-			snapguard_installed = true;
-			return true;
+			return snapguard_installed;
 		}
 
 		// Guard for the per-client scene-buffer clear (see R_InitSceneBuffers

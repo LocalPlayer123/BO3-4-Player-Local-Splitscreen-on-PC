@@ -9,11 +9,16 @@
 		// descriptors). The hook runs just before it and, for controllers 1..3, copies player 1's
 		// <name>_0.cgp over <name>_N.cgp for the loadout and stats files; the game then reads a
 		// real file through its own path.
+		// Where the files are: the descriptor byte at +0x4C picks the engine's "other
+		// directory" for these eight (it is 1 for all of them). Both clients send both
+		// directories to <game>\boiii_players - official BOIII by making the branch on that
+		// byte a jmp (patch_players_folder_name), ezz by rewriting the
+		// path (path.cpp: players -> boiii_players) - so the byte is not consulted. Until
+		// 2.4.1 a file with the byte set was skipped unless the branch was the BOIII jmp:
+		// under ezz every copy was skipped (measured 2026-09-30: dir forced 0, other-dir 1).
 		constexpr size_t save_desc_stride = 0x58;
 		constexpr size_t save_desc_name_max = 0x40;
 		constexpr size_t save_desc_other_dir = 0x4C;
-		// save_dir_branch_rva: the branch on the descriptor's "other directory" byte. BOIII (patch_players_folder_name)
-		// makes it a jmp (0xEB), so every file goes to boiii_players whatever the byte says.
 		constexpr const char* sponsor_copy_names[] = {
 			"loadouts_zm_offline", "loadouts_mp_offline", "loadouts_cp_offline",
 			"stats_zm_offline", "stats_mp_offline", "stats_cp_offline",
@@ -39,10 +44,10 @@
 			if (controller >= 1 && controller < 4 && files && count > 0)
 			{
 				const auto b = base();
-				const bool dir_forced = *reinterpret_cast<const uint8_t*>(b + save_dir_branch_rva) == 0xEB;
 				const auto* dvar = *reinterpret_cast<void* const*>(b + save_base_dvar_rva);
 				const auto get_string = reinterpret_cast<const char* (*)(const void*)>(b + dvar_get_string_rva);
 				const char* root = dvar ? get_string(dvar) : nullptr;
+				note("save read: controller %d, %d files, root '%s'", controller, count, root ? root : "(null)");
 				for (int i = 0; root && *root && i < count; ++i)
 				{
 					const auto* desc = files + static_cast<size_t>(i) * save_desc_stride;
@@ -51,10 +56,8 @@
 						continue;
 					}
 					const auto* name = reinterpret_cast<const char*>(desc);
-					if (!dir_forced && desc[save_desc_other_dir] != 0)
-					{
-						continue;
-					}
+					note("save read:   %s other-dir %u%s", name, desc[save_desc_other_dir],
+					     is_sponsor_copy_name(name) ? " (copied from player 1)" : "");
 					if (!is_sponsor_copy_name(name))
 					{
 						continue;
@@ -108,6 +111,7 @@
 				return;
 			}
 			guest_copy_installed = true;
+			note("guest copy: installed");
 		}
 
 		// The game reads the saves only once, at boot, so each join re-reads the eight files for

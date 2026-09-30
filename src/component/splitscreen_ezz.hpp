@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "splitscreen_addresses.hpp"
+#include "splitscreen_midhook.hpp"
 
 namespace splitscreen::ezz
 {
@@ -266,15 +267,21 @@ namespace splitscreen::ezz
 		}
 
 		// CG_InitAndAllocCGEntsArray (0x0085B990) allocates one entity pool per
-		// local client in a loop indexed by rsi (xor esi,esi at +0x2B). A cave
-		// stores esi before the call, so the stub knows the client.
+		// local client in a loop indexed by rsi (xor esi,esi at +0x2B); the index is
+		// never spilled to memory. A mid-function hook on the size load just before
+		// the call records it, and the call itself goes to entity_alloc.
 		inline hunk_alloc_fn entity_host = nullptr;
-		inline volatile uint32_t* entity_lc = nullptr;
+		inline volatile uint32_t entity_lc = 0xFFFFFFFF;
 		inline uint8_t* entity_pools[4] = {};
+
+		inline void record_entity_lc(midhook::context& ctx)
+		{
+			entity_lc = static_cast<uint32_t>(ctx.rsi);
+		}
 
 		inline void* entity_alloc(void* user, const size_t size, const int alignment, const char* name)
 		{
-			const uint32_t lc = *entity_lc;
+			const uint32_t lc = entity_lc;
 			if ((lc == 2 || lc == 3) && size == entity_pool_size)
 			{
 				if (auto* p = zeroed(entity_pools[lc], entity_pool_size, size, alignment))
@@ -382,30 +389,20 @@ namespace splitscreen::ezz
 		}
 
 		const size_t host = host_call_target(base, image_size, entity_call_rva);
-		if (host && bytes_at(base + entity_size_rva, entity_size_bytes, sizeof(entity_size_bytes)))
+		if (host && alloc_near && bytes_at(base + entity_size_rva, entity_size_bytes, sizeof(entity_size_bytes)))
 		{
-			// mov [rip+8], esi ; jmp [rip+0] ; dq entity_alloc ; dd lc
-			auto* cave = static_cast<uint8_t*>(alloc_near ? alloc_near(0x20) : nullptr);
-			if (cave)
+			entity_host = reinterpret_cast<hunk_alloc_fn>(host);
+			// the size load `mov edx, 0x3F0000` (position-independent) runs as stock after it
+			if (midhook::install(base + entity_size_rva, entity_size_bytes, sizeof(entity_size_bytes),
+			                     &record_entity_lc, alloc_near))
 			{
-				const uint8_t code[] = {0x89, 0x35, 0x0E, 0x00, 0x00, 0x00, 0xFF, 0x25, 0x00, 0x00, 0x00, 0x00};
-				std::memcpy(cave, code, sizeof(code));
-				const auto target = reinterpret_cast<uint64_t>(&entity_alloc);
-				std::memcpy(cave + 12, &target, sizeof(target));
-				entity_lc = reinterpret_cast<volatile uint32_t*>(cave + 20);
-				*entity_lc = 0xFFFFFFFF;
-				entity_host = reinterpret_cast<hunk_alloc_fn>(host);
-
-				const int64_t rel = reinterpret_cast<int64_t>(cave) - static_cast<int64_t>(base + entity_call_rva + 5);
-				if (rel >= INT32_MIN && rel <= INT32_MAX)
+				try
 				{
-					uint8_t call[5] = {0xE8};
-					const auto rel32 = static_cast<int32_t>(rel);
-					std::memcpy(call + 1, &rel32, sizeof(rel32));
-					if (write_code(base + entity_call_rva, call, sizeof(call)))
-					{
-						chained |= 128;
-					}
+					utils::hook::call(base + entity_call_rva, reinterpret_cast<void*>(&entity_alloc));
+					chained |= 128;
+				}
+				catch (...)
+				{
 				}
 			}
 		}
