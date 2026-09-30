@@ -1,4 +1,4 @@
-BO3 Local Splitscreen 2.4.1  -  build {VERSION}
+BO3 Local Splitscreen 2.5    -  build {VERSION}
 ================================================
 
 Up to FOUR local split-screen players for Call of Duty: Black Ops III on PC -
@@ -6,6 +6,18 @@ Zombies and Multiplayer (offline custom games, bots work too). An ezz BOIII
 plugin. Local (offline) play only.
 
 This is a BETA. Please report what works and what does not.
+
+
+NEW IN 2.5
+----------
+* Nothing changes in the game: 2.5 plays like 2.4.1.
+* Internal cleanup for the ezz BOIII developers: the Zombies barricade
+  records (window boards, mystery box) of players 3 and 4 are handled by
+  two small C++ functions of the mod instead of patched game code. Before
+  the switch, both versions ran side by side and gave identical results
+  (220 of 220).
+
+Updating from 2.2 - 2.4.1: extract this zip over the old files.
 
 
 NEW IN 2.4.1

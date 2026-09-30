@@ -238,6 +238,8 @@ namespace splitscreen
 			// Batches 1-18 and the light queue, in perclient_rows order (10_relocations_b.inl).
 			// Before install_perclient_buffer_guard(): its cave bakes C's base.
 			relocate_perclient_rows();
+			// cg_zbarriers/numcgZBarriers: the two functions that use them, on four rows of ours.
+			replace_zbarrier_functions();
 			// Before R_Init allocates the culler object (see grow_umbra_client_arrays).
 			grow_umbra_client_arrays();
 			install_perclient_buffer_guard();

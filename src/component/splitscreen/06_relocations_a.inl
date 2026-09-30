@@ -1053,10 +1053,6 @@
 		// gArcData - ARC_DATA[4] (PS4 0x03FF7A10, 0xEEC), grenade arc prediction
 		// (CG_ArcPrediction_Update/Render). Indexed by lc next to cg_t (0x342720).
 
-		// cg_zbarriers - cgZBarrier_t[4][128] (PS4 0x03F2FE90, row 0xC400 = 128 x 0x188),
-		// handed out per lc by CG_InitZBarrier. PC row 2 was foreign memory. The
-		// map-start clear is widened in widen_zbarrier_clear().
-
 		// Per-local-client [2][18] x 0x132 array: the game session's 18 member slots
 		// for each local client. lc 2 ran past it into a static cmd_function_t node.
 		// Moved to [4]; its clear (memset 0x2B08) widens to four rows.
@@ -1150,42 +1146,134 @@
 		// 0x00039BB9 is a site: rcx holds the module base there. Zero-fill is the
 		// initial state (AimTarget_Init memsets each slot).
 
-		// CG_InitZBarriers (PC 0x004616C0, PS4 0x1697B0): PS4 clears four rows and
-		// four counts. Widen the memset 0x18800 -> 0x31000, and turn the 11-byte
-		// qword store to numcgZBarriers into xorps/movups/nop, a 16-byte store
-		// (its slots 2..3 are padding; xmm0 is volatile). Otherwise player 3's
-		// count never resets and passes 128 on the next map. Post-step of the zbarriers row.
-		bool widen_zbarrier_clear(const perclient_array&, const size_t zb_new)
+		// ---- cg_zbarriers: re-implemented, not relocated ----
+		// cgZBarrier_t cg_zbarriers[4][128] (PS4 0x03F2FE90, 0x188 each) and int
+		// numcgZBarriers[4] (PS4 0x03F60EA0) are [2] on the PC, and exactly two functions
+		// address them (every reference scanned 2026-09-30): the record allocator that
+		// CG_InitZBarrier calls, and CG_InitZBarriers (from CG_Init and CG_MapRestart).
+		// Both are replaced whole and work on four rows of our own; the engine's rows are
+		// never touched again. Records leave only as a pointer (centity +0x650) and the free
+		// routine clears their byte 0 through it, so they may live anywhere. Neither function
+		// has an Arxan caller check, the replacements call no engine code, and no caller reads
+		// a volatile register after either call (both stock bodies call memset).
+		struct zbarrier_store
 		{
+			uint8_t rows[4][zbarriers_per_client][zbarrier_size];
+			int32_t count[4];
+		};
+		zbarrier_store* zbarriers = nullptr;
+		bool zbarriers_replaced = false;
+		utils::hook::detour zbarrier_alloc_hook;
+		utils::hook::detour cg_init_zbarriers_hook;
+
+		// The allocator (PC only; PS4 CG_InitZBarrier appends inline and never reuses): the
+		// first of the client's `count` records whose in-use byte 0 is clear, else the next
+		// one while count < 128, else NULL. The record is zeroed and marked in use. count
+		// stays 0..128 (starts 0; only the clear and the append set it). Two unreachable
+		// inputs get NULL where stock would index foreign memory: lc outside 0..3 and a
+		// negative count (stock appends at row[n] for n < 0).
+		uint8_t* zbarrier_alloc(zbarrier_store& s, const int lc)
+		{
+			if (static_cast<uint32_t>(lc) >= std::size(s.count))
+			{
+				return nullptr;
+			}
+			auto& row = s.rows[lc];
+			const int32_t n = s.count[lc];
+			uint8_t* rec = nullptr;
+			for (int32_t i = 0; i < n; ++i)
+			{
+				if (row[i][0] == 0)
+				{
+					rec = row[i];
+					break;
+				}
+			}
+			if (!rec)
+			{
+				if (n < 0 || n >= static_cast<int32_t>(zbarriers_per_client))
+				{
+					return nullptr;
+				}
+				rec = row[n];
+				s.count[lc] = n + 1;
+			}
+			std::memset(rec, 0, zbarrier_size);
+			rec[0] = 1;
+			return rec;
+		}
+
+		// CG_InitZBarriers: all four rows and counts, as PS4 (the stock PC body clears two).
+		void zbarrier_clear(zbarrier_store& s)
+		{
+			std::memset(&s, 0, sizeof(s));
+		}
+
+		uint8_t* zbarrier_alloc_stub(const int lc)
+		{
+			return zbarrier_alloc(*zbarriers, lc);
+		}
+
+		void cg_init_zbarriers_stub()
+		{
+			note("[splitscreen] zbarriers: clear, counts %d %d %d %d\n", zbarriers->count[0],
+			     zbarriers->count[1], zbarriers->count[2], zbarriers->count[3]);
+			zbarrier_clear(*zbarriers);
+		}
+
+		// Both or neither: one replaced alone would split the records between two stores.
+		// Every byte of both bodies is verified first (the old relocation row, if left in,
+		// changes both, so this then stands down). detour::create throws on a MinHook
+		// failure; that path must clear too, or F2 could stay detoured with F1 stock.
+		bool replace_zbarrier_functions()
+		{
+			if (zbarriers_replaced)
+			{
+				return true;
+			}
 			const auto b = base();
-			auto* imm = reinterpret_cast<uint8_t*>(b + zbarrier_len_rva);
-			auto* clr = reinterpret_cast<uint8_t*>(b + zbarrier_count_store_rva);
-			const auto& imm_old = zbarrier_len_bytes;
-			const auto& clr_old = zbarrier_count_store_bytes;
-			// the memset's rcx must already point at the moved rows
-			const auto* lea = reinterpret_cast<const uint8_t*>(b + zbarrier_lea_rva);
-			int32_t lea_disp = 0;
-			std::memcpy(&lea_disp, lea + 3, sizeof(lea_disp));
-			if (!zb_new || b + zbarrier_lea_rva + 7 + lea_disp != zb_new
-			    || !readable(imm, sizeof(imm_old)) || std::memcmp(imm, imm_old, sizeof(imm_old)) != 0
-			    || !readable(clr, sizeof(clr_old)) || std::memcmp(clr, clr_old, sizeof(clr_old)) != 0)
+			const auto* alloc = reinterpret_cast<const void*>(b + zbarrier_alloc_rva);
+			const auto* init = reinterpret_cast<const void*>(b + cg_init_zbarriers_rva);
+			if (!readable(alloc, sizeof(zbarrier_alloc_expected))
+			    || std::memcmp(alloc, zbarrier_alloc_expected, sizeof(zbarrier_alloc_expected)) != 0
+			    || !readable(init, sizeof(cg_init_zbarriers_expected))
+			    || std::memcmp(init, cg_init_zbarriers_expected, sizeof(cg_init_zbarriers_expected)) != 0)
 			{
-				note("[splitscreen] zbarrier clear: bytes differ - not widened\n");
+				note("[splitscreen] zbarriers: function bytes differ - not replaced\n");
 				return false;
 			}
-			const auto disp = static_cast<int32_t>(numcgzbarriers_rva - (zbarrier_count_store_rva + 3 + 7));
-			uint8_t clr_new[11] = {0x0F, 0x57, 0xC0, 0x0F, 0x11, 0x05, 0, 0, 0, 0, 0x90};
-			std::memcpy(clr_new + 6, &disp, sizeof(disp));
-			const auto& imm_new = zbarrier_len_new;
-			if (!write_bytes(clr, clr_new, sizeof(clr_new)))
+			if (!zbarriers)
 			{
+				// VirtualAlloc zero-fills: the state CG_InitZBarriers leaves.
+				zbarriers = static_cast<zbarrier_store*>(allocate_near_module(sizeof(zbarrier_store)));
+				if (!zbarriers)
+				{
+					return false;
+				}
+			}
+			try
+			{
+				if (!hook_if_stock(cg_init_zbarriers_hook, cg_init_zbarriers_rva, cg_init_zbarriers_expected,
+				                   cg_init_zbarriers_stub))
+				{
+					return false;
+				}
+				if (!hook_if_stock(zbarrier_alloc_hook, zbarrier_alloc_rva, zbarrier_alloc_expected,
+				                   zbarrier_alloc_stub))
+				{
+					cg_init_zbarriers_hook.clear();
+					return false;
+				}
+			}
+			catch (...)
+			{
+				zbarrier_alloc_hook.clear();
+				cg_init_zbarriers_hook.clear();
+				note("[splitscreen] zbarriers: hook failed - both removed, not replaced\n");
 				return false;
 			}
-			if (!write_bytes(imm, imm_new, sizeof(imm_new)))
-			{
-				write_bytes(clr, clr_old, sizeof(clr_old));
-				return false;
-			}
+			zbarriers_replaced = true;
+			note("[splitscreen] zbarriers: replaced, store %p\n", static_cast<void*>(zbarriers));
 			return true;
 		}
 

@@ -393,8 +393,6 @@
 			{atglob_array},
 			{aimtargetcmd_array},
 			{arcdata_array},
-			{.array = zbarriers_array,
-			 .post = widen_zbarrier_clear},
 			// batch 2
 			{totalcoverage_array},
 			{rightstick_array},
