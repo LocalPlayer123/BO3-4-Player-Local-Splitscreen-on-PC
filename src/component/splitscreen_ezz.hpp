@@ -285,8 +285,15 @@ namespace splitscreen::ezz
 			return entity_host(user, size, alignment, name);
 		}
 
-		// `call rel32` at `site` whose target is a host thunk (jmp [rip+0]) outside
-		// the game image - i.e. ezz's redirect, not the engine's own call.
+		// `call rel32` at `site` that leaves the game image for ezz: ezz's redirect,
+		// not the engine's own call. ezz's utils::hook::call (src/common/utils/hook.cpp)
+		// writes it in one of two forms, chosen by where ASLR placed boiii.exe:
+		//   far (> 2 GB)  call -> a `jmp [rip+0]` thunk near the game image
+		//   near          call -> ezz's function in boiii.exe, directly
+		// Accepting only the thunk left all four pool sites unhooked whenever boiii.exe
+		// loaded within 2 GB of the game (1.07 GB in the 2026-09-30 09:07 crash, mask
+		// 0x10F): local clients 2/3 then ran on ezz's 2-client static pools and
+		// overwrote local client 0's entities. Both forms are callable as the host.
 		inline size_t host_call_target(const size_t base, const size_t image_size, const uint32_t site)
 		{
 			const auto* p = reinterpret_cast<const uint8_t*>(base + site);
@@ -297,9 +304,31 @@ namespace splitscreen::ezz
 			int32_t rel = 0;
 			std::memcpy(&rel, p + 1, sizeof(rel));
 			const size_t target = base + site + 5 + static_cast<int64_t>(rel);
+			if (target >= base && target < base + image_size)
+			{
+				return 0; // the engine's own call: no host redirect (official BOIII)
+			}
 			static constexpr uint8_t thunk[] = {0xFF, 0x25, 0x00, 0x00, 0x00, 0x00};
-			const bool outside = target < base || target >= base + image_size;
-			return outside && bytes_at(target, thunk, sizeof(thunk)) ? target : 0;
+			if (bytes_at(target, thunk, sizeof(thunk)))
+			{
+				return target;
+			}
+			// The near form: code inside another loaded module - not the game, not
+			// this DLL.
+			HMODULE owner{};
+			HMODULE self{};
+			const auto flags = GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT;
+			MEMORY_BASIC_INFORMATION mbi{};
+			constexpr DWORD executable = PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+			if (!GetModuleHandleExW(flags, reinterpret_cast<LPCWSTR>(target), &owner)
+				|| !GetModuleHandleExW(flags, reinterpret_cast<LPCWSTR>(&host_call_target), &self)
+				|| owner == self || reinterpret_cast<size_t>(owner) == base
+				|| !VirtualQuery(reinterpret_cast<const void*>(target), &mbi, sizeof(mbi))
+				|| mbi.State != MEM_COMMIT || !(mbi.Protect & executable))
+			{
+				return 0;
+			}
+			return target;
 		}
 
 		inline bool write_code(const size_t address, const void* bytes, const size_t n)

@@ -182,6 +182,18 @@ which the engine no longer writes then - client-script GetTime under that
 handler would see a stale value. Not observed to matter in the two test
 rounds; item 1 removes it.
 
+**Recognising ezz's redirect (fixed in mod 2.3.1):** `utils::hook::call`
+(`common/utils/hook.cpp`) writes `call rel32` straight into boiii.exe when the
+target is within 2 GB of the call site, and a call to a `jmp [rip+0]` thunk
+otherwise, so the form depends on where ASLR loads boiii.exe (the same for
+every launch until the next reboot). The mod up to 2.3 recognised only the
+thunk; with boiii.exe 1.05 GB from the game (measured 2026-09-30) none of the
+four hooks above was installed, clients 2/3 wrote into ezz's `[2]` pools, and
+4-player loads crashed intermittently (client 2's `cgs_t` inside
+`cg_entitiesArray`: AV at 0x02381906 on an entity field holding a `cgs_t`
+value). 2.3.1 accepts both forms. Growing the pools in ezz (item 1) makes the
+workaround unnecessary.
+
 ## 5. clientUIActives indexed by local client - MATCH (mod works; ezz's reads not checked)
 
 ezz reads `cg::clientUIActives->actives[lc]` (0x05359BC0, game array
