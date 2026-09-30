@@ -57,6 +57,20 @@ entry from padding (0). Users: `0x01C8CC72`, `0x01C8DA64`, `0x01C8DB20`,
 `0x01C8DB68`, `0x01C8CBB2` (same addresses in both builds). Relocate after a
 full reference scan.
 
+### A8. MP 3-4 players: crash in CG_DrawNames (name-drawing statics `[2]`)
+Seen 2026-09-30 (2.6 test, Rise TDM, just after spawn): AV reading
+`0xFFFFFFFFFFFFFFFF` at `0x0068293D` (PC CG_DrawNames `0x0067E0C0`, lc 2):
+`drawNameEntities[1].entnum` (`0x049482D0`) held the game time `0x22FDC` and
+`alpha` `0x3F800001` - a FriendlyHeadTrace {lastTraceTime, inView = 1} of
+player 3 written over the name list. The five per-client statics of
+cg_draw_names.cpp (PS4 all `[4]`) are `[2]` on PC and packed in front of the
+list: `actorOverheadFade` `0x04945F30` [2][64] x 0x10, `centOverheadFade`
+`0x04946730` [2][32] x 0x50, `overheadFade` `0x04947B60` [2][18] x 0x10,
+`s_friendlyHeadTrace` `0x04947DA0` [2][18] x 8, `s_friendlyActorHeadTrace`
+`0x04947EC0` [2][64] x 8 - so slots 2/3 of each overwrite the next array
+(actor head traces of lc 2 start exactly at `drawNameEntities`). Reset in
+`0x00677B20` (five memsets). Fix: relocate all five (next release).
+
 ### A7. User reports, not reproduced yet
 Hit indicator texture missing; players 1 and 2 sharing one controller with
 mixed third-party + Xbox pads (one pad probably seen through two APIs).
@@ -66,6 +80,17 @@ Exit code 0, no dialog, no dump, inside the game's own `Com_Init` (the
 component's startup completes first). Intermittent; starting again works.
 
 ## B. Fixed (listed because they show where to look next)
+
+### B11. Lens flares off for players 3/4 (fixed in 2.6)
+The PC FxLensFlaresManager (`0x032AEC10`, a later rework of the PS4 class)
+keeps its per-client state `[2]` (+0xA058 persistent data, +0xA068 visible
+lists, +0xB068 counts, +0xB070/+0xB080 pools); lc 2 hit the members behind
+them (NULL pool in SpawnInstance), so until 2.6 its five lc entry points
+returned early for lc >= 2. 2.6 gives lc 2/3 a second manager: midhooks at the
+seven entry points that take lc (and one in the backend buffer update, which
+reads lc from the view) continue with (second, lc - 2); players 3/4's sources
+keep accumulation ranges of their own (lc * 0x300), and both accumulation
+buffers grow from 2 x 0x300 to 4 x 0x300 entries.
 
 ### B5. ezz only: ClientCommand hangs the server in 6 of 16 launches (2.0)
 ezz detours `ClientCommand` (`0x0193DFC0`) and calls the original from

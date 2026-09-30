@@ -250,7 +250,11 @@ namespace splitscreen
 			widen_csc_lc_checks();
 			widen_odd_lc_checks();
 			install_lc_bound_hooks();
-			gate_lensflares_for_extra_clients();
+			// Lens flares for clients 2/3: a second manager, else off for them.
+			if (!route_lensflares_for_extra_clients())
+			{
+				gate_lensflares_for_extra_clients();
+			}
 			// Before the clamp, which bounds the slot by these slices.
 			grow_sun_shadow_slices();
 			clamp_sun_shadow_slot();

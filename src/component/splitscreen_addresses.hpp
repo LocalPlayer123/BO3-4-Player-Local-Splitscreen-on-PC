@@ -2949,6 +2949,43 @@ namespace splitscreen
 		{0x014BBD40, {0x48, 0x89, 0x4C, 0x24, 0x08}, 5},        // SpawnInstance
 		{0x014BC9E0, {0x48, 0x8B, 0xC4, 0x55, 0x53}, 5},        // per-view render
 	};
+	// route_lensflares_for_extra_clients: a second FxLensFlaresManager for lc 2/3.
+	inline constexpr uint32_t lensflare_manager_rva = 0x032AEC10;
+	inline constexpr size_t lensflare_manager_size = 0xB100;       // methods use +0xA000..+0xB090
+	inline constexpr uint32_t lensflare_persistent_off = 0xA058;   // persistentData*[2]
+	struct lensflare_site
+	{
+		uint32_t rva;
+		uint8_t stock[9];
+		uint8_t len;
+	};
+	// `this` in rcx and lc in edx at each (the entry, or just after an early exit)
+	inline constexpr lensflare_site lensflare_lc_entries[] = {
+		{0x014BA810, {0x89, 0x54, 0x24, 0x10, 0x48, 0x89, 0x4C, 0x24, 0x08}, 9}, // FixupOnRestore (FX_Restore)
+		{0x014BAC40, {0x40, 0x55, 0x56, 0x57, 0x41, 0x54}, 6},  // Init(lc, memory, size) (FX_InitSystem)
+		{0x014BB9B0, {0x48, 0x8B, 0xC4, 0x57, 0x41, 0x54}, 6},  // Shutdown(lc) (FX_ShutdownSystem)
+		{0x014BBD40, {0x48, 0x89, 0x4C, 0x24, 0x08}, 5},        // SpawnInstance (3 callers)
+		{0x014BC9E0, {0x48, 0x8B, 0xC4, 0x55, 0x53}, 5},        // UpdateVisibleLensFlares (per view)
+		{0x014BA46A, {0x48, 0x89, 0x5C, 0x24, 0x18}, 5},        // DeleteInstance, after handle == -1 -> ret
+		{0x014BB520, {0x48, 0x89, 0x74, 0x24, 0x20}, 5},        // MarkVisibleLensFlare (FX draw)
+	};
+	// 0x014BC5B0 (this, view, ...): lc = view+0x398, loaded into r15 before this site
+	inline constexpr uint32_t lensflare_view_lc_rva = 0x014BC5BC;
+	inline constexpr uint8_t lensflare_view_lc_bytes[] = {0x4C, 0x63, 0xBA, 0x98, 0x03, 0x00, 0x00}; // movsxd r15,[rdx+0x398]
+	inline constexpr uint32_t lensflare_view_route_rva = 0x014BC5C3;
+	inline constexpr uint8_t lensflare_view_route_stock[] = {0x33, 0xDB, 0x48, 0x8B, 0xFA};           // xor ebx,ebx; mov rdi,rdx
+	// AllocateLensFlareSource 0x014B97E0: accumulation index = lc * 0x300 + handle
+	inline constexpr uint32_t lensflare_accum_premise_rva = 0x014B9835;
+	inline constexpr uint8_t lensflare_accum_premise[] = {0x43, 0x8D, 0x2C, 0x76, 0xC1, 0xE5, 0x08};   // lea ebp,[r14+r14*2]; shl ebp,8
+	inline constexpr uint32_t lensflare_accum_rva = 0x014B983C;
+	inline constexpr uint8_t lensflare_accum_stock[] = {0x03, 0xE8, 0x48, 0x8D, 0x97, 0x40, 0x34, 0x00, 0x00}; // add ebp,eax; lea rdx,[rdi+0x3440]
+	// InitSharedResources: element counts of both accumulation buffers, 2 x 0x300 -> 4 x 0x300
+	inline constexpr uint32_t lensflare_accum_count_rvas[] = {0x014BB2C7, 0x014BB2FE};
+	inline constexpr uint8_t lensflare_accum_count_stock[] = {0xC7, 0x44, 0x24, 0x20, 0x00, 0x06, 0x00, 0x00};
+	inline constexpr uint8_t lensflare_accum_count_new[] = {0xC7, 0x44, 0x24, 0x20, 0x00, 0x0C, 0x00, 0x00};
+	// the buffers' GfxBuffer records: three resource pointers first (+0x20 = byte size, 0x1800)
+	inline constexpr uint32_t lensflare_accum_buffer_rvas[] = {0x09E97C20, 0x09E97BF0};
+	inline constexpr size_t lensflare_accum_buffer_ptrs = 0x18;
 	inline constexpr uint32_t lensflare_exit_thunk_rva = 0x02EF9840;
 	inline constexpr uint8_t lensflare_exit_thunk_expected[] = {
 		0x48, 0x8D, 0x0D, 0xC9, 0x53, 0x3B, 0x00,   // lea rcx, [FxLensFlaresManager]

@@ -1,4 +1,4 @@
-BO3 Local Splitscreen 2.5.1  -  build {VERSION}
+BO3 Local Splitscreen 2.6    -  build {VERSION}
 ================================================
 
 Up to FOUR local split-screen players for Call of Duty: Black Ops III on PC -
@@ -6,6 +6,16 @@ Zombies and Multiplayer (offline custom games, bots work too). An ezz BOIII
 plugin. Local (offline) play only.
 
 This is a BETA. Please report what works and what does not.
+
+
+NEW IN 2.6
+----------
+* Lens flares for players 3 and 4: the sun and bright lamps now flare on
+  their screens too, and the flares fade behind cover as on the screens
+  of players 1 and 2. Until now the game only kept lens flares for two
+  players, so the mod had switched them off for players 3 and 4.
+
+Updating from 2.2 - 2.5.1: extract this zip over the old files.
 
 
 NEW IN 2.5.1
@@ -247,6 +257,10 @@ folders listed under INSTALL.
 
 KNOWN ISSUES
 ------------
+* Multiplayer with 3 or 4 players: now and then the game can crash while
+  it draws player names ("EXCEPTION_ACCESS_VIOLATION"). The cause is found
+  (the name drawing keeps some of its data for two players only) and the
+  fix is the next release. It was there in every earlier version too.
 * Let players 3 and 4 join in the lobby (after choosing ZOMBIES or
   MULTIPLAYER), not in the main menu - a controller joining in the main
   menu can get a garbled name.

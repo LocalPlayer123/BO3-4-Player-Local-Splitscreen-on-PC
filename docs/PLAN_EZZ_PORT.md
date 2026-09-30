@@ -33,7 +33,7 @@ project can stop after any phase without leaving a broken mod behind.
   only 1-3 engine functions - those are the first to replace by
   re-implemented functions (see phase 5).
 * **Phase 5 started** (roadmap item 8, mod 2.5): measured the functions of the 42
-  arrays touched by at most 3 of them (`tools/array_functions.py --sizes`). Only 7
+  arrays touched by at most 3 of them (a size scan of every such function). Only 7
   have functions that are all small (<= 878 bytes) with no reference in flattened
   code; the others sit in 4-25 KB functions or Arxan-flattened code, where the
   table-driven relocation stays the maintainable form. Of the 7, an analysis with

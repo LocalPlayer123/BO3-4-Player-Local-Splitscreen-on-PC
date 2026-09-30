@@ -491,15 +491,150 @@
 			}
 		}
 
-		// ---- Lens flares: off for local clients >= 2 ------------------------------
-		// PS4 FxLensFlaresManager has eight per-client arrays of 4; on the PC they are
-		// arrays of 2 inside one static object, so lc 2 hits the neighbouring members.
-		// The object cannot grow (the fix would re-lay the whole class), so for now
-		// clients >= 2 get no lens flares: each entry point that takes lc in edx returns
-		// at once for them (SpawnInstance with -1, its own failure value) and runs the
-		// stock function otherwise. Arguments pass through as raw 64-bit values; the
-		// counts are each function's live-in registers and its caller's stack stores
-		// (render: 4 + 7). None of the five has an Arxan caller check.
+		// ---- Lens flares for local clients 2/3: a second manager -----------------
+		// PS4 FxLensFlaresManager keeps its per-client state as [4]. The PC class is a later
+		// rework with [2]: +0xA058 persistent data, +0xA068 visible lists [2][0x100], +0xB068
+		// counts, +0xB070/+0xB080 pool memory - lc 2 hit the members behind them. Clients 2/3
+		// get a second manager of their own (the object is reached only through its 15
+		// `lea rcx` sites, and its methods only through them): each entry point that takes lc
+		// in edx continues with (second, lc - 2), and so does the backend buffer update, which
+		// reads lc from the view. Its sources keep the accumulation range of their real lc
+		// (lc * 0x300, PS4 GetAccumBuffersIndex), for which both accumulation buffers grow from
+		// 2 x 0x300 to 4 x 0x300 entries before InitSharedResources creates them. The shared
+		// members (+0xA000..+0xA050, query materials and mesh) are used only by
+		// InitSharedResources, Shutdown() and KickOffVisibilityQueries, which keep the primary.
+		// Locks follow the remapped lc (0x76/0x7B/0x80 + lc; five exist per family).
+		uint8_t* lensflare_second = nullptr;
+		bool lensflare_routed = false;
+
+		void lensflare_route_entry(midhook::context& c)
+		{
+			const auto lc = static_cast<int32_t>(c.rdx);
+			if (c.rcx == base() + lensflare_manager_rva && (lc == 2 || lc == 3))
+			{
+				c.rcx = reinterpret_cast<uint64_t>(lensflare_second);
+				c.rdx = static_cast<uint32_t>(lc - 2);
+			}
+		}
+
+		// after `movsxd r15, [view+0x398]`, before `mov rbp, rcx`
+		void lensflare_route_view(midhook::context& c)
+		{
+			const auto lc = static_cast<int64_t>(c.r15);
+			if (c.rcx == base() + lensflare_manager_rva && (lc == 2 || lc == 3))
+			{
+				c.rcx = reinterpret_cast<uint64_t>(lensflare_second);
+				c.r15 = static_cast<uint64_t>(lc - 2);
+			}
+		}
+
+		// ebp = lc * 0x300 with lc already remapped, rdi = persistent data of (this, lc)
+		void lensflare_accum_index(midhook::context& c)
+		{
+			const auto lc = c.r14;
+			const auto* persistent = reinterpret_cast<const uint64_t*>(lensflare_second + lensflare_persistent_off);
+			if (lc < 2 && c.rdi && persistent[lc] == c.rdi)
+			{
+				c.rbp += 2 * 0x300;
+			}
+		}
+
+		// All or nothing; false leaves every byte stock (the caller then gates instead).
+		bool route_lensflares_for_extra_clients()
+		{
+			if (lensflare_routed)
+			{
+				return true;
+			}
+			const auto b = base();
+			const auto stock = [b](const uint32_t rva, const uint8_t* bytes, const size_t n) {
+				const auto* p = reinterpret_cast<const void*>(b + rva);
+				return readable(p, n) && std::memcmp(p, bytes, n) == 0;
+			};
+			bool ok = stock(lensflare_view_lc_rva, lensflare_view_lc_bytes, sizeof(lensflare_view_lc_bytes))
+				&& stock(lensflare_accum_premise_rva, lensflare_accum_premise, sizeof(lensflare_accum_premise));
+			for (const auto rva : lensflare_accum_count_rvas)
+			{
+				ok = ok && stock(rva, lensflare_accum_count_stock, sizeof(lensflare_accum_count_stock));
+			}
+			// the larger counts only take effect if the buffers do not exist yet
+			static constexpr uint8_t no_buffer[lensflare_accum_buffer_ptrs] = {};
+			for (const auto rva : lensflare_accum_buffer_rvas)
+			{
+				ok = ok && stock(rva, no_buffer, sizeof(no_buffer));
+			}
+			if (!ok)
+			{
+				note("[splitscreen] lensflare routing: premises differ or buffers already created - not routed\n");
+				return false;
+			}
+			if (!lensflare_second)
+			{
+				// zero-filled, the state of the static manager before Init
+				lensflare_second = static_cast<uint8_t*>(allocate_near_module(lensflare_manager_size));
+				if (!lensflare_second)
+				{
+					return false;
+				}
+			}
+
+			struct write { uint32_t rva; const uint8_t* stock; uint8_t patch[16]; size_t n; };
+			write writes[std::size(lensflare_lc_entries) + 2 + std::size(lensflare_accum_count_rvas)]{};
+			size_t count = 0;
+			for (const auto& e : lensflare_lc_entries)
+			{
+				auto& w = writes[count++];
+				w = {e.rva, e.stock, {}, e.len};
+				if (!midhook::prepare(b + e.rva, e.stock, e.len, &lensflare_route_entry, &allocate_near_module, w.patch))
+				{
+					note("[splitscreen] lensflare routing: 0x%08X not prepared - not routed\n", e.rva);
+					return false;
+				}
+			}
+			const struct { uint32_t rva; const uint8_t* stock; size_t n; midhook::callback fn; } mids[] = {
+				{lensflare_view_route_rva, lensflare_view_route_stock, sizeof(lensflare_view_route_stock), &lensflare_route_view},
+				{lensflare_accum_rva, lensflare_accum_stock, sizeof(lensflare_accum_stock), &lensflare_accum_index},
+			};
+			for (const auto& m : mids)
+			{
+				auto& w = writes[count++];
+				w = {m.rva, m.stock, {}, m.n};
+				if (!midhook::prepare(b + m.rva, m.stock, m.n, m.fn, &allocate_near_module, w.patch))
+				{
+					note("[splitscreen] lensflare routing: 0x%08X not prepared - not routed\n", m.rva);
+					return false;
+				}
+			}
+			for (const auto rva : lensflare_accum_count_rvas)
+			{
+				auto& w = writes[count++];
+				w = {rva, lensflare_accum_count_stock, {}, sizeof(lensflare_accum_count_new)};
+				std::memcpy(w.patch, lensflare_accum_count_new, sizeof(lensflare_accum_count_new));
+			}
+			for (size_t i = 0; i < count; ++i)
+			{
+				if (!write_bytes(reinterpret_cast<void*>(b + writes[i].rva), writes[i].patch, writes[i].n))
+				{
+					while (i-- > 0)
+					{
+						write_bytes(reinterpret_cast<void*>(b + writes[i].rva), writes[i].stock, writes[i].n);
+					}
+					note("[splitscreen] lensflare routing: write failed - all restored\n");
+					return false;
+				}
+			}
+			lensflare_routed = true;
+			note("[splitscreen] lensflare routing: second manager %p, %zu sites\n",
+			     static_cast<void*>(lensflare_second), count);
+			return true;
+		}
+
+		// ---- Lens flares: off for local clients >= 2 (fallback) -------------------
+		// Used when the routing above cannot be installed. Each entry point that takes lc
+		// in edx returns at once for lc >= 2 (SpawnInstance with -1, its own failure value)
+		// and runs the stock function otherwise. Arguments pass through as raw 64-bit
+		// values; the counts are each function's live-in registers and its caller's stack
+		// stores (render: 4 + 7). None of the five has an Arxan caller check.
 		bool lensflare_gated = false;
 		utils::hook::detour lensflare_hooks[std::size(lensflare_gates)];
 
