@@ -2679,16 +2679,6 @@ namespace splitscreen
 	inline constexpr entcoll_site prevview_sites[] = {
 		{0x01CDF3D5, 3, 7, true , 0x0000}, // lea rax, [rip + 0xe15ffd4]
 	};
-	inline constexpr entcoll_site statscache_sites[] = {
-		{0x01E94E8F, 3, 7, true , 0x0000}, // lea rcx, [rip + 0xf578eaa]  (LiveStats_ResetCache memset)
-		{0x01E9893F, 2, 6, true , 0x4400}, // mov edx, dword ptr [rip + 0xf5797fb]
-		{0x01E9894F, 2, 6, true , 0x4400}, // mov eax, dword ptr [rip + 0xf5797eb]
-		{0x01E98959, 3, 7, true , 0x0040}, // lea r14, [rip + 0xf575420]
-		{0x01E98960, 3, 7, true , 0x0000}, // lea rbp, [rip + 0xf5753d9]
-		{0x01E989A3, 2, 6, true , 0x4400}, // mov eax, dword ptr [rip + 0xf579797]
-		{0x01E989AD, 3, 7, true , 0x4400}, // mov dword ptr [rip + 0xf57978c], r15d
-		{0x01E9952B, 3, 7, true , 0x0000}, // lea rax, [rip + 0xf57480e]  (LiveStats_SetStatChanged)
-	};
 	inline constexpr entcoll_site visbits_sites[] = {
 		{0x0061D911, 3, 7, false, 0x0000}, // mov ebx, dword ptr [rbx + rsi*8 + 0x179dbdc8]
 		{0x006D3CAD, 4, 8, false, 0x0000}, // mov rcx, qword ptr [r9 + rbx*8 + 0x179dbdc8]
@@ -3024,11 +3014,6 @@ namespace splitscreen
 		{0x000B2060, 4, {0x41, 0x83, 0xFD, 0x02}, {0x41, 0x83, 0xFD, 0x03}},   // save loop
 	};
 	inline constexpr uint32_t umbra_object_rva = 0x0AE15BF8;   // grow_umbra_client_arrays: the culler object pointer
-	// widen_statscache_reset: lea rcx,[cache] / mov r8d, 0x8808 -> 0x11010
-	inline constexpr uint32_t statscache_reset_lea_rva = 0x01E94E8F;
-	inline constexpr uint32_t statscache_reset_len_rva = 0x01E94E98;
-	inline constexpr uint8_t statscache_reset_len_bytes[] = {0x41, 0xB8, 0x08, 0x88, 0x00, 0x00};
-	inline constexpr uint8_t statscache_reset_len_new[] = {0x41, 0xB8, 0x10, 0x10, 0x01, 0x00};
 	// perclient_rows descriptors (the driver table stays in 10_relocations_b.inl)
 	inline constexpr perclient_array cgdc_array = {"cgdc", 0x049B2CD0, 0x1838, cgdc_sites, std::size(cgdc_sites), 0, {}};
 	inline constexpr perclient_array notetracklerps_array = {"g_notetrackLerps", 0x0474B130, 0x340, notetracklerps_sites, std::size(notetracklerps_sites), 0, {}};
@@ -3080,7 +3065,6 @@ namespace splitscreen
 	inline constexpr perclient_array hudpl_icons_array = {"hudpl_icons", 0x1A7F6B50, 0x40, hudpl_icons_sites, std::size(hudpl_icons_sites), 0, {}};
 	inline constexpr perclient_array hudpl_self_array = {"hudpl_self", 0x1A7F6BD0, 0x4, hudpl_self_sites, std::size(hudpl_self_sites), 0, {}};
 	inline constexpr perclient_array prevview_array = {"prevview", 0x0FDCC800, 0x290, prevview_sites, std::size(prevview_sites), 0, {}};
-	inline constexpr perclient_array statscache_array = {"statscache", 0x1139B860, 0x4404, statscache_sites, std::size(statscache_sites), 0, {}};
 	inline constexpr perclient_array visbits_array = {"visbits", 0x1795CEC8, 0x8, visbits_sites, std::size(visbits_sites), 0, {}};
 	inline constexpr perclient_array conmsgbuf_array = {"conmsgbuf", conmsgbuf_base, conmsgbuf_stride, conmsgbuf_sites, std::size(conmsgbuf_sites), 0, {}};
 	inline constexpr perclient_array uiinfo_array = {"uiinfo", 0x1795D270, 0x1B68, uiinfo_sites, std::size(uiinfo_sites), 0, {}};
@@ -3445,6 +3429,46 @@ namespace splitscreen
 	inline constexpr uint8_t cgame_shutdown_start_new[] = {0xBF, 0x03, 0x00, 0x00, 0x00};
 	inline constexpr uint32_t cgame_shutdown_cursor_rva = 0x0132E31F;
 	inline constexpr uint8_t cgame_shutdown_cursor_bytes[] = {0x48, 0x8D, 0x1D, 0x12, 0xC9, 0x02, 0x04};
+
+	// ======== splitscreen/15_stats_cache.inl ========
+
+	// PS4 s_cachedStatsChanges cachedStats_t[4] x 0x1984 (0x0E3BF670); PC [2] x 0x4404.
+	inline constexpr uint32_t statscache_rva = 0x1139B860;            // engine slots 0/1, count at +0x4400
+	inline constexpr uint32_t statscache_stride = 0x4404;             // 0x100 x {u8[0x40]; int} + int count
+	inline constexpr uint32_t set_stat_changed_rva = 0x01E994E0;      // LiveStats_SetStatChanged (PS4 0xC63D00)
+	inline constexpr uint8_t set_stat_changed_prologue[] = {
+		0x40, 0x55, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, // push rbp, rsi, rdi, r12-r15
+		0x48, 0x8D, 0x6C, 0x24, 0xD9,                                           // lea rbp, [rsp-0x27]
+	};
+	inline constexpr uint32_t set_stat_changed_internal_rva = 0x01E99850; // LiveStats_SetStatChangedInternal (PS4 0xC639B0)
+	inline constexpr uint32_t com_decode_yenc_rva = 0x02245B90;       // Com_DecodeYEnc (PS4 0xFC1540)
+	inline constexpr uint32_t com_error_rva = 0x020EB9F0;             // Com_Error (PS4 0xE47C30)
+	inline constexpr uint32_t bb_register_hwm_rva = 0x02241CC0;       // BB_RegisterHighWaterMark (PS4 0xFBB850)
+	inline constexpr uint32_t bb_set_hwm_rva = 0x02242070;            // BB_SetHighWaterMark (PS4 0xFBB9B0)
+	inline constexpr uint32_t statscache_hwm_id_rva = 0x113A4068;     // SetStatChanged's static hwm id
+	inline constexpr uint32_t statscache_hwm_guard_rva = 0x113A406C;  // its init guard, bit 0
+	inline constexpr uint32_t str_statscache2_rva = 0x02F9A4B8;       // "statscache2"
+	inline constexpr uint32_t str_statsoverflow_rva = 0x02F9A4A0;     // "EXE_PATCH_STATSOVERFLOW"
+	inline constexpr uint32_t str_empty_rva = 0x02F1467C;             // ""
+	// LiveStats_ResetCache (PS4 0xC63CD0) inlined in LiveStats_PreGame (0x01E94C70)
+	inline constexpr uint32_t statscache_reset_rva = 0x01E94E8F;
+	inline constexpr uint8_t statscache_reset_bytes[] = {
+		0x48, 0x8D, 0x0D, 0xCA, 0x69, 0x50, 0x0F, // lea rcx, [statscache_rva]
+		0x33, 0xD2,                               // xor edx, edx
+		0x41, 0xB8, 0x08, 0x88, 0x00, 0x00,       // mov r8d, 0x8808
+		0xE8, 0x4D, 0xFE, 0xD2, 0x00,             // call memset
+	};
+	inline constexpr uint32_t statscache_reset_call_rva = 0x01E94E9E;
+	static_assert(statscache_reset_call_rva == statscache_reset_rva + 15);
+	// 0x01E987A0 (PC-only statsHash command) flushes slot 0 in place: every slot-0 reference
+	inline constexpr entcoll_site stats_hash_slot0_sites[] = {
+		{0x01E9893F, 2, 6, true, 0x4400}, // mov edx, [slot0.count]
+		{0x01E9894F, 2, 6, true, 0x4400}, // mov eax, [slot0.count]
+		{0x01E98959, 3, 7, true, 0x0040}, // lea r14, [slot0.changes[0].size]
+		{0x01E98960, 3, 7, true, 0x0000}, // lea rbp, [slot0]
+		{0x01E989A2, 3, 7, true, 0x4400}, // mov r8d, [slot0.count]
+		{0x01E989AD, 3, 7, true, 0x4400}, // mov [slot0.count], r15d
+	};
 }
 
 namespace splitscreen::ezz

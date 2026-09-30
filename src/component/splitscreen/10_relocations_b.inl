@@ -18,14 +18,10 @@
 		// g_prevFrameViewParmsDraw (PS4 GfxViewParms[4] x 0x290): R_RenderScene copies each
 		// frame's view parms to prev[localClientNum]; slot 2 covered another renderer object.
 
-		// ---- Batch 14: LiveStats per-controller stat-change cache ----
-		// PS4 LiveStats_SetStatChanged (0xC63D00) decodes change messages into
-		// s_cachedStatsChanges[controller], [4]. The PC cache (0x100 entries, stride 0x4404,
-		// count at +0x4400) is [2], so controller 2 overwrote the statics behind it, including
-		// the "statReadDDLExt" cmd node (crash in Cmd_RemoveCommand at game over).
-		// LiveStats_ResetCache clears all four slots on PS4; the PC memset (0x8808) clears two
-		// and is widened to 0x11010 after the move (an uncleared count reaching 0x100 is
-		// EXE_PATCH_STATSOVERFLOW).
+		// ---- Batch 14: LiveStats stat-change cache - no longer relocated ----
+		// s_cachedStatsChanges is [4] on PS4 and [2] on the PC; controller 2 overwrote the
+		// statics behind it (crash in Cmd_RemoveCommand at game over). SetStatChanged and the
+		// cache reset are re-implemented over four slots in 15_stats_cache.inl.
 
 		// ---- Batch 15: per-client UI visibility bits ----
 		// The zombie HUD shows its widgets through the "UIVisibilityBit.<n>" models. PS4 keeps
@@ -325,26 +321,6 @@
 			return true;
 		}
 
-		// LiveStats_ResetCache: memset length `mov r8d, 0x8808` -> 0x11010,
-		// only when its lea already points at the moved array. Post-step of the statscache row.
-		bool widen_statscache_reset(const perclient_array&, const size_t cache_new)
-		{
-			const auto b = base();
-			auto* imm = reinterpret_cast<uint8_t*>(b + statscache_reset_len_rva);
-			const auto& imm_old = statscache_reset_len_bytes;
-			const auto& imm_new = statscache_reset_len_new;
-			const auto* lea = reinterpret_cast<const uint8_t*>(b + statscache_reset_lea_rva);
-			int32_t lea_disp = 0;
-			std::memcpy(&lea_disp, lea + 3, sizeof(lea_disp));
-			if (!cache_new || b + statscache_reset_lea_rva + 7 + lea_disp != cache_new
-			    || !readable(imm, sizeof(imm_old)) || std::memcmp(imm, imm_old, sizeof(imm_old)) != 0)
-			{
-				note("[splitscreen] statscache reset: bytes differ - not widened\n");
-				return false;
-			}
-			return write_bytes(imm, imm_new, sizeof(imm_new));
-		}
-
 		// Own row: ikStates to [5]. If a reference fails to verify, fall back to moving the
 		// reset loop's end marker one slot, which covers client 2 (three players); with two
 		// players that slot is NULL and the loop skips it.
@@ -458,9 +434,7 @@
 			{hudpl_icons_array},
 			{hudpl_self_array},
 			{prevview_array},
-			// batches 14-18 and the light queue
-			{.array = statscache_array,
-			 .post = widen_statscache_reset},
+			// batches 15-18 and the light queue
 			{.array = visbits_array,
 			 .post = widen_visbits_reset},
 			{.array = conmsgbuf_array,

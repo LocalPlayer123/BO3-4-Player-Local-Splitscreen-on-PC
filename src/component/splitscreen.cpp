@@ -63,6 +63,7 @@ namespace splitscreen
 		#include "splitscreen/12_relocations_ui.inl"
 		#include "splitscreen/13_lobby_join.inl"
 		#include "splitscreen/14_player4_fixes.inl"
+		#include "splitscreen/15_stats_cache.inl"
 
 		// Marks the image as patched: runtime.cpp's patched-twice check reads this
 		// magic and stands down instead of applying the component a second time.
@@ -240,6 +241,8 @@ namespace splitscreen
 			relocate_perclient_rows();
 			// cg_zbarriers/numcgZBarriers: the two functions that use them, on four rows of ours.
 			replace_zbarrier_functions();
+			// s_cachedStatsChanges: SetStatChanged and the cache reset over four slots.
+			install_stats_cache();
 			// Before R_Init allocates the culler object (see grow_umbra_client_arrays).
 			grow_umbra_client_arrays();
 			install_perclient_buffer_guard();

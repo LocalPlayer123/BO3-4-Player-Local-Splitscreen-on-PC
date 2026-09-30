@@ -40,7 +40,12 @@ project can stop after any phase without leaving a broken mod behind.
   adversarial verification found two worth replacing: `cg_zbarriers` (done in 2.5:
   its allocator and CG_InitZBarriers re-implemented, 220/220 identical to the stock
   functions in a side-by-side diagnostic build, the old array untouched in play)
-  and `s_cachedStatsChanges` (next).
+  and `s_cachedStatsChanges` (done in 2.5.1: LiveStats_SetStatChanged and the
+  cache reset re-implemented; controllers 0/1 keep the engine's slots, 2/3 use the
+  mod's own; 440/440 identical to the stock function, DDL writes included). The
+  other five stay relocated: `rightstick` needs its live records imported on a
+  late apply, and for the rest a re-implementation adds more code and risk than
+  the few rewritten references it removes.
 
 ## 1. Where we started (first draft)
 

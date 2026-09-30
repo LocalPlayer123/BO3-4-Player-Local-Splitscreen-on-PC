@@ -34,7 +34,8 @@ console again, at runtime, without touching any file on disk:
    and every gap between functions byte by byte). Where only a few small
    functions use an array, those functions are re-implemented in C++ on the
    mod's own `[4]` storage instead, after running side by side with the
-   engine's versions in a diagnostic build (so far: `cg_zbarriers`).
+   engine's versions in a diagnostic build (so far: `cg_zbarriers` and
+   `s_cachedStatsChanges`).
 2. **Widen** the loop bounds / range checks from 2 to 4 - but only after every
    array such a loop touches has been checked for slot 2/3 (slot 2 of a `[2]`
    array usually lies on a foreign global; widening first only moves the crash).
