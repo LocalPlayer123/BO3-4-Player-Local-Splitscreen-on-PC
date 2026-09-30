@@ -57,7 +57,7 @@ entry from padding (0). Users: `0x01C8CC72`, `0x01C8DA64`, `0x01C8DB20`,
 `0x01C8DB68`, `0x01C8CBB2` (same addresses in both builds). Relocate after a
 full reference scan.
 
-### A8. MP 3-4 players: crash in CG_DrawNames (name-drawing statics `[2]`)
+### A8. (fixed in 2.6.1, see B12)
 Seen 2026-09-30 (2.6 test, Rise TDM, just after spawn): AV reading
 `0xFFFFFFFFFFFFFFFF` at `0x0068293D` (PC CG_DrawNames `0x0067E0C0`, lc 2):
 `drawNameEntities[1].entnum` (`0x049482D0`) held the game time `0x22FDC` and
@@ -69,7 +69,7 @@ list: `actorOverheadFade` `0x04945F30` [2][64] x 0x10, `centOverheadFade`
 `s_friendlyHeadTrace` `0x04947DA0` [2][18] x 8, `s_friendlyActorHeadTrace`
 `0x04947EC0` [2][64] x 8 - so slots 2/3 of each overwrite the next array
 (actor head traces of lc 2 start exactly at `drawNameEntities`). Reset in
-`0x00677B20` (five memsets). Fix: relocate all five (next release).
+`0x00677B20` (five memsets).
 
 ### A7. User reports, not reproduced yet
 Hit indicator texture missing; players 1 and 2 sharing one controller with
@@ -80,6 +80,16 @@ Exit code 0, no dialog, no dump, inside the game's own `Com_Init` (the
 component's startup completes first). Intermittent; starting again works.
 
 ## B. Fixed (listed because they show where to look next)
+
+### B12. MP 3-4 players: crash in CG_DrawNames (fixed in 2.6.1)
+The crash of A8 above. A sixth array belongs to the same group: `playerDetails`
+`0x04945090` [2][18] x 0x68 (PS4 `[4][18]`, cleared by CG_ClearPlayerDetails
+`0x00677B90`), whose slot 2 is `actorOverheadFade`. All six are relocated to
+`[4]` (Batch 19, 74 references; the linear decode missed `0x006A7A53`, the lea of
+CG_GetActorOverheadFade behind junk bytes after an int3 - every raw candidate is
+now cross-checked) and each reset memset is widened from 2 to 4 slots. Verified
+in 4-player MP: the old arrays stay all zero, the name list holds real entity
+numbers.
 
 ### B11. Lens flares off for players 3/4 (fixed in 2.6)
 The PC FxLensFlaresManager (`0x032AEC10`, a later rework of the PS4 class)

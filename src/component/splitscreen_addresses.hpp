@@ -2679,6 +2679,101 @@ namespace splitscreen
 	inline constexpr entcoll_site prevview_sites[] = {
 		{0x01CDF3D5, 3, 7, true , 0x0000}, // lea rax, [rip + 0xe15ffd4]
 	};
+	// Batch 19: the per-client statics of cg_draw_names.cpp (PS4 [4], PC [2], packed from
+	// 0x04945090 to drawNameEntities 0x049482C0). Generated and cross-checked against every raw
+	// candidate field (every Arxan-section candidate is data or junk).
+	// playerdetails (PS4 playerDetails PlayerDetails[4][18] x 0x68): 3 sites
+	inline constexpr entcoll_site playerdetails_sites[] = {
+		{0x00677B94, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x42cd4f5]
+		{0x0069D795, 3, 7, true , 0x0000}, // lea rax, [rip + 0x42a78f4]
+		{0x006A7AEB, 3, 7, true , 0x0000}, // lea rax, [rip + 0x429d59e]
+	};
+	// actoroverheadfade (PS4 actorOverheadFade OverheadFade[4][64]): 24 sites
+	inline constexpr entcoll_site actoroverheadfade_sites[] = {
+		{0x00677B38, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x42ce3f1]
+		{0x00679461, 4, 9, false, 0x000C}, // mov byte ptr [r13 + rax*8 + 0x4945f3c], 0
+		{0x00679479, 5, 9, false, 0x000C}, // movzx ecx, byte ptr [r13 + rbx*8 + 0x4945f3c]
+		{0x00679486, 4, 8, false, 0x0000}, // mov eax, dword ptr [r13 + rbx*8 + 0x4945f30]
+		{0x0067949B, 4, 9, false, 0x000C}, // mov byte ptr [r13 + rbx*8 + 0x4945f3c], 0
+		{0x006794BB, 4, 8, false, 0x0000}, // mov dword ptr [r13 + rbx*8 + 0x4945f30], eax
+		{0x006794C3, 4, 9, false, 0x000C}, // cmp byte ptr [r13 + rbx*8 + 0x4945f3c], 0
+		{0x006794CE, 4, 8, false, 0x0004}, // mov dword ptr [r13 + rbx*8 + 0x4945f34], eax
+		{0x0067E054, 4, 9, false, 0x000C}, // mov byte ptr [rdx + r8*8 + 0x4945f3c], 0
+		{0x00692A20, 4, 9, false, 0x000C}, // mov byte ptr [r8 + rbx*8 + 0x4945f3c], 0
+		{0x00692A51, 4, 9, false, 0x000C}, // cmp byte ptr [r8 + rbx*8 + 0x4945f3c], 0
+		{0x00692A60, 4, 9, false, 0x000C}, // mov byte ptr [r8 + rbx*8 + 0x4945f3c], 1
+		{0x00692A69, 4, 8, false, 0x0008}, // mov dword ptr [r8 + rbx*8 + 0x4945f38], esi
+		{0x00699CAA, 4, 9, false, 0x000C}, // cmp byte ptr [r8 + rax*8 + 0x4945f3c], 0
+		{0x00699CBD, 4, 8, false, 0x0004}, // mov dword ptr [r8 + rax*8 + 0x4945f34], ecx
+		{0x00699CCD, 4, 8, false, 0x0004}, // mov r8d, dword ptr [r8 + rax*8 + 0x4945f34]
+		{0x00699CE4, 4, 8, false, 0x0008}, // mov edx, dword ptr [r10 + rax*8 + 0x4945f38]
+		{0x006A79A5, 4, 8, false, 0x0008}, // mov eax, dword ptr [r15 + rcx*8 + 0x4945f38]
+		{0x006A79B0, 4, 8, false, 0x0004}, // mov eax, dword ptr [r15 + rcx*8 + 0x4945f34]
+		{0x006A7A53, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x429e4d6]
+		{0x006B0524, 4, 8, false, 0x0004}, // sub eax, dword ptr [rcx + r8 + 0x4945f34]
+		{0x006B054D, 4, 8, false, 0x0008}, // mov dword ptr [rcx + r8 + 0x4945f38], eax
+		{0x006B055B, 4, 8, false, 0x0004}, // mov dword ptr [rcx + r8 + 0x4945f34], eax
+		{0x006EF430, 4, 8, false, 0x000C}, // cmp byte ptr [rax + rcx*8 + 0x4945f3c], r14b
+	};
+	// centoverheadfade (PS4 centOverheadFade centity_overheadName_t[4][32] (PC 0x50 each)): 2 sites
+	inline constexpr entcoll_site centoverheadfade_sites[] = {
+		{0x00677B4C, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x42cebdd]
+		{0x006A7A73, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x429ecb6]
+	};
+	// overheadfade (PS4 overheadFade OverheadFade[4][18]): 32 sites
+	inline constexpr entcoll_site overheadfade_sites[] = {
+		{0x00677B24, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x42d0035]
+		{0x00682AEC, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x42c506d]
+		{0x00682B48, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x42c5011]
+		{0x00682B7E, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x42c4fdb]
+		{0x00682DF6, 4, 9, false, 0x000C}, // mov byte ptr [rdx + r8*8 + 0x4947b6c], 0
+		{0x0068822C, 4, 9, false, 0x000C}, // mov byte ptr [r8 + rdx*8 + 0x4947b6c], 0
+		{0x00688279, 4, 9, false, 0x000C}, // cmp byte ptr [r8 + rdx*8 + 0x4947b6c], 0
+		{0x0068829E, 4, 9, false, 0x000C}, // mov byte ptr [r8 + rdx*8 + 0x4947b6c], 1
+		{0x006882A7, 4, 8, false, 0x0008}, // mov dword ptr [r8 + rdx*8 + 0x4947b68], eax
+		{0x0068F145, 4, 9, false, 0x000C}, // cmp byte ptr [rbx + r8 + 0x4947b6c], 0
+		{0x0068F154, 4, 9, false, 0x000C}, // mov byte ptr [rbx + r8 + 0x4947b6c], 1
+		{0x0068F15D, 4, 8, false, 0x0008}, // mov dword ptr [rbx + r8 + 0x4947b68], esi
+		{0x0068F16E, 4, 8, false, 0x000D}, // mov byte ptr [rbx + r8 + 0x4947b6d], al
+		{0x0068F186, 4, 9, false, 0x000C}, // mov byte ptr [rbx + r8 + 0x4947b6c], 0
+		{0x00696323, 4, 9, false, 0x000D}, // cmp byte ptr [r8 + rdx*8 + 0x4947b6d], 0
+		{0x00696332, 4, 9, false, 0x000C}, // cmp byte ptr [r8 + rdx*8 + 0x4947b6c], 0
+		{0x00696345, 4, 8, false, 0x0004}, // mov dword ptr [r8 + rdx*8 + 0x4947b64], eax
+		{0x00696351, 4, 8, false, 0x0004}, // mov r8d, dword ptr [r8 + rdx*8 + 0x4947b64]
+		{0x0069636A, 4, 8, false, 0x0008}, // mov edx, dword ptr [r10 + rdx*8 + 0x4947b68]
+		{0x0069639C, 4, 9, false, 0x000D}, // cmp byte ptr [r8 + rdx*8 + 0x4947b6d], 0
+		{0x006963AB, 4, 9, false, 0x000C}, // cmp byte ptr [r8 + rdx*8 + 0x4947b6c], 0
+		{0x006963BE, 4, 8, false, 0x0004}, // mov dword ptr [r8 + rdx*8 + 0x4947b64], eax
+		{0x006963CA, 4, 8, false, 0x0004}, // mov r8d, dword ptr [r8 + rdx*8 + 0x4947b64]
+		{0x006963E3, 4, 8, false, 0x0008}, // mov edx, dword ptr [r10 + rdx*8 + 0x4947b68]
+		{0x006A47A8, 4, 8, false, 0x000C}, // cmp byte ptr [rdx + rcx + 0x4947b6c], r15b
+		{0x006A47B2, 3, 8, false, 0x000C}, // mov byte ptr [rdx + rcx + 0x4947b6c], 1
+		{0x006A47BA, 4, 8, false, 0x0008}, // mov dword ptr [rdx + rcx + 0x4947b68], r14d
+		{0x006A47C2, 4, 8, false, 0x0004}, // mov dword ptr [rdx + rcx + 0x4947b64], r14d
+		{0x006A47E8, 3, 8, false, 0x000C}, // mov byte ptr [rdx + rcx + 0x4947b6c], 0
+		{0x006A47F0, 4, 8, false, 0x0004}, // mov r8d, dword ptr [rdx + rcx + 0x4947b64]
+		{0x006A47FB, 3, 7, false, 0x0008}, // mov edx, dword ptr [rdx + rcx + 0x4947b68]
+		{0x006A7AB3, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x42a00a6]
+	};
+	// friendlyheadtrace (PS4 s_friendlyHeadTrace FriendlyHeadTrace[4][18]): 8 sites
+	inline constexpr entcoll_site friendlyheadtrace_sites[] = {
+		{0x00677B60, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x42d0239]
+		{0x00682DDE, 3, 7, false, 0x0004}, // mov byte ptr [rcx + rdx + 0x4947da4], al
+		{0x00682DE5, 3, 8, false, 0x0005}, // mov byte ptr [rcx + rdx + 0x4947da5], 1
+		{0x00682E03, 3, 7, false, 0x0000}, // mov eax, dword ptr [rcx + rdx + 0x4947da0]
+		{0x00687F6F, 3, 7, false, 0x0000}, // mov dword ptr [rdi + rdx + 0x4947da0], esi
+		{0x0068B8FD, 4, 8, false, 0x0005}, // mov byte ptr [r8 + rdx*8 + 0x4947da5], dil
+		{0x0068F132, 4, 9, false, 0x0004}, // cmp byte ptr [rdi + r8 + 0x4947da4], 0
+		{0x0068F165, 5, 9, false, 0x0005}, // movzx eax, byte ptr [rdi + r8 + 0x4947da5]
+	};
+	// friendlyactorheadtrace (PS4 s_friendlyActorHeadTrace FriendlyHeadTrace[4][64]): 5 sites
+	inline constexpr entcoll_site friendlyactorheadtrace_sites[] = {
+		{0x00677B74, 3, 7, true , 0x0000}, // lea rcx, [rip + 0x42d0345]
+		{0x0067E044, 3, 7, false, 0x0004}, // mov byte ptr [rcx + rdx + 0x4947ec4], al
+		{0x0067E061, 3, 7, false, 0x0000}, // mov eax, dword ptr [rcx + rdx + 0x4947ec0]
+		{0x006929D2, 4, 8, false, 0x0000}, // mov dword ptr [r8 + rbx*8 + 0x4947ec0], esi
+		{0x00692A0E, 4, 9, false, 0x0004}, // cmp byte ptr [r8 + rbx*8 + 0x4947ec4], 0
+	};
 	inline constexpr entcoll_site visbits_sites[] = {
 		{0x0061D911, 3, 7, false, 0x0000}, // mov ebx, dword ptr [rbx + rsi*8 + 0x179dbdc8]
 		{0x006D3CAD, 4, 8, false, 0x0000}, // mov rcx, qword ptr [r9 + rbx*8 + 0x179dbdc8]
@@ -3106,6 +3201,29 @@ namespace splitscreen
 	inline constexpr perclient_array conmsgbuf_array = {"conmsgbuf", conmsgbuf_base, conmsgbuf_stride, conmsgbuf_sites, std::size(conmsgbuf_sites), 0, {}};
 	inline constexpr perclient_array uiinfo_array = {"uiinfo", 0x1795D270, 0x1B68, uiinfo_sites, std::size(uiinfo_sites), 0, {}};
 	inline constexpr perclient_array ui3d_windows_array = {"ui3d_windows", 0x10B2F2F0, 0x438, ui3d_windows_sites, std::size(ui3d_windows_sites), 0, {}};
+	inline constexpr perclient_array playerdetails_array = {"playerdetails", 0x04945090, 0x750, playerdetails_sites, std::size(playerdetails_sites), 0, {}};
+	inline constexpr perclient_array actoroverheadfade_array = {"actoroverheadfade", 0x04945F30, 0x400, actoroverheadfade_sites, std::size(actoroverheadfade_sites), 0, {}};
+	inline constexpr perclient_array centoverheadfade_array = {"centoverheadfade", 0x04946730, 0xA00, centoverheadfade_sites, std::size(centoverheadfade_sites), 0, {}};
+	inline constexpr perclient_array overheadfade_array = {"overheadfade", 0x04947B60, 0x120, overheadfade_sites, std::size(overheadfade_sites), 0, {}};
+	inline constexpr perclient_array friendlyheadtrace_array = {"friendlyheadtrace", 0x04947DA0, 0x90, friendlyheadtrace_sites, std::size(friendlyheadtrace_sites), 0, {}};
+	inline constexpr perclient_array friendlyactorheadtrace_array = {"friendlyactorheadtrace", 0x04947EC0, 0x200, friendlyactorheadtrace_sites, std::size(friendlyactorheadtrace_sites), 0, {}};
+	// widen_name_reset: each Batch 19 array's memset in its reset (0x00677B20, CG_ClearPlayerDetails
+	// 0x00677B90): `lea rcx, [array]` (a site of its row) and `mov r8d, 2 * stride`
+	struct name_reset
+	{
+		uint32_t array_base;
+		uint32_t lea_rva;
+		uint32_t len_rva;
+		uint8_t len_bytes[6];
+	};
+	inline constexpr name_reset name_resets[] = {
+		{0x04945090, 0x00677B94, 0x00677B9D, {0x41, 0xB8, 0xA0, 0x0E, 0x00, 0x00}},
+		{0x04945F30, 0x00677B38, 0x00677B41, {0x41, 0xB8, 0x00, 0x08, 0x00, 0x00}},
+		{0x04946730, 0x00677B4C, 0x00677B55, {0x41, 0xB8, 0x00, 0x14, 0x00, 0x00}},
+		{0x04947B60, 0x00677B24, 0x00677B2D, {0x41, 0xB8, 0x40, 0x02, 0x00, 0x00}},
+		{0x04947DA0, 0x00677B60, 0x00677B69, {0x41, 0xB8, 0x20, 0x01, 0x00, 0x00}},
+		{0x04947EC0, 0x00677B74, 0x00677B7D, {0x41, 0xB8, 0x00, 0x04, 0x00, 0x00}},
+	};
 	inline constexpr uint32_t compass_actors_clear_rva = 0x0059888D;   // CG_ClearCompassPingData memset length `mov r8d, imm32` (compass_clear_*)
 	inline constexpr uint32_t compass_vehicles_clear_rva = 0x005988B5;   // CG_ClearCompassPingData memset length `mov r8d, imm32` (compass_clear_*)
 	inline constexpr uint32_t compass_artillery_clear_rva = 0x005988F1;   // CG_ClearCompassPingData memset length `mov r8d, imm32` (compass_clear_*)

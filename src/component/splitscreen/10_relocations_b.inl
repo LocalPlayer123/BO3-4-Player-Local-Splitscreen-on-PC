@@ -166,6 +166,38 @@
 		// behind the array (player 3's white HUD panels in MP). PS4 has a single
 		// g_ui3d_windows. Three other hits in the range are loop end markers and stay.
 
+		// ---- Batch 19: player-name drawing, the statics of cg_draw_names.cpp -----
+		// PS4 keeps them [4]; the PC has [2] of each, packed in front of the global name list
+		// drawNameEntities (0x049482C0): playerDetails [2][18] x 0x68, actorOverheadFade [2][64],
+		// centOverheadFade [2][32] x 0x50, overheadFade [2][18], s_friendlyHeadTrace [2][18],
+		// s_friendlyActorHeadTrace [2][64]. Slot 2 of each is the next array; slot 2 of the actor
+		// head traces is the name list itself, so a head trace of player 3 turned a list entry into
+		// {time, 1} and CG_DrawNames read entity 0x22FDC (4p MP crash at 0x0068293D). The zero
+		// state is the reset state. Each reset memset covers two slots and is widened to four.
+		bool widen_name_reset(const perclient_array& a, const size_t fresh)
+		{
+			const auto b = base();
+			for (const auto& r : name_resets)
+			{
+				if (r.array_base != a.base)
+				{
+					continue;
+				}
+				int32_t disp = 0;
+				std::memcpy(&disp, reinterpret_cast<const uint8_t*>(b + r.lea_rva) + 3, sizeof(disp));
+				auto* len = reinterpret_cast<uint8_t*>(b + r.len_rva);
+				if (b + r.lea_rva + 7 + static_cast<ptrdiff_t>(disp) != fresh || !readable(len, sizeof(r.len_bytes))
+				    || std::memcmp(len, r.len_bytes, sizeof(r.len_bytes)) != 0)
+				{
+					note("[splitscreen] %s reset: bytes differ - not widened\n", a.name);
+					return false;
+				}
+				const uint32_t four_slots = 4 * a.stride;
+				return write_bytes(len + 2, &four_slots, sizeof(four_slots));
+			}
+			return false;
+		}
+
 		// ---- Light queue: records [2][1024] + counters [2] -> [4] ----------------
 		// Per-client ring of light records (1024 x 0x28, stride 0xA000) with
 		// read/write counters in two int[2] arrays A and B, 8 bytes apart. Client
@@ -442,6 +474,13 @@
 			{.array = uiinfo_array,
 			 .pre = uiinfo_bound_matches, .post = widen_uiinfo_init},
 			{ui3d_windows_array},
+			// batch 19: player-name drawing
+			{.array = playerdetails_array, .post = widen_name_reset},
+			{.array = actoroverheadfade_array, .post = widen_name_reset},
+			{.array = centoverheadfade_array, .post = widen_name_reset},
+			{.array = overheadfade_array, .post = widen_name_reset},
+			{.array = friendlyheadtrace_array, .post = widen_name_reset},
+			{.array = friendlyactorheadtrace_array, .post = widen_name_reset},
 			{.array = {"lightq"}, .own = relocate_lightq},
 		};
 

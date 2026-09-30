@@ -1,4 +1,4 @@
-BO3 Local Splitscreen 2.6    -  build {VERSION}
+BO3 Local Splitscreen 2.6.1  -  build {VERSION}
 ================================================
 
 Up to FOUR local split-screen players for Call of Duty: Black Ops III on PC -
@@ -6,6 +6,18 @@ Zombies and Multiplayer (offline custom games, bots work too). An ezz BOIII
 plugin. Local (offline) play only.
 
 This is a BETA. Please report what works and what does not.
+
+
+NEW IN 2.6.1
+------------
+* Fixed: Multiplayer with 3 or 4 players could crash now and then while
+  the game drew player names ("EXCEPTION_ACCESS_VIOLATION", often right
+  after spawning). The name drawing kept six of its lists for two players
+  only, so player 3 and 4 wrote into the neighbouring lists - one of them
+  the list of names to draw. All six now have room for four players. The
+  crash was in every earlier version.
+
+Updating from 2.2 - 2.6: extract this zip over the old files.
 
 
 NEW IN 2.6
@@ -257,10 +269,6 @@ folders listed under INSTALL.
 
 KNOWN ISSUES
 ------------
-* Multiplayer with 3 or 4 players: now and then the game can crash while
-  it draws player names ("EXCEPTION_ACCESS_VIOLATION"). The cause is found
-  (the name drawing keeps some of its data for two players only) and the
-  fix is the next release. It was there in every earlier version too.
 * Let players 3 and 4 join in the lobby (after choosing ZOMBIES or
   MULTIPLAYER), not in the main menu - a controller joining in the main
   menu can get a garbled name.
