@@ -85,22 +85,6 @@ namespace splitscreen
 			                   stride_site_bytes, sizeof(stride_site_bytes)) == 0;
 		}
 
-		// Detours the engine function at `rva` if it still starts with `prologue`;
-		// otherwise writes nothing and returns false.
-		template <size_t N, typename F>
-		bool hook_if_stock(utils::hook::detour& hook, const size_t rva, const uint8_t (&prologue)[N],
-		                   F* stub)
-		{
-			const auto place = base() + rva;
-			if (std::memcmp(reinterpret_cast<const void*>(place), prologue, N) != 0)
-			{
-				note("[splitscreen] 0x%zX: prologue differs - not hooked\n", rva);
-				return false;
-			}
-			hook.create(reinterpret_cast<void*>(place), reinterpret_cast<void*>(stub));
-			return true;
-		}
-
 		bool try_apply()
 		{
 			publish_status_magic();
@@ -329,10 +313,10 @@ namespace splitscreen
 			// and the per-player UI models.
 			relocate_signin_field();
 
-			// Third screen, part 2. install_isactive_cave() answers IsActive(lc >= 2)
-			// from the relocated clientGameStates, so it must run after
+			// Third screen, part 2. install_isactive_hook() answers IsActive(lc >= 2)
+			// (0 until cl_maxLocalClients covers the client); it waits for
 			// relocate_signin_field(). Pane counts and bounds come last.
-			install_isactive_cave();
+			install_isactive_hook();
 			install_pane_counts_and_bounds();
 			// Also after relocate_signin_field(): reads seat record 2.
 			widen_gamepad_button_models();
@@ -374,8 +358,8 @@ namespace splitscreen
 			                                            shoutcaster_read_result_prologue,
 			                                            shoutcaster_read_result_stub);
 
-			hook_if_stock(splitscreen_player_count_hook, splitscreen_player_count_rva,
-			              splitscreen_player_count_prologue, splitscreen_player_count_stub);
+			player_count_detoured = hook_if_stock(splitscreen_player_count_hook, splitscreen_player_count_rva,
+			                                      splitscreen_player_count_prologue, splitscreen_player_count_stub);
 
 			// CL_LocalClient_SetActive: the trigger for CL_Init(2) (see set_active_stub).
 			hook_if_stock(set_active_hook, set_active_rva, set_active_prologue, set_active_stub);

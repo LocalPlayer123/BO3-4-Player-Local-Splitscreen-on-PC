@@ -5,30 +5,76 @@
 		// RT 5 (sun shadow depth) and RT 9 (its colour twin) have 3 slices per view
 		// slot. The slot is min(splitscreen player count - 1, localClientNum); with
 		// the count at 3, player 3 got a slot with no slices and crashed in d3d11
-		// OMSetRenderTargets. The cave caps the slot at slices / partitions - 1,
-		// read from the verified instructions. 15 straight-line bytes become
-		// `jmp cave` + NOPs.
+		// OMSetRenderTargets. The view setup's count is capped at the slots that have
+		// slices (slices / partitions, read from the verified instructions).
 		bool sun_slot_clamped = false;
+		uint32_t sun_max_slot = 1;
 
 		// ---- Sun shadow: 12 slices, one slot per view -----------------------------
 		// With 2 slots, players 2-4 shared slot 1 and overwrote each other's
 		// shadows. PS4 renders views one after another into the same slices; the
 		// PC does not, so RT 5 (depth) and RT 9 (colour) grow from 6 to 12 slices.
-		// - Descriptors: the two slice stores become calls to caves that store 12
-		//   (the `mov r8d,6` stays; it is also RT 6's id).
+		// - Descriptors: R_InitRenderTargetsPlatform receives 12 for both (the stores
+		//   of 6 stay; that `mov r8d,6` is also RT 6's id).
 		// - Depth arrays are sized from the slice count and need nothing else.
 		// - Colour views live in 8 inline slots (index clamped to 7). The creation
 		//   check admits 2..12, the loop stops at 6 so the inline slots stay stock,
 		//   and slices 6..11 get sidecar views (maintain_sun_trans_views) that the
-		//   setter and the clear pick; the clear has no clamp of its own.
+		//   setter's view lookup and the clear pick; the clear has no clamp of its own.
 		// Applied before R_Init, which builds the descriptors. History: LOG.md, 12 slices
 		constexpr uint32_t rt_record_stride = 0xAE0;
+		constexpr uint32_t rt_config_stride = 0x2C;   // GfxRenderTargetConfiguration (PS4 r_rendertarget.cpp:74)
+		constexpr uint32_t rt_config_slices = 0x14;
+		constexpr uint32_t sun_depth_rt = 5;
 		constexpr uint32_t sun_trans_rt = 9;
+		constexpr uint32_t sun_slices_stock = 6;
 		constexpr uint32_t sun_slices_wanted = 12;
 		bool sun_slices_grown = false;
-		ID3D11RenderTargetView* sun_trans_extra[6] = {};      // RT 9 slices 6..11 (read by the caves)
-		ID3D11RenderTargetView* sun_trans_retired[6] = {};    // released one tick later
+		ID3D11RenderTargetView* sun_trans_extra[sun_slices_wanted - sun_slices_stock] = {};    // RT 9 slices 6..11
+		ID3D11RenderTargetView* sun_trans_retired[sun_slices_wanted - sun_slices_stock] = {};  // released one tick later
 		void* sun_trans_seen_v0 = nullptr;
+
+		// R_InitRenderTargetsPlatform(configs, count, allocator, flag), the one reader of
+		// R_InitRenderTargets' descriptor table: RT 5 and RT 9 are created with 12
+		// slices, every other target as the table says.
+		void init_rt_platform_stub(uint8_t* configs, const int count, void* allocator, const bool flag)
+		{
+			for (int i = 0; i < count; ++i)
+			{
+				auto* c = configs + static_cast<size_t>(i) * rt_config_stride;
+				const auto id = *reinterpret_cast<const uint16_t*>(c);
+				auto* slices = reinterpret_cast<uint32_t*>(c + rt_config_slices);
+				if ((id == sun_depth_rt || id == sun_trans_rt) && *slices == sun_slices_stock)
+				{
+					*slices = sun_slices_wanted;
+				}
+			}
+			using init_rt_platform_t = void (*)(uint8_t*, int, void*, bool);
+			reinterpret_cast<init_rt_platform_t>(base() + init_rt_platform_rva)(configs, count, allocator, flag);
+		}
+
+		// The setter's view-set lookup. The setter reads only the colour slot
+		// min(slice, 7) and the depth-array pointer at +0x40 of the set, then overwrites
+		// rax; so for RT 9 slices 6..11 it gets a per-thread copy of the set whose slot
+		// holds the sidecar view. Without a sidecar it gets the stock set.
+		uint64_t* setter_view_set_stub(void* state, const uint16_t rt, const uint32_t slice)
+		{
+			using view_set_t = uint64_t* (*)(void*, uint16_t);
+			auto* set = reinterpret_cast<view_set_t>(base() + rt_view_set_rva)(state, rt);
+			if (rt != sun_trans_rt || slice < sun_slices_stock || slice >= sun_slices_wanted)
+			{
+				return set;
+			}
+			auto* extra = sun_trans_extra[slice - sun_slices_stock];
+			if (!extra)
+			{
+				return set;
+			}
+			thread_local uint64_t shadow[9];   // 8 inline colour views + the depth-array pointer
+			std::memcpy(shadow, set, sizeof(shadow));
+			shadow[slice < 7 ? slice : 7] = reinterpret_cast<uint64_t>(extra);
+			return shadow;
+		}
 
 		bool grow_sun_shadow_slices()
 		{
@@ -44,61 +90,29 @@
 			};
 			if (!matches(sun_desc_rt5_rva, sun_desc_rt5_stock, sizeof(sun_desc_rt5_stock))
 				|| !matches(sun_desc_rt9_rva, sun_desc_rt9_stock, sizeof(sun_desc_rt9_stock))
+				|| !matches(init_rt_platform_call_rva, init_rt_platform_call_stock, sizeof(init_rt_platform_call_stock))
 				|| !matches(sun_view_check_rva, sun_view_check_stock, sizeof(sun_view_check_stock))
 				|| !matches(sun_view_loop_rva, sun_view_loop_stock, sizeof(sun_view_loop_stock))
-				|| !matches(sun_setter_rva, sun_setter_stock, sizeof(sun_setter_stock))
+				|| !matches(sun_setter_premise_rva, sun_setter_premise, sizeof(sun_setter_premise))
 				|| !matches(sun_clear_rva, sun_clear_stock, sizeof(sun_clear_stock)))
 			{
 				note("[splitscreen] sun shadow 12 slices: NOT applied - bytes differ\n");
 				return false;
 			}
-			auto* cave = static_cast<uint8_t*>(allocate_near_module(0x180));
+			auto* cave = static_cast<uint8_t*>(allocate_near_module(0x80));
 			if (!cave)
 			{
 				note("[splitscreen] sun shadow 12 slices: NOT applied - allocation failed\n");
 				return false;
 			}
-			const uint8_t n = static_cast<uint8_t>(sun_slices_wanted);
-			// +0x00: mov qword [rbp+0xD04], 12 ; ret      (RT 5 slices, colorFormat 0)
-			const uint8_t c_rt5[] = {0x48, 0xC7, 0x85, 0x04, 0x0D, 0x00, 0x00, n, 0x00, 0x00, 0x00, 0xC3};
-			// +0x10: mov dword [rbp+0xD5C], 12 ; ret      (RT 9 slices)
-			const uint8_t c_rt9[] = {0xC7, 0x85, 0x5C, 0x0D, 0x00, 0x00, n, 0x00, 0x00, 0x00, 0xC3};
-			// +0x20: movzx eax,[rsi+0xA86] ; cmp eax,6 ; jbe +5 ; mov eax,6 ; ret
+			// Two picks have no call to hook, so they stay machine code:
+			// +0x00 the colour-view loop cap (the bound is reloaded from the record after
+			// a 4-byte indirect call): movzx eax,[rsi+0xA86] ; cmp eax,6 ; jbe +5 ; mov eax,6 ; ret
 			const uint8_t c_loop[] = {0x0F, 0xB7, 0x86, 0x86, 0x0A, 0x00, 0x00, 0x83, 0xF8, 0x06, 0x76, 0x05,
 			                          0xB8, 0x06, 0x00, 0x00, 0x00, 0xC3};
-			// +0x40: the setter's colour pick.
-			std::vector<uint8_t> s;
-			s.insert(s.end(), {0x83, 0xFB, 0x06, 0x7C, 0x00});             // cmp ebx,6 ; jl orig
-			const size_t j1 = s.size() - 1;
-			s.insert(s.end(), {0x83, 0xFB, 0x0C, 0x73, 0x00});             // cmp ebx,12 ; jae orig
-			const size_t j2 = s.size() - 1;
-			s.insert(s.end(), {0x66, 0x83, 0xFE, static_cast<uint8_t>(sun_trans_rt), 0x75, 0x00});   // cmp si,9 ; jne orig
-			const size_t j3 = s.size() - 1;
-			s.insert(s.end(), {0x49, 0xB8});                                 // mov r8, &sun_trans_extra
-			{
-				const auto a = reinterpret_cast<uint64_t>(&sun_trans_extra[0]);
-				const auto* p = reinterpret_cast<const uint8_t*>(&a);
-				s.insert(s.end(), p, p + 8);
-			}
-			s.insert(s.end(), {0x4D, 0x8B, 0x44, 0xD8, 0xD0});             // mov r8,[r8+rbx*8-0x30]
-			s.insert(s.end(), {0x4D, 0x85, 0xC0, 0x75, 0x00});             // test r8,r8 ; jnz done
-			const size_t j4 = s.size() - 1;
-			const size_t orig = s.size();
-			s.insert(s.end(), sun_setter_stock, sun_setter_stock + sizeof(sun_setter_stock));
-			const size_t done = s.size();
-			s.insert(s.end(), {0x0F, 0xB7, 0xD6, 0x33, 0xC9});             // movzx edx,si ; xor ecx,ecx
-			s.insert(s.end(), {0xFF, 0x25, 0x00, 0x00, 0x00, 0x00});       // jmp [rip+0]
-			{
-				const uint64_t back = b + sun_setter_rva + sizeof(sun_setter_stock);
-				const auto* p = reinterpret_cast<const uint8_t*>(&back);
-				s.insert(s.end(), p, p + 8);
-			}
-			s[j1] = static_cast<uint8_t>(orig - (j1 + 1));
-			s[j2] = static_cast<uint8_t>(orig - (j2 + 1));
-			s[j3] = static_cast<uint8_t>(orig - (j3 + 1));
-			s[j4] = static_cast<uint8_t>(done - (j4 + 1));
-			// +0x100: the clear's colour pick (rbp = view set, rbx = cmd state):
-			// sidecar for RT 9 slices 6..11, otherwise inline[slice], clamped.
+			// +0x20 the clear's colour pick (rbp = view set, also walked as the depth
+			// array, rbx = cmd state): sidecar for RT 9 slices 6..11, else inline[slice],
+			// clamped.
 			std::vector<uint8_t> k;
 			k.insert(k.end(), {0x8B, 0x93, 0xC8, 0x80, 0x00, 0x00});       // mov edx,[rbx+0x80C8]
 			k.insert(k.end(), {0x83, 0xFA, 0x06, 0x7C, 0x00});             // cmp edx,6 ; jl orig
@@ -133,64 +147,56 @@
 			k[k2] = static_cast<uint8_t>(kclamp - (k2 + 1));
 			k[k3] = static_cast<uint8_t>(kclamp - (k3 + 1));
 			k[k4] = static_cast<uint8_t>(kdone - (k4 + 1));
-			if (0x40 + s.size() > 0x100 || 0x100 + k.size() > 0x180
-				|| !write_bytes(cave + 0x00, c_rt5, sizeof(c_rt5))
-				|| !write_bytes(cave + 0x10, c_rt9, sizeof(c_rt9))
-				|| !write_bytes(cave + 0x20, c_loop, sizeof(c_loop))
-				|| !write_bytes(cave + 0x40, s.data(), s.size())
-				|| !write_bytes(cave + 0x100, k.data(), k.size()))
+			if (0x20 + k.size() > 0x80
+				|| !write_bytes(cave + 0x00, c_loop, sizeof(c_loop))
+				|| !write_bytes(cave + 0x20, k.data(), k.size()))
 			{
 				note("[splitscreen] sun shadow 12 slices: NOT applied - cave write failed\n");
 				return false;
 			}
 
-			// All-or-nothing. Setter first: without sidecar views it acts as stock.
-			const auto call_site = [&](uint32_t rva, size_t len, size_t cave_off, uint8_t* out)
+			// The site bytes, all prepared before the first write.
+			const auto* setter_call_stock = sun_setter_premise + (sun_setter_call_rva - sun_setter_premise_rva);
+			uint8_t p_setter[5];
+			uint8_t p_rt[sizeof(init_rt_platform_call_stock)];
+			if (!call_site_bytes(sun_setter_call_rva, sizeof(p_setter),
+			                     reinterpret_cast<const void*>(&setter_view_set_stub), p_setter)
+				|| !call_site_bytes(init_rt_platform_call_rva, sizeof(p_rt),
+				                    reinterpret_cast<const void*>(&init_rt_platform_stub), p_rt))
+			{
+				note("[splitscreen] sun shadow 12 slices: NOT applied - relay allocation failed\n");
+				return false;
+			}
+			const auto jump_or_call = [&](uint8_t op, uint32_t rva, size_t len, size_t cave_off, uint8_t* out)
 			{
 				std::memset(out, 0x90, len);
-				out[0] = 0xE8;
+				out[0] = op;
 				const auto rel = static_cast<int32_t>(reinterpret_cast<size_t>(cave + cave_off) - (b + rva + 5));
 				std::memcpy(out + 1, &rel, sizeof(rel));
 			};
-			uint8_t p_setter[sizeof(sun_setter_stock)];
-			std::memset(p_setter, 0x90, sizeof(p_setter));
-			p_setter[0] = 0xE9;
-			{
-				const auto rel = static_cast<int32_t>(reinterpret_cast<size_t>(cave + 0x40) - (b + sun_setter_rva + 5));
-				std::memcpy(p_setter + 1, &rel, sizeof(rel));
-			}
 			uint8_t p_clear[sizeof(sun_clear_stock)];
-			std::memset(p_clear, 0x90, sizeof(p_clear));
-			p_clear[0] = 0xE9;
-			{
-				const auto rel = static_cast<int32_t>(reinterpret_cast<size_t>(cave + 0x100) - (b + sun_clear_rva + 5));
-				std::memcpy(p_clear + 1, &rel, sizeof(rel));
-			}
+			jump_or_call(0xE9, sun_clear_rva, sizeof(p_clear), 0x20, p_clear);
 			uint8_t p_loop[sizeof(sun_view_loop_stock)];
-			call_site(sun_view_loop_rva, sizeof(p_loop), 0x20, p_loop);
+			jump_or_call(0xE8, sun_view_loop_rva, sizeof(p_loop), 0x00, p_loop);
 			const uint8_t p_check[] = {0x66, 0x83, 0xF8, static_cast<uint8_t>(sun_slices_wanted - 2)};
-			uint8_t p_rt5[sizeof(sun_desc_rt5_stock)];
-			call_site(sun_desc_rt5_rva, sizeof(p_rt5), 0x00, p_rt5);
-			uint8_t p_rt9[sizeof(sun_desc_rt9_stock)];
-			call_site(sun_desc_rt9_rva, sizeof(p_rt9), 0x10, p_rt9);
 
+			// All-or-nothing. Setter first: without sidecar views it acts as stock.
 			struct w { uint32_t rva; const uint8_t* stock; const uint8_t* patch; size_t n; };
 			const w writes[] = {
-				{sun_setter_rva, sun_setter_stock, p_setter, sizeof(p_setter)},
+				{sun_setter_call_rva, setter_call_stock, p_setter, sizeof(p_setter)},
 				{sun_clear_rva, sun_clear_stock, p_clear, sizeof(p_clear)},
 				{sun_view_loop_rva, sun_view_loop_stock, p_loop, sizeof(p_loop)},
 				{sun_view_check_rva, sun_view_check_stock, p_check, sizeof(p_check)},
-				{sun_desc_rt5_rva, sun_desc_rt5_stock, p_rt5, sizeof(p_rt5)},
-				{sun_desc_rt9_rva, sun_desc_rt9_stock, p_rt9, sizeof(p_rt9)},
+				{init_rt_platform_call_rva, init_rt_platform_call_stock, p_rt, sizeof(p_rt)},
 			};
 			size_t done_w = 0;
 			for (const auto& x : writes)
 			{
 				if (!write_bytes(reinterpret_cast<void*>(b + x.rva), x.patch, x.n))
 				{
-					for (size_t k = 0; k < done_w; ++k)
+					for (size_t i = 0; i < done_w; ++i)
 					{
-						write_bytes(reinterpret_cast<void*>(b + writes[k].rva), writes[k].stock, writes[k].n);
+						write_bytes(reinterpret_cast<void*>(b + writes[i].rva), writes[i].stock, writes[i].n);
 					}
 					note("[splitscreen] sun shadow 12 slices: NOT applied - a site write failed (rolled back)\n");
 					return false;
@@ -277,6 +283,20 @@
 			}
 		}
 
+		// CL_SplitscreenPlayerCount as the sun-shadow view setup sees it, capped at the
+		// slots that have slices: its slot min(max(n, 1) - 1, lc) becomes
+		// min(max(n, 1) - 1, sun_max_slot, lc). It answers what the game's own call
+		// reaches - the detour, else the stock dvar read; never the original, whose dvar
+		// getter has an Arxan caller check.
+		int splitscreen_player_count_stub();   // 14_player4_fixes.inl
+		int stock_splitscreen_player_count();  // 14_player4_fixes.inl
+
+		int sun_slot_player_count()
+		{
+			const int n = player_count_detoured ? splitscreen_player_count_stub() : stock_splitscreen_player_count();
+			return std::min(n, static_cast<int>(sun_max_slot) + 1);
+		}
+
 		void clamp_sun_shadow_slot()
 		{
 			if (sun_slot_clamped)
@@ -286,18 +306,18 @@
 			const auto b = base();
 			const auto* slices_at = reinterpret_cast<const uint8_t*>(b + sun_slices_rva);
 			const auto* parts_at = reinterpret_cast<const uint8_t*>(b + sun_partitions_rva);
-			auto* site = reinterpret_cast<uint8_t*>(b + sun_slot_site_rva);
+			const auto* premise = reinterpret_cast<const uint8_t*>(b + sun_slot_count_call_rva);
 			if (!readable(slices_at, 6) || slices_at[0] != 0x41 || slices_at[1] != 0xB8
 				|| !readable(parts_at, 3) || parts_at[0] != 0x83 || parts_at[1] != 0xFB
-				|| !readable(site, sizeof(sun_slot_site_expected))
-				|| std::memcmp(site, sun_slot_site_expected, sizeof(sun_slot_site_expected)) != 0)
+				|| !readable(premise, sizeof(sun_slot_premise))
+				|| std::memcmp(premise, sun_slot_premise, sizeof(sun_slot_premise)) != 0)
 			{
 				note("[splitscreen] sun shadow slot: bytes differ - not clamped\n");
 				return;
 			}
 			uint32_t slices = 0;
 			std::memcpy(&slices, slices_at + 2, sizeof(slices));
-			// grow_sun_shadow_slices() leaves that immediate at 6 and stores 12 itself.
+			// grow_sun_shadow_slices() leaves that immediate at 6 and makes it 12 itself.
 			if (sun_slices_grown)
 			{
 				slices = sun_slices_wanted;
@@ -310,42 +330,33 @@
 				     slices, partitions);
 				return;
 			}
-			const uint32_t max_slot = slices / partitions - 1;
+			sun_max_slot = slices / partitions - 1;
+			sun_slot_clamped = call_site_to(sun_slot_count_call_rva, 5,
+			                                reinterpret_cast<const void*>(&sun_slot_player_count));
+		}
 
-			auto* cave = static_cast<uint8_t*>(allocate_near_module(0x40));
-			if (!cave)
-			{
-				return;
-			}
-			std::vector<uint8_t> c(sun_slot_site_expected, sun_slot_site_expected + 12);
-			c.insert(c.end(), {0x83, 0xF9, static_cast<uint8_t>(max_slot)}); // cmp ecx, max_slot
-			c.insert(c.end(), {0x7E, 0x05});                                 // jle +5
-			c.insert(c.end(), {0xB9});                                       // mov ecx, max_slot
-			{
-				const auto* p = reinterpret_cast<const uint8_t*>(&max_slot);
-				c.insert(c.end(), p, p + 4);
-			}
-			c.insert(c.end(), {0x89, 0x4D, 0x14});                           // mov [rbp+0x14], ecx
-			c.insert(c.end(), {0xFF, 0x25, 0x00, 0x00, 0x00, 0x00});         // jmp [rip+0]
-			const uint64_t back = b + sun_slot_site_rva + sizeof(sun_slot_site_expected);
-			const auto* back_bytes = reinterpret_cast<const uint8_t*>(&back);
-			c.insert(c.end(), back_bytes, back_bytes + 8);
-			if (!write_bytes(cave, c.data(), c.size()))
-			{
-				return;
-			}
+		// CL_LocalClient_GetActiveCount: PS4 (0x1516A20) sums IsActive(i) for i < 4, the PC
+		// unrolls two elements. Its replacement adds elements 2/3 under the IsActive rule
+		// (i < cl_maxLocalClients). It counts active flags, not seats: seats stay set in the
+		// lobby after GAME OVER, which kept three panes open. Entered through
+		// preserving_thunk; the original is never called.
+		utils::hook::detour pane_count_hook;
 
-			uint8_t patch[sizeof(sun_slot_site_expected)];
-			std::memset(patch, 0x90, sizeof(patch));
-			patch[0] = 0xE9;
-			const auto rel = static_cast<int32_t>(
-				reinterpret_cast<size_t>(cave) - (b + sun_slot_site_rva + 5));
-			std::memcpy(patch + 1, &rel, sizeof(rel));
-			if (!write_bytes(site, patch, sizeof(patch)))
+		uint32_t active_count_for_panes()
+		{
+			const auto b = base();
+			const auto* ui = reinterpret_cast<const volatile uint8_t*>(b + uia_base_rva);
+			const auto max_local = *reinterpret_cast<const volatile int32_t*>(b + cl_max_local_clients_rva);
+			uint32_t count = 0;
+			for (int lc = 0; lc < 4; ++lc)
 			{
-				return;
+				if (lc >= 2 && max_local <= lc)
+				{
+					continue;
+				}
+				count += *reinterpret_cast<const volatile uint32_t*>(ui + lc * uia_stride) & 1;
 			}
-			sun_slot_clamped = true;
+			return count;
 		}
 
 		bool install_pane_counts_and_bounds()
@@ -354,10 +365,10 @@
 			{
 				return true;
 			}
-			// clientUIActives cannot move, so its IsActive gate is caved. Every other
+			// clientUIActives cannot move, so its IsActive gate is replaced. Every other
 			// array the pane path indexes at 2 must be relocated first, or the wider
 			// bounds corrupt foreign globals.
-			if (!isactive_caved || !view_params_relocated
+			if (!isactive_hooked || !view_params_relocated
 				|| !scrplace_relocated || !perclient54_relocated
 				|| !aaglob_relocated)
 			{
@@ -381,73 +392,9 @@
 				}
 			}
 
-			auto* cave = static_cast<uint8_t*>(allocate_near_module(0x80));
-			if (!cave)
-			{
-				return false;
-			}
-			const auto cave_addr = reinterpret_cast<size_t>(cave);
-			std::vector<uint8_t> c;
-			const auto rip32 = [&](const size_t tgt)
-			{
-				const auto v = static_cast<int32_t>(tgt - (cave_addr + c.size() + 4));
-				const auto* p = reinterpret_cast<const uint8_t*>(&v);
-				c.insert(c.end(), p, p + 4);
-			};
-			// CL_LocalClient_GetActiveCount: PS4 (0x1516A20) sums IsActive(i) for
-			// i < 4, the PC unrolls two elements. The cave adds elements 2/3 under the
-			// IsActive cave's rule (i < cl_maxLocalClients). It counts active flags,
-			// not seats: seats stay set in the lobby after GAME OVER, which kept three
-			// panes open.
-			c.insert(c.end(), {0x33, 0xC0});                   // xor eax, eax
-			c.insert(c.end(), {0x48, 0x8D, 0x0D});             // lea rcx, [clientUIActives]
-			rip32(b + uia_base_rva);
-			for (uint32_t i = 0; i < 4; ++i)
-			{
-				const uint32_t off = i * uia_stride;
-				if (i >= 2)
-				{
-					c.insert(c.end(), {0x83, 0x3D});           // cmp dword [cl_maxLocalClients], i
-					{
-						const auto v = static_cast<int32_t>((b + cl_max_local_clients_rva)
-							- (cave_addr + c.size() + 4 + 1));
-						const auto* p = reinterpret_cast<const uint8_t*>(&v);
-						c.insert(c.end(), p, p + 4);
-					}
-					c.insert(c.end(), {static_cast<uint8_t>(i)});
-					c.insert(c.end(), {0x7E, 0x0B});           // jle next (skips the 11 bytes below)
-				}
-				if (off == 0)
-				{
-					c.insert(c.end(), {0x8B, 0x11});           // mov edx, [rcx]
-				}
-				else
-				{
-					c.insert(c.end(), {0x8B, 0x91});           // mov edx, [rcx+off]
-					const auto* p = reinterpret_cast<const uint8_t*>(&off);
-					c.insert(c.end(), p, p + 4);
-				}
-				c.insert(c.end(), {0x83, 0xE2, 0x01});         // and edx, 1
-				c.insert(c.end(), {0x03, 0xC2});               // add eax, edx
-			}
-			c.insert(c.end(), {0xC3});                          // ret
-			if (c.size() > 0x80)
-			{
-				note("[splitscreen] pane count: cave too small (%zu)\n", c.size());
-				return false;
-			}
-			if (!write_bytes(cave, c.data(), c.size()))
-			{
-				return false;
-			}
-
-			uint8_t patch[5] = {0xE9};
-			const auto rel = static_cast<int32_t>(
-				cave_addr - (b + get_active_count_rva + 5));
-			std::memcpy(patch + 1, &rel, sizeof(rel));
-			uint8_t old_head[5] = {};
-			std::memcpy(old_head, fn, sizeof(old_head));
-			if (!write_bytes(fn, patch, sizeof(patch)))
+			auto* thunk = preserving_thunk(reinterpret_cast<const void*>(&active_count_for_panes));
+			if (!thunk || !hook_if_stock(pane_count_hook, get_active_count_rva, get_active_count_expected,
+			                             static_cast<void*>(thunk)))
 			{
 				return false;
 			}
@@ -465,7 +412,7 @@
 							b + pane_bounds[i].rva + pane_bounds[i].offset);
 						write_bytes(undo, &pane_bounds[i].from, 1);
 					}
-					write_bytes(fn, old_head, sizeof(old_head));
+					pane_count_hook.clear();
 					return false;
 				}
 				++applied;

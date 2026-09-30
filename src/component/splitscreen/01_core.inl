@@ -159,6 +159,91 @@
 			return nullptr;
 		}
 
+		// Entry thunk for a C++ replacement of a game function whose callers may rely on
+		// registers that function never touches (whole-program optimisation can give an
+		// internal function a custom convention; IsActive clobbers only rax and rcx). It
+		// saves rcx, rdx, r8-r11 and xmm0-5, calls `fn` with the arguments unchanged and an
+		// aligned stack, restores them and returns rax. Entered like the replaced function
+		// (rsp = 8 mod 16): 6 pushes and 0x88 bytes leave rsp = 0 mod 16 at the call, with
+		// the 0x20 home area below the xmm save slots.
+		void* preserving_thunk(const void* fn)
+		{
+			static constexpr uint8_t head[] = {
+				0x51, 0x52, 0x41, 0x50, 0x41, 0x51, 0x41, 0x52, 0x41, 0x53,   // push rcx, rdx, r8, r9, r10, r11
+				0x48, 0x81, 0xEC, 0x88, 0x00, 0x00, 0x00,                     // sub rsp, 0x88
+				0x0F, 0x11, 0x44, 0x24, 0x20,                                 // movups [rsp+0x20], xmm0
+				0x0F, 0x11, 0x4C, 0x24, 0x30,                                 // movups [rsp+0x30], xmm1
+				0x0F, 0x11, 0x54, 0x24, 0x40,                                 // movups [rsp+0x40], xmm2
+				0x0F, 0x11, 0x5C, 0x24, 0x50,                                 // movups [rsp+0x50], xmm3
+				0x0F, 0x11, 0x64, 0x24, 0x60,                                 // movups [rsp+0x60], xmm4
+				0x0F, 0x11, 0x6C, 0x24, 0x70,                                 // movups [rsp+0x70], xmm5
+				0x48, 0xB8,                                                   // mov rax, fn (imm64 follows)
+			};
+			static constexpr uint8_t tail[] = {
+				0xFF, 0xD0,                                                   // call rax
+				0x0F, 0x10, 0x44, 0x24, 0x20,                                 // movups xmm0, [rsp+0x20]
+				0x0F, 0x10, 0x4C, 0x24, 0x30,                                 // movups xmm1, [rsp+0x30]
+				0x0F, 0x10, 0x54, 0x24, 0x40,                                 // movups xmm2, [rsp+0x40]
+				0x0F, 0x10, 0x5C, 0x24, 0x50,                                 // movups xmm3, [rsp+0x50]
+				0x0F, 0x10, 0x64, 0x24, 0x60,                                 // movups xmm4, [rsp+0x60]
+				0x0F, 0x10, 0x6C, 0x24, 0x70,                                 // movups xmm5, [rsp+0x70]
+				0x48, 0x81, 0xC4, 0x88, 0x00, 0x00, 0x00,                     // add rsp, 0x88
+				0x41, 0x5B, 0x41, 0x5A, 0x41, 0x59, 0x41, 0x58, 0x5A, 0x59,   // pop r11, r10, r9, r8, rdx, rcx
+				0xC3,                                                         // ret
+			};
+			auto* code = static_cast<uint8_t*>(allocate_near_module(sizeof(head) + 8 + sizeof(tail)));
+			if (!code)
+			{
+				return nullptr;
+			}
+			const auto target = reinterpret_cast<uint64_t>(fn);
+			std::memcpy(code, head, sizeof(head));
+			std::memcpy(code + sizeof(head), &target, sizeof(target));
+			std::memcpy(code + sizeof(head) + 8, tail, sizeof(tail));
+			return code;
+		}
+
+		// `jmp [rip+0]; dq target` near the image: lets a rel32 call or jmp in game code
+		// reach a function of this DLL wherever the DLL is loaded.
+		void* near_relay(const void* target)
+		{
+			auto* relay = static_cast<uint8_t*>(allocate_near_module(14));
+			if (!relay)
+			{
+				return nullptr;
+			}
+			uint8_t jump[14] = {0xFF, 0x25, 0x00, 0x00, 0x00, 0x00};
+			const auto to = reinterpret_cast<uint64_t>(target);
+			std::memcpy(jump + 6, &to, sizeof(to));
+			std::memcpy(relay, jump, sizeof(jump));
+			return relay;
+		}
+
+		// The `len` bytes that make the game site at `rva` a `call fn` (through a near
+		// relay) plus NOPs, for a caller that writes them itself (e.g. all-or-nothing).
+		bool call_site_bytes(const size_t rva, const size_t len, const void* fn, uint8_t* out)
+		{
+			auto* relay = len >= 5 ? near_relay(fn) : nullptr;
+			if (!relay)
+			{
+				return false;
+			}
+			std::memset(out, 0x90, len);
+			out[0] = 0xE8;
+			const auto rel = static_cast<int32_t>(reinterpret_cast<size_t>(relay) - (base() + rva + 5));
+			std::memcpy(out + 1, &rel, sizeof(rel));
+			return true;
+		}
+
+		// Replaces the `len` game bytes at `rva` with `call fn` and NOPs, in one write.
+		// The caller has verified those bytes.
+		bool call_site_to(const size_t rva, const size_t len, const void* fn)
+		{
+			uint8_t patch[32];
+			return len <= sizeof(patch) && call_site_bytes(rva, len, fn, patch)
+				&& write_bytes(reinterpret_cast<void*>(base() + rva), patch, len);
+		}
+
 		// Never call printf from here: it takes post_unpack down. note() formats
 		// into a buffer and goes only to the component's trace file, so a patch
 		// that stands down on a new build still says so. Diagnostic build only.
@@ -182,6 +267,22 @@
 			}
 			trace_text(buf);
 #endif
+		}
+
+		// Detours the engine function at `rva` if it still starts with `prologue`;
+		// otherwise writes nothing and returns false.
+		template <size_t N, typename F>
+		bool hook_if_stock(utils::hook::detour& hook, const size_t rva, const uint8_t (&prologue)[N],
+		                   F* stub)
+		{
+			const auto place = base() + rva;
+			if (std::memcmp(reinterpret_cast<const void*>(place), prologue, N) != 0)
+			{
+				note("[splitscreen] 0x%zX: prologue differs - not hooked\n", rva);
+				return false;
+			}
+			hook.create(reinterpret_cast<void*>(place), reinterpret_cast<void*>(stub));
+			return true;
 		}
 
 		// Where each table landed, filled by relocate(). The client-object table

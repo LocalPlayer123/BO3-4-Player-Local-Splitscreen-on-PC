@@ -402,115 +402,36 @@
 		// Active count fix ("only two screens"). PS4 SetAllUsedActive sets
 		// splitscreen_playerCount from CL_LocalClient_GetActiveCount (0x1516A20,
 		// i < 4); the PC inlines it unrolled to two elements, so the dvar and the
-		// allocator never exceed 2. These 26 bytes jump to a cave that counts
-		// Com_LocalClient_IsBeingUsed(lc) for lc = 0..3 and returns into the
-		// engine's own Dvar_SetInt. The activation loop bound stays at 2: widening
-		// it would write into clientUIActives[2].
+		// allocator never exceed 2. These 26 bytes become a call of active_count_stub,
+		// which counts Com_LocalClient_IsBeingUsed(lc) for lc = 0..3; its eax flows into
+		// the engine's own Dvar_SetInt (which has an Arxan caller check, so that call stays
+		// the game's). Registers other than eax are dead at the site. The activation loop
+		// bound stays at 2: widening it would write into clientUIActives[2].
+		uint32_t active_count_stub()
+		{
+			const auto used = reinterpret_cast<bool (*)(int)>(base() + is_being_used_rva);
+			uint32_t count = 0;
+			for (int lc = 0; lc < 4; ++lc)
+			{
+				if (used(lc))
+				{
+					++count;
+				}
+			}
+			return count;
+		}
 
 		bool install_active_count_fix()
 		{
 			auto* site = reinterpret_cast<uint8_t*>(base() + active_count_rva);
 			if (std::memcmp(site, active_count_bytes, sizeof(active_count_bytes)) != 0)
 			{
-				note("[splitscreen] active count: unexpected bytes at 0x%zX\n",
-				     active_count_rva);
+				note("[splitscreen] active count: unexpected bytes at 0x%zX\n", active_count_rva);
 				return false;
 			}
-
-			auto* cave = static_cast<uint8_t*>(allocate_near_module(0x100));
-			if (!cave)
-			{
-				return false;
-			}
-
-			auto* slots = cave + 0x80; // +0 index, +4 count, +8 executions, +12 last
-			const auto cave_addr = reinterpret_cast<size_t>(cave);
-
-			std::vector<uint8_t> c;
-			// `extra` = bytes after the displacement in the same instruction (an
-			// immediate); getting it wrong aims the access off by that much.
-			const auto rip32 = [&](const size_t target, const size_t extra = 0)
-			{
-				const auto value = static_cast<int32_t>(
-					target - (cave_addr + c.size() + 4 + extra));
-				const auto* p = reinterpret_cast<const uint8_t*>(&value);
-				c.insert(c.end(), p, p + 4);
-			};
-
-			const auto slot = [&](const size_t i) { return reinterpret_cast<size_t>(slots + i); };
-
-			// inc dword [executions]
-			c.insert(c.end(), {0xFF, 0x05});
-			rip32(slot(8));
-			// mov dword [index], 0
-			c.insert(c.end(), {0xC7, 0x05});
-			rip32(slot(0), 4);
-			c.insert(c.end(), {0x00, 0x00, 0x00, 0x00});
-			// mov dword [count], 0
-			c.insert(c.end(), {0xC7, 0x05});
-			rip32(slot(4), 4);
-			c.insert(c.end(), {0x00, 0x00, 0x00, 0x00});
-
-			const auto loop_start = c.size();
-			// mov ecx, dword [index]
-			c.insert(c.end(), {0x8B, 0x0D});
-			rip32(slot(0));
-			// call Com_LocalClient_IsBeingUsed
-			c.insert(c.end(), {0xE8});
-			rip32(base() + is_being_used_rva);
-			// test al, al ; je +6
-			c.insert(c.end(), {0x84, 0xC0});
-			c.insert(c.end(), {0x74, 0x06});
-			// inc dword [count]            (6 bytes - the je above skips exactly this)
-			c.insert(c.end(), {0xFF, 0x05});
-			rip32(slot(4));
-			// inc dword [index]
-			c.insert(c.end(), {0xFF, 0x05});
-			rip32(slot(0));
-			// cmp dword [index], 4
-			c.insert(c.end(), {0x83, 0x3D});
-			rip32(slot(0), 1);
-			c.insert(c.end(), {0x04});
-			// jl loop
-			c.insert(c.end(), {0x0F, 0x8C});
-			{
-				const auto target = cave_addr + loop_start;
-				const auto value = static_cast<int32_t>(target - (cave_addr + c.size() + 4));
-				const auto* p = reinterpret_cast<const uint8_t*>(&value);
-				c.insert(c.end(), p, p + 4);
-			}
-			// mov eax, dword [count]   -> the value the engine then uses
-			c.insert(c.end(), {0x8B, 0x05});
-			rip32(slot(4));
-			// mov dword [last], eax
-			c.insert(c.end(), {0x89, 0x05});
-			rip32(slot(12));
-			// jmp back, past the 26 replaced bytes
-			c.insert(c.end(), {0xE9});
-			rip32(base() + active_count_rva + sizeof(active_count_bytes));
-
-			if (c.size() > 0x80)
-			{
-				note("[splitscreen] active count: cave too small (%zu)\n", c.size());
-				return false;
-			}
-
-			std::memcpy(cave, c.data(), c.size());
-			std::memset(slots, 0, 0x30);
-
-			uint8_t patch[sizeof(active_count_bytes)];
-			std::memset(patch, 0x90, sizeof(patch)); // nop the remainder
-			patch[0] = 0xE9;
-			const auto rel = static_cast<int32_t>(cave_addr - (base() + active_count_rva + 5));
-			std::memcpy(patch + 1, &rel, sizeof(rel));
-
-			if (!write_bytes(site, patch, sizeof(patch)))
-			{
-				return false;
-			}
-
-			active_count_slots = slots;
-			return true;
+			active_count_installed = call_site_to(active_count_rva, sizeof(active_count_bytes),
+			                                      reinterpret_cast<const void*>(&active_count_stub));
+			return active_count_installed;
 		}
 
 		bool install_stride_fix()

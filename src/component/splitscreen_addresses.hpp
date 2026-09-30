@@ -982,19 +982,12 @@ namespace splitscreen
 		uint8_t old_value;
 		uint8_t new_value;
 	};
-	// ---- Lens flares: disabled for local clients >= 2 ------------------------
-	// PS4 FxLensFlaresManager has eight per-client arrays of 4; on the PC they
-	// are arrays of 2 inside one static object, so lc 2 hits the neighbouring
-	// members. The object cannot grow (the fix would re-lay the whole class),
-	// so for now clients >= 2 get no lens flares. Each entry point below takes
-	// lc in edx and gets a cave: `cmp edx,2 / jl original`, else return
-	// (SpawnInstance: -1, its own failure value).
+	// An FxLensFlaresManager entry point and its stock first bytes (gate_lensflares_for_extra_clients).
 	struct lc_gate
 	{
 		uint32_t rva;
 		uint8_t prologue[9];
 		uint8_t len;
-		bool returns_minus_one;
 	};
 
 	// from splitscreen/12_relocations_ui.inl
@@ -2948,11 +2941,11 @@ namespace splitscreen
 		{0x01C8F426, 0x08, 0x10},
 	};
 	inline constexpr lc_gate lensflare_gates[] = {
-		{0x014BA810, {0x89, 0x54, 0x24, 0x10, 0x48, 0x89, 0x4C, 0x24, 0x08}, 9, false}, // per-client pool setup
-		{0x014BAC40, {0x40, 0x55, 0x56, 0x57, 0x41, 0x54}, 6, false}, // SetPersistentData
-		{0x014BB9B0, {0x48, 0x8B, 0xC4, 0x57, 0x41, 0x54}, 6, false}, // per-client update
-		{0x014BBD40, {0x48, 0x89, 0x4C, 0x24, 0x08}, 5, true},        // SpawnInstance
-		{0x014BC9E0, {0x48, 0x8B, 0xC4, 0x55, 0x53}, 5, false},       // per-view render
+		{0x014BA810, {0x89, 0x54, 0x24, 0x10, 0x48, 0x89, 0x4C, 0x24, 0x08}, 9}, // per-client pool setup
+		{0x014BAC40, {0x40, 0x55, 0x56, 0x57, 0x41, 0x54}, 6},  // SetPersistentData
+		{0x014BB9B0, {0x48, 0x8B, 0xC4, 0x57, 0x41, 0x54}, 6},  // per-client update
+		{0x014BBD40, {0x48, 0x89, 0x4C, 0x24, 0x08}, 5},        // SpawnInstance
+		{0x014BC9E0, {0x48, 0x8B, 0xC4, 0x55, 0x53}, 5},        // per-view render
 	};
 	inline constexpr uint32_t lensflare_exit_thunk_rva = 0x02EF9840;
 	inline constexpr uint8_t lensflare_exit_thunk_expected[] = {
@@ -3092,12 +3085,31 @@ namespace splitscreen
 
 	// ======== splitscreen/11_sun_shadow.inl ========
 
-	inline constexpr uint32_t sun_slot_site_rva = 0x01D0D920;
-	inline constexpr uint8_t sun_slot_site_expected[] = {
-		0x41, 0x8B, 0x85, 0x98, 0x03, 0x00, 0x00,   // mov eax, [r13+0x398]
-		0x3B, 0xC8,                                 // cmp ecx, eax
-		0x0F, 0x4D, 0xC8,                           // cmovge ecx, eax
-		0x89, 0x4D, 0x14,                           // mov [rbp+0x14], ecx
+	// Sun-shadow view setup 0x01D0D790: slot = min(max(CL_SplitscreenPlayerCount(), 1) - 1,
+	// viewInfo lc [r13+0x398]) (1 - 1 = 0 when dvar 0x0AE166A0 is set). The whole stretch
+	// from the count's call to the slot store is the premise of clamp_sun_shadow_slot().
+	inline constexpr uint32_t sun_slot_count_call_rva = 0x01D0D8DA;   // call CL_SplitscreenPlayerCount
+	inline constexpr uint8_t sun_slot_premise[] = {
+		0xE8, 0xD1, 0x41, 0xAB, 0x00,                     // call 0x027C1AB0
+		0x48, 0x8B, 0x0D, 0xBA, 0x8D, 0x10, 0x09,         // mov rcx, [dvar 0x0AE166A0]
+		0x41, 0xBF, 0x01, 0x00, 0x00, 0x00,               // mov r15d, 1
+		0x8B, 0xD8,                                       // mov ebx, eax
+		0x41, 0x3B, 0xC7,                                 // cmp eax, r15d
+		0x41, 0x0F, 0x4E, 0xDF,                           // cmovle ebx, r15d
+		0xE8, 0xB6, 0x2A, 0x55, 0x00,                     // call Dvar_GetBool 0x022603B0
+		0x41, 0x8D, 0x4F, 0x04,                           // lea ecx, [r15+4]
+		0x84, 0xC0,                                       // test al, al
+		0x41, 0xC7, 0x85, 0x18, 0x1F, 0x00, 0x00, 0x05, 0x00, 0x09, 0x00,   // mov [r13+0x1F18], 0x90005
+		0x41, 0x0F, 0x45, 0xDF,                           // cmovne ebx, r15d
+		0xE8, 0xEC, 0x76, 0xFC, 0xFF,                     // call 0x01CD5000
+		0x8D, 0x4B, 0xFF,                                 // lea ecx, [rbx-1]
+		0x0F, 0xB7, 0xC0,                                 // movzx eax, ax
+		0xC1, 0xE8, 0x05,                                 // shr eax, 5
+		0x89, 0x45, 0x10,                                 // mov [rbp+0x10], eax
+		0x41, 0x8B, 0x85, 0x98, 0x03, 0x00, 0x00,         // mov eax, [r13+0x398]
+		0x3B, 0xC8,                                       // cmp ecx, eax
+		0x0F, 0x4D, 0xC8,                                 // cmovge ecx, eax
+		0x89, 0x4D, 0x14,                                 // mov [rbp+0x14], ecx   the slot
 	};
 	inline constexpr uint32_t sun_slices_rva = 0x01CD12AD;       // mov r8d, <slices>
 	inline constexpr uint32_t sun_partitions_rva = 0x01C6FFFD;   // cmp ebx, <partitions>
@@ -3109,10 +3121,33 @@ namespace splitscreen
 	inline constexpr uint8_t sun_view_check_stock[] = {0x66, 0x83, 0xF8, 0x05};
 	inline constexpr uint32_t sun_view_loop_rva = 0x01CD5494;                            // movzx eax,[rsi+0xA86]
 	inline constexpr uint8_t sun_view_loop_stock[] = {0x0F, 0xB7, 0x86, 0x86, 0x0A, 0x00, 0x00};
-	inline constexpr uint32_t sun_setter_rva = 0x01CF550D;                               // colour index clamp
-	inline constexpr uint8_t sun_setter_stock[] = {
-		0xB9, 0x07, 0x00, 0x00, 0x00, 0x3B, 0xD9, 0x44, 0x8B, 0xCB, 0x0F, 0xB7, 0xD6, 0x44, 0x0F,
-		0x4D, 0xC9, 0x33, 0xC9, 0x45, 0x85, 0xC9, 0x44, 0x0F, 0x4E, 0xC9, 0x4E, 0x8B, 0x04, 0xC8,
+	// R_InitRenderTargets' one use of its descriptor table (rcx = &table, edx = 6 entries).
+	inline constexpr uint32_t init_rt_platform_call_rva = 0x01CD47B9;
+	inline constexpr uint8_t init_rt_platform_call_stock[] = {0xE8, 0x12, 0x14, 0x00, 0x00};
+	inline constexpr uint32_t init_rt_platform_rva = 0x01CD5BD0;   // R_InitRenderTargetsPlatform (PS4 0x9F8D90)
+	// R_SetRenderTargetSlice 0x01CF54E0: the view-set lookup, then the colour view
+	// inline[clamp(slice, 0, 7)] and the depth pointer at +0x40. Premise of the setter hook.
+	inline constexpr uint32_t rt_view_set_rva = 0x01CD5250;       // leaf: records + rt*0xAE0 [+ set*0x150] + 8
+	inline constexpr uint32_t sun_setter_call_rva = 0x01CF5508;   // call rt_view_set
+	inline constexpr uint32_t sun_setter_premise_rva = 0x01CF54F8;
+	inline constexpr uint8_t sun_setter_premise[] = {
+		0x48, 0x8B, 0xE9,                                 // mov rbp, rcx
+		0x48, 0x81, 0xC1, 0x00, 0x04, 0x00, 0x00,         // add rcx, 0x400
+		0x41, 0x8B, 0xD8,                                 // mov ebx, r8d          slice (r8 unchanged)
+		0x0F, 0xB7, 0xF2,                                 // movzx esi, dx         rt
+		0xE8, 0x43, 0xFD, 0xFD, 0xFF,                     // call rt_view_set
+		0xB9, 0x07, 0x00, 0x00, 0x00,                     // mov ecx, 7
+		0x3B, 0xD9,                                       // cmp ebx, ecx
+		0x44, 0x8B, 0xCB,                                 // mov r9d, ebx
+		0x0F, 0xB7, 0xD6,                                 // movzx edx, si
+		0x44, 0x0F, 0x4D, 0xC9,                           // cmovge r9d, ecx
+		0x33, 0xC9,                                       // xor ecx, ecx
+		0x45, 0x85, 0xC9,                                 // test r9d, r9d
+		0x44, 0x0F, 0x4E, 0xC9,                           // cmovle r9d, ecx
+		0x4E, 0x8B, 0x04, 0xC8,                           // mov r8, [rax+r9*8]    colour view
+		0x4C, 0x89, 0x44, 0x24, 0x60,                     // mov [rsp+0x60], r8
+		0x48, 0x8B, 0x40, 0x40,                           // mov rax, [rax+0x40]   depth views
+		0x4C, 0x8B, 0x34, 0xD8,                           // mov r14, [rax+rbx*8]
 	};
 	inline constexpr uint32_t sun_clear_rva = 0x01CF367D;         // colour clear of the current slice
 	inline constexpr uint8_t sun_clear_stock[] = {

@@ -35,8 +35,12 @@ console again, at runtime, without touching any file on disk:
 2. **Widen** the loop bounds / range checks from 2 to 4 - but only after every
    array such a loop touches has been checked for slot 2/3 (slot 2 of a `[2]`
    array usually lies on a foreign global; widening first only moves the crash).
-3. **Caves** for the few places where the PC made a different, 2-player-only
-   decision (pane geometry, sign-in of controllers 2/3, sun-shadow slots, ...).
+3. **Hooks** for the few places where the PC made a different, 2-player-only
+   decision (pane geometry, sign-in of controllers 2/3, sun-shadow slots, ...):
+   C++ functions behind MinHook detours or rewritten `call` sites. Where there
+   is no call or function boundary to hook, a small machine-code cave built
+   from verified bytes remains (the sun-shadow loop cap and clear pick, the
+   snapshot guard, the 0x1E940 stride repair, ezz's entity-pool index).
    `splitscreen_ezz.hpp` bridges the places where ezz BOIII itself is sized
    for two players (XUID table, name map, static cgame pools) and works
    around ezz's ClientCommand hook (see EZZ_REQUIRED_CHANGES.md).

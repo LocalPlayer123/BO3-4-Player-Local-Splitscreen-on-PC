@@ -519,7 +519,67 @@
 			}
 		}
 
+		// ---- Lens flares: off for local clients >= 2 ------------------------------
+		// PS4 FxLensFlaresManager has eight per-client arrays of 4; on the PC they are
+		// arrays of 2 inside one static object, so lc 2 hits the neighbouring members.
+		// The object cannot grow (the fix would re-lay the whole class), so for now
+		// clients >= 2 get no lens flares: each entry point that takes lc in edx returns
+		// at once for them (SpawnInstance with -1, its own failure value) and runs the
+		// stock function otherwise. Arguments pass through as raw 64-bit values; the
+		// counts are each function's live-in registers and its caller's stack stores
+		// (render: 4 + 7). None of the five has an Arxan caller check.
 		bool lensflare_gated = false;
+		utils::hook::detour lensflare_hooks[std::size(lensflare_gates)];
+
+		bool lensflare_extra_client(const uint64_t lc)
+		{
+			return static_cast<int32_t>(lc) >= 2;   // as the game's `cmp edx, 2`
+		}
+
+		void lensflare_pool_setup_stub(const uint64_t m, const uint64_t lc)
+		{
+			if (!lensflare_extra_client(lc))
+			{
+				lensflare_hooks[0].invoke<void>(m, lc);
+			}
+		}
+
+		void lensflare_set_persistent_stub(const uint64_t m, const uint64_t lc, const uint64_t data,
+		                                   const uint64_t size)
+		{
+			if (!lensflare_extra_client(lc))
+			{
+				lensflare_hooks[1].invoke<void>(m, lc, data, size);
+			}
+		}
+
+		void lensflare_update_stub(const uint64_t m, const uint64_t lc)
+		{
+			if (!lensflare_extra_client(lc))
+			{
+				lensflare_hooks[2].invoke<void>(m, lc);
+			}
+		}
+
+		uint64_t lensflare_spawn_stub(const uint64_t m, const uint64_t lc, const uint64_t params,
+		                              const uint64_t a4)
+		{
+			if (lensflare_extra_client(lc))
+			{
+				return 0xFFFFFFFF;   // eax = -1
+			}
+			return lensflare_hooks[3].invoke<uint64_t>(m, lc, params, a4);
+		}
+
+		void lensflare_render_stub(const uint64_t m, const uint64_t lc, const uint64_t a3, const uint64_t a4,
+		                           const uint64_t a5, const uint64_t a6, const uint64_t a7, const uint64_t a8,
+		                           const uint64_t a9, const uint64_t a10, const uint64_t a11)
+		{
+			if (!lensflare_extra_client(lc))
+			{
+				lensflare_hooks[4].invoke<void>(m, lc, a3, a4, a5, a6, a7, a8, a9, a10, a11);
+			}
+		}
 
 		void gate_lensflares_for_extra_clients()
 		{
@@ -537,51 +597,17 @@
 					return;
 				}
 			}
-			uint32_t installed = 0;
-			for (const auto& g : lensflare_gates)
+			void* const stubs[] = {
+				reinterpret_cast<void*>(&lensflare_pool_setup_stub), reinterpret_cast<void*>(&lensflare_set_persistent_stub),
+				reinterpret_cast<void*>(&lensflare_update_stub), reinterpret_cast<void*>(&lensflare_spawn_stub),
+				reinterpret_cast<void*>(&lensflare_render_stub),
+			};
+			static_assert(std::size(stubs) == std::size(lensflare_gates));
+			for (size_t i = 0; i < std::size(lensflare_gates); ++i)
 			{
-				auto* cave = static_cast<uint8_t*>(allocate_near_module(0x40));
-				if (!cave)
-				{
-					break;
-				}
-				std::vector<uint8_t> c;
-				c.insert(c.end(), {0x83, 0xFA, 0x02});       // cmp edx, 2
-				c.insert(c.end(), {0x7C, 0x00});             // jl original (patched)
-				const auto jl_at = c.size() - 1;
-				if (g.returns_minus_one)
-				{
-					c.insert(c.end(), {0xB8, 0xFF, 0xFF, 0xFF, 0xFF}); // mov eax, -1
-				}
-				c.insert(c.end(), {0xC3});                   // ret
-				c[jl_at] = static_cast<uint8_t>(c.size() - (jl_at + 1));
-				c.insert(c.end(), g.prologue, g.prologue + g.len);
-				c.insert(c.end(), {0xFF, 0x25, 0x00, 0x00, 0x00, 0x00}); // jmp [rip+0]
-				const uint64_t back = b + g.rva + g.len;
-				const auto* back_bytes = reinterpret_cast<const uint8_t*>(&back);
-				c.insert(c.end(), back_bytes, back_bytes + 8);
-				if (!write_bytes(cave, c.data(), c.size()))
-				{
-					break;
-				}
-				uint8_t patch[9];
-				std::memset(patch, 0x90, sizeof(patch));
-				patch[0] = 0xE9;
-				const auto rel = static_cast<int32_t>(
-					reinterpret_cast<size_t>(cave) - (b + g.rva + 5));
-				std::memcpy(patch + 1, &rel, sizeof(rel));
-				if (!write_bytes(reinterpret_cast<uint8_t*>(b + g.rva), patch, g.len))
-				{
-					break;
-				}
-				++installed;
+				lensflare_hooks[i].create(b + lensflare_gates[i].rva, stubs[i]);
 			}
-			lensflare_gated = installed == std::size(lensflare_gates);
-			if (!lensflare_gated)
-			{
-				note("[splitscreen] lensflare gate: %u of %zu entry points gated for local clients >= 2\n",
-				     installed, std::size(lensflare_gates));
-			}
+			lensflare_gated = true;
 		}
 
 		// ---- Quit hang: lens-flare manager destructor at process exit ----------
@@ -616,6 +642,31 @@
 		// Known hazard, not fixed: setupArmBladeTarget / setupRocketLauncherTarget
 		// just before are [2] per client (PS4: 4); lc 2 would overwrite these roots.
 		bool controller_models_hooked = false;
+
+		// Com_LocalClient_LastInput_Init runs once, in Com_Init. Before its body, create the
+		// persistent model roots "controller2" / "controller3" with the game's own
+		// UI_Model_CreatePersistentModelFromPath - PS4 UI_Model_Init does this for all four
+		// controllers, the PC for two. Neither function has an Arxan caller check.
+		utils::hook::detour lastinput_init_hook;
+
+		void lastinput_init_stub()
+		{
+			const auto b = base();
+			auto* slots = reinterpret_cast<uint16_t*>(b + ui_controller_model_rva);
+			const auto* global = reinterpret_cast<const volatile uint16_t*>(b + ui_global_model_rva);
+			const auto create = reinterpret_cast<uint16_t (*)(uint16_t parent, const char* path)>(
+				b + ui_create_persistent_rva);
+			static constexpr const char* names[] = {"controller2", "controller3"};
+			for (int slot = 2; slot <= 3; ++slot)
+			{
+				const uint16_t parent = *global;
+				if (slots[slot] == 0 && parent != 0)
+				{
+					slots[slot] = create(parent, names[slot - 2]);
+				}
+			}
+			lastinput_init_hook.invoke<void>();
+		}
 
 		void create_extra_controller_models()
 		{
@@ -669,70 +720,8 @@
 				return;
 			}
 
-			auto* cave = static_cast<uint8_t*>(allocate_near_module(0x100));
-			if (!cave)
-			{
-				return;
-			}
-			const auto put64 = [](std::vector<uint8_t>& v, uint64_t x)
-			{
-				const auto* p = reinterpret_cast<const uint8_t*>(&x);
-				v.insert(v.end(), p, p + 8);
-			};
-			std::vector<uint8_t> c;
-			c.insert(c.end(), {0x48, 0x83, 0xEC, 0x28});                 // sub rsp, 0x28
-			size_t name_fixups[2] = {};
-			for (int slot = 2; slot <= 3; ++slot)
-			{
-				const uint64_t slot_va = b + ui_controller_model_rva + slot * 2;
-				c.insert(c.end(), {0x48, 0xB8}); put64(c, slot_va);        // mov rax, &slot
-				c.insert(c.end(), {0x66, 0x83, 0x38, 0x00});               // cmp word [rax], 0
-				const size_t jne_at = c.size();
-				c.insert(c.end(), {0x75, 0x00});                           // jne next
-				c.insert(c.end(), {0x48, 0xB8}); put64(c, b + ui_global_model_rva); // mov rax, &global
-				c.insert(c.end(), {0x0F, 0xB7, 0x08});                     // movzx ecx, word [rax]
-				c.insert(c.end(), {0x85, 0xC9});                           // test ecx, ecx
-				const size_t jz_at = c.size();
-				c.insert(c.end(), {0x74, 0x00});                           // jz next
-				c.insert(c.end(), {0x48, 0xBA});                           // mov rdx, name
-				name_fixups[slot - 2] = c.size();
-				put64(c, 0);
-				c.insert(c.end(), {0x48, 0xB8}); put64(c, b + ui_create_persistent_rva); // mov rax, create
-				c.insert(c.end(), {0xFF, 0xD0});                           // call rax
-				c.insert(c.end(), {0x48, 0xB9}); put64(c, slot_va);        // mov rcx, &slot
-				c.insert(c.end(), {0x66, 0x89, 0x01});                     // mov word [rcx], ax
-				const size_t next = c.size();
-				c[jne_at + 1] = static_cast<uint8_t>(next - (jne_at + 2));
-				c[jz_at + 1] = static_cast<uint8_t>(next - (jz_at + 2));
-			}
-			c.insert(c.end(), {0x48, 0x83, 0xC4, 0x28});                 // add rsp, 0x28
-			c.insert(c.end(), lastinput_init_expected,
-			         lastinput_init_expected + sizeof(lastinput_init_expected)); // replayed
-			c.insert(c.end(), {0xFF, 0x25, 0x00, 0x00, 0x00, 0x00});     // jmp [rip+0]
-			put64(c, b + lastinput_init_rva + sizeof(lastinput_init_expected));
-			static const char names[] = "controller2\0controller3";
-			for (int i = 0; i < 2; ++i)
-			{
-				const uint64_t at = reinterpret_cast<uint64_t>(cave) + c.size();
-				std::memcpy(c.data() + name_fixups[i], &at, sizeof(at));
-				const char* s = names + i * 12;
-				c.insert(c.end(), s, s + std::strlen(s) + 1);
-			}
-			if (c.size() > 0x100 || !write_bytes(cave, c.data(), c.size()))
-			{
-				return;
-			}
-
-			uint8_t patch[sizeof(lastinput_init_expected)];
-			patch[0] = 0xE9;
-			const auto rel = static_cast<int32_t>(
-				reinterpret_cast<size_t>(cave) - (b + lastinput_init_rva + 5));
-			std::memcpy(patch + 1, &rel, sizeof(rel));
-			if (!write_bytes(reinterpret_cast<uint8_t*>(b + lastinput_init_rva), patch, sizeof(patch)))
-			{
-				return;
-			}
-			controller_models_hooked = true;
+			controller_models_hooked = hook_if_stock(lastinput_init_hook, lastinput_init_rva,
+			                                         lastinput_init_expected, lastinput_init_stub);
 		}
 
 		// ---- Gamepad button models for controllers 2..3 -------------------------

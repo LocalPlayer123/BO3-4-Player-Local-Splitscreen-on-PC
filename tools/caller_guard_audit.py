@@ -38,6 +38,11 @@ consts = {m.group(1): int(m.group(2), 16) for m in re.finditer(r"constexpr\s+(?:
 targets = {}
 for m in re.finditer(r"reinterpret_cast<[^;]*?\(\s*\*\s*\)\s*\([^;]*?>\s*\(\s*(?:base\(\)|b)\s*\+\s*(\w+)\s*\)", text):
     targets.setdefault(m.group(1), "call")
+# the same through a function-pointer alias: `using fn_t = R (*)(...);` ... reinterpret_cast<fn_t>(base() + NAME)
+fn_aliases = set(re.findall(r"using\s+(\w+)\s*=\s*[^;=]*\(\s*\*\s*\)\s*\(", text))
+for m in re.finditer(r"reinterpret_cast<\s*(\w+)\s*>\s*\(\s*(?:base\(\)|b)\s*\+\s*(\w+)\s*\)", text):
+    if m.group(1) in fn_aliases:
+        targets.setdefault(m.group(2), "call")
 for m in re.finditer(r"(\w+)_hook\.create\(\s*(?:reinterpret_cast<void\*>\()?\s*(?:base\(\)|b)\s*\+\s*(\w+)", text):
     targets[m.group(2)] = "hook+invoke"
 # hook_if_stock(NAME_hook, NAME_rva, prologue, stub)
@@ -154,6 +159,10 @@ for rva, (name, kind) in sorted(resolved.items()):
     a, bl, cb = guarded(b, e)
     rows.append((rva, name, kind, b, e, a, bl, cb, tail_chain(b, e)))
 print("%d call/hook targets resolved from the component sources" % len(rows))
+if "--list" in args:
+    for rva, name, kind, b, e, a, bl, cb, tails in rows:
+        print("  %08X %-38s %-12s above %d  base %d  call-byte %d  tail %s"
+              % (rva, name, kind, a, bl, cb, ", ".join(tails) or "none"))
 flag = [r for r in rows if r[5] or r[7] or r[8]]
 print("%d contain a caller check, or jump from a small body into one:" % len(flag))
 for rva, name, kind, b, e, a, bl, cb, tails in flag:

@@ -214,8 +214,10 @@ check in a 4-player match before relying on it.
 
 **Mod workaround:** the array stays in place and slots 2/3 are made usable
 around it: slot 2 and most of slot 3 are the block `voice_comm` vacated,
-`CL_LocalClient_IsActive` (0x027C18E0) jumps to a cave that answers for
-lc >= 2 from the mod's seat state, the twelve loops that end at `actives[2]`
+`CL_LocalClient_IsActive` (0x027C18E0) is replaced by a C++ function (entered
+through a register-saving thunk: the stock code clobbers only rax/rcx) that
+answers 0 for lc 2/3 while lc >= `cl_maxLocalClients` and otherwise reads the
+flag, the twelve loops that end at `actives[2]`
 and the end-of-match loops run to 4, and SwapClients guards slot 3's tail.
 4-player Zombies and Multiplayer matches under ezz work with this.
 

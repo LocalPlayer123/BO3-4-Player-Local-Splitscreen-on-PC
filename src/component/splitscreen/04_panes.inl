@@ -8,7 +8,7 @@
 		// foreign slot 2; C4 the geometry table has no 3- and 4-pane rows.
 
 		// clientUIActives stays [2]: moving it black-screened the frontend (a closed
-		// dead end, CLAUDE.md). install_isactive_cave() and the walker bounds work
+		// dead end, CLAUDE.md). install_isactive_hook() and the walker bounds work
 		// around its foreign slots 2/3.
 
 		// ---- Phase 2: the pane geometry table (GetLocalClientViewParams) ----
@@ -243,11 +243,31 @@
 		// returns 0 for lc >= cl_maxLocalClients and otherwise does the stock read
 		// clientUIActives[lc].flags & 1.
 
-		bool isactive_caved = false;
+		// CL_LocalClient_IsActive(lc) is clientUIActives[lc].flags & 1 with no bound. Its
+		// replacement answers 0 for lc 2/3 while lc >= cl_maxLocalClients, mirroring
+		// CG_GetLocalClientGlobals, which is NULL there for callers that do not null-check
+		// (the dvar only becomes 3 at map load; until then the pane loop skips client 2);
+		// otherwise the stock read (slot 2 is real since voice_comm moved off it). Do not
+		// answer from the seat table: back at the menu the seat stays in use while lc 2's
+		// active bit is cleared -> black loading screen. Entered through preserving_thunk
+		// (the stock code clobbers only rax/rcx); the original is never called.
+		bool isactive_hooked = false;
+		utils::hook::detour isactive_hook;
+		const volatile int32_t* isactive_max_local = nullptr;
+		const volatile uint8_t* isactive_ui = nullptr;
 
-		bool install_isactive_cave()
+		uint32_t isactive_stub(const int lc)
 		{
-			if (isactive_caved)
+			if (lc >= 2 && lc >= *isactive_max_local)
+			{
+				return 0;
+			}
+			return *reinterpret_cast<const volatile uint32_t*>(isactive_ui + static_cast<int64_t>(lc) * uia_stride) & 1;
+		}
+
+		bool install_isactive_hook()
+		{
+			if (isactive_hooked)
 			{
 				return true;
 			}
@@ -256,76 +276,16 @@
 				return false; // needs the sign-in relocation first
 			}
 			const auto b = base();
-			auto* fn = reinterpret_cast<uint8_t*>(b + isactive_rva);
-			if (!readable(fn, sizeof(isactive_expected))
-				|| std::memcmp(fn, isactive_expected, sizeof(isactive_expected)) != 0)
+			if (!readable(reinterpret_cast<const void*>(b + isactive_rva), sizeof(isactive_expected)))
 			{
 				return false;
 			}
-
-			auto* cave = static_cast<uint8_t*>(allocate_near_module(0x80));
-			if (!cave)
-			{
-				return false;
-			}
-			const auto cave_addr = reinterpret_cast<size_t>(cave);
-
-			std::vector<uint8_t> c;
-			const auto rip32 = [&](const size_t tgt)
-			{
-				const auto v = static_cast<int32_t>(tgt - (cave_addr + c.size() + 4));
-				const auto* p = reinterpret_cast<const uint8_t*>(&v);
-				c.insert(c.end(), p, p + 4);
-			};
-			const auto imm32 = [&](const uint32_t v)
-			{
-				const auto* p = reinterpret_cast<const uint8_t*>(&v);
-				c.insert(c.end(), p, p + 4);
-			};
-
-			c.insert(c.end(), {0x83, 0xF9, 0x02});          // cmp ecx, 2
-			c.insert(c.end(), {0x7C, 0x00});                // jl  stock  (patched)
-			const auto jl_at = c.size() - 1;
-
-			// Mirrors CG_GetLocalClientGlobals, which returns NULL for lc >=
-			// cl_maxLocalClients to callers that do not null-check. That dvar only
-			// becomes 3 at map load; until then the pane loop skips client 2.
-			c.insert(c.end(), {0x3B, 0x0D});                // cmp ecx, [cl_maxLocalClients]
-			rip32(b + cl_max_local_clients_rva);
-			c.insert(c.end(), {0x7C, 0x03});                // jl  +3 (storage exists)
-			c.insert(c.end(), {0x33, 0xC0});                // xor eax, eax
-			c.insert(c.end(), {0xC3});                      // ret  -> not active yet
-
-			// Otherwise the stock read (slot 2 is real since voice_comm moved off it).
-			// Do not answer from the seat table: back at the menu the seat stays in
-			// use while lc 2's active bit is cleared -> black loading screen.
-
-			// stock path: clientUIActives[lc].flags & 1
-			const auto stock_off = c.size();
-			c[jl_at] = static_cast<uint8_t>(stock_off - (jl_at + 1));
-			c.insert(c.end(), {0x48, 0x63, 0xC1});          // movsxd rax, ecx
-			c.insert(c.end(), {0x48, 0x69, 0xC0});          // imul rax, rax, 0x1078
-			imm32(uia_stride);
-			c.insert(c.end(), {0x48, 0x8D, 0x0D});          // lea rcx, [clientUIActives]
-			rip32(b + uia_base_rva);
-			c.insert(c.end(), {0x8B, 0x04, 0x08});          // mov eax, [rax+rcx]
-			c.insert(c.end(), {0x83, 0xE0, 0x01});          // and eax, 1
-			c.insert(c.end(), {0xC3});                      // ret
-
-			if (!write_bytes(cave, c.data(), c.size()))
-			{
-				return false;
-			}
-
-			uint8_t patch[5] = {0xE9};
-			const auto rel = static_cast<int32_t>(cave_addr - (b + isactive_rva + 5));
-			std::memcpy(patch + 1, &rel, sizeof(rel));
-			if (!write_bytes(fn, patch, sizeof(patch)))
-			{
-				return false;
-			}
-			isactive_caved = true;
-			return true;
+			isactive_max_local = reinterpret_cast<const volatile int32_t*>(b + cl_max_local_clients_rva);
+			isactive_ui = reinterpret_cast<const volatile uint8_t*>(b + uia_base_rva);
+			auto* thunk = preserving_thunk(reinterpret_cast<const void*>(&isactive_stub));
+			isactive_hooked = thunk && hook_if_stock(isactive_hook, isactive_rva, isactive_expected,
+			                                         static_cast<void*>(thunk));
+			return isactive_hooked;
 		}
 
 		// ---- Phase 3: the pane count and the dispatcher bound ----
@@ -484,6 +444,23 @@
 		size_t scene_c_new = 0;
 		bool pcbuf_guarded = false;
 
+		// R_InitSceneData(lc) memsets the client's dpvs and scene C buffers; C[lc] of an
+		// unallocated client 2/3 is NULL (the memset crash at old 0x02C3DE7F). Return only
+		// then - a count gate would leave client 2's buffers uncleared once
+		// fill_scene_buffers() allocates them. The C table is taken once, at install (the
+		// moved one if its relocation ran, which runs before this guard).
+		utils::hook::detour r_init_scene_data_hook;
+		void* const volatile* pcbuf_c_table = nullptr;
+
+		void r_init_scene_data_stub(const int lc)
+		{
+			if (pcbuf_c_table[static_cast<int64_t>(lc)] == nullptr)
+			{
+				return;
+			}
+			r_init_scene_data_hook.invoke<void>(lc);
+		}
+
 		bool install_perclient_buffer_guard()
 		{
 			if (pcbuf_guarded)
@@ -491,58 +468,12 @@
 				return true;
 			}
 			const auto b = base();
-			auto* fn = reinterpret_cast<uint8_t*>(b + pcbuf_clear_rva);
-			if (!readable(fn, sizeof(pcbuf_expected))
-				|| std::memcmp(fn, pcbuf_expected, sizeof(pcbuf_expected)) != 0)
+			if (!readable(reinterpret_cast<const void*>(b + pcbuf_clear_rva), sizeof(pcbuf_expected)))
 			{
 				return false;
 			}
-			auto* cave = static_cast<uint8_t*>(allocate_near_module(0x40));
-			if (!cave)
-			{
-				return false;
-			}
-			const auto cave_addr = reinterpret_cast<size_t>(cave);
-			std::vector<uint8_t> c;
-			const auto rel32 = [&](const size_t tgt)
-			{
-				const auto v = static_cast<int32_t>(tgt - (cave_addr + c.size() + 4));
-				const auto* p = reinterpret_cast<const uint8_t*>(&v);
-				c.insert(c.end(), p, p + 4);
-			};
-			// Return only when C[lc] is NULL; a count gate would leave client 2's
-			// buffers uncleared once fill_scene_buffers() allocates them.
-			// rax/r10 are volatile and free at entry.
-			c.insert(c.end(), {0x48, 0x63, 0xC1});
-			c.insert(c.end(), {0x49, 0xBA});
-			{
-				// the moved C if its relocation ran (it runs before this guard)
-				const auto c_base = static_cast<uint64_t>(
-					scene_c_new ? scene_c_new : b + scene_c_rva);
-				const auto* cp = reinterpret_cast<const uint8_t*>(&c_base);
-				c.insert(c.end(), cp, cp + 8);
-			}
-			c.insert(c.end(), {0x49, 0x8B, 0x04, 0xC2});
-			c.insert(c.end(), {0x48, 0x85, 0xC0});
-			c.insert(c.end(), {0x75, 0x01});
-			c.insert(c.end(), {0xC3});
-			// work: displaced prologue, then jump back past it
-			c.insert(c.end(), pcbuf_expected,
-			         pcbuf_expected + sizeof(pcbuf_expected));
-			c.insert(c.end(), {0xE9});
-			rel32(b + pcbuf_clear_rva + sizeof(pcbuf_expected));
-			if (!write_bytes(cave, c.data(), c.size()))
-			{
-				return false;
-			}
-			uint8_t patch[5] = {0xE9};
-			const auto rel = static_cast<int32_t>(
-				cave_addr - (b + pcbuf_clear_rva + 5));
-			std::memcpy(patch + 1, &rel, sizeof(rel));
-			if (!write_bytes(fn, patch, sizeof(patch)))
-			{
-				return false;
-			}
-			pcbuf_guarded = true;
-			return true;
+			pcbuf_c_table = reinterpret_cast<void* const volatile*>(scene_c_new ? scene_c_new : b + scene_c_rva);
+			pcbuf_guarded = hook_if_stock(r_init_scene_data_hook, pcbuf_clear_rva, pcbuf_expected,
+			                              r_init_scene_data_stub);
+			return pcbuf_guarded;
 		}

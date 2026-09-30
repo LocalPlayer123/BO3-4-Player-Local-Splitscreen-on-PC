@@ -10,7 +10,7 @@
 		// the allocator disagree with every other reader and was the round-start crash.
 		constexpr uint32_t dvar_current_offset = 0x28;
 
-		uint8_t* active_count_slots = nullptr;
+		bool active_count_installed = false;
 
 		// The count must already be right in the lobby: PS4 CL_ConnectFromLobby
 		// allocates (0x4155A0) before it activates the clients (0x41566C). Calling
@@ -138,7 +138,7 @@
 			std::memcpy(&max_local,
 			            reinterpret_cast<const void*>(base() + cl_max_local_clients_rva),
 			            sizeof(max_local));
-			if (active_count_slots != nullptr && max_local >= 2)
+			if (active_count_installed && max_local >= 2)
 			{
 				const auto live = true_local_client_count();
 				if (live >= first_raised_player_count && live != last_active_refresh
@@ -567,6 +567,7 @@
 		// relocated or reads zero.
 
 		utils::hook::detour splitscreen_player_count_hook;
+		bool player_count_detoured = false;   // the game's calls reach splitscreen_player_count_stub()
 
 		// CL_Init for local client 2. PS4 Com_Init calls CL_Init(i) for i 0..3 at boot
 		// (0xE49E98); the PC boot inlines clients 0 and 1 only. CL_Frame skips a client
@@ -583,7 +584,7 @@
 		uint8_t cbuf_range_resting = 0x02;
 		// Defined with the IsActive cave further down. The cgame frame-loop widen
 		// below may only run when the cave is installed.
-		extern bool isactive_caved;
+		extern bool isactive_hooked;
 
 		bool cl_init2_done = false;
 
@@ -722,7 +723,7 @@
 			// gets). The relocations try_apply() makes before this are what make it
 			// safe; guarding them one at a time only moved the crash.
 			// History: LOG.md, "BO3_CG_FRAME"
-			if (isactive_caved)
+			if (isactive_hooked)
 			{
 				bool all_stock = true;
 				for (const auto rva : cg_frame_imms)
