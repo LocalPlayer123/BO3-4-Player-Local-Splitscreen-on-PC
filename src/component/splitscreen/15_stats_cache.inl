@@ -200,3 +200,37 @@
 			}
 			sv_add_modified_stats_hook.invoke<void>(client_num);
 		}
+
+		// The stats transfer before a round (CA_SENDINGDATA) sends player data in 0x4C0-byte
+		// packets; the server answers "statresponse <lo> <hi>" with the packets it still
+		// needs, printed unsigned, and the client reads both with the SIGNED _atoi64. While
+		// packet 63 is missing the low mask is >= 2^63, _atoi64 saturates it to
+		// 0x7FFFFFFFFFFFFFFF, and the client never sends packet 63 again: the round hangs at
+		// the end of the loading screen. It needs player data of 64+ packets (~77 KB
+		// compressed), so it starts once a profile's stats grow past that - with any number
+		// of players (2026-10-01: 94309 bytes, server mask 0x7FFF..FF / 0x3FFF, dump
+		// data/loadhang_20261001). Read the masks unsigned, as they were written.
+		uint64_t parse_statresponse_mask(const char* text)
+		{
+			return text ? std::strtoull(text, nullptr, 10) : 0;
+		}
+
+		void install_statresponse_parse()
+		{
+			for (const auto rva : statresponse_parse_rvas)
+			{
+				const auto* site = reinterpret_cast<const uint8_t*>(base() + rva);
+				int32_t rel = 0;
+				if (!readable(site, 5) || site[0] != 0xE8)
+				{
+					note("[splitscreen] statresponse site 0x%X is not a call - left\n", rva);
+					continue;
+				}
+				std::memcpy(&rel, site + 1, sizeof(rel));
+				if (rva + 5 + static_cast<int64_t>(rel) != i_atoi64_rva
+				    || !call_site_to(rva, 5, reinterpret_cast<const void*>(&parse_statresponse_mask)))
+				{
+					note("[splitscreen] statresponse site 0x%X: unexpected target - left\n", rva);
+				}
+			}
+		}

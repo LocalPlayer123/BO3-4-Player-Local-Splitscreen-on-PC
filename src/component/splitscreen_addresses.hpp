@@ -3600,6 +3600,13 @@ namespace splitscreen
 
 	// ======== splitscreen/15_stats_cache.inl ========
 
+	// "statresponse": the server sends the missing stats-transfer packets as two unsigned
+	// masks (SV_ReceiveTransferData 0x021EB62C: va("statresponse %Iu %Iu"), string 0x02FD1740);
+	// CL_DispatchConnectionlessPacket reads them with I_atoi64 (0x0227C180, the signed CRT
+	// _atoi64) at these two calls. PS4: "statresponse %zu", one mask.
+	inline constexpr uint32_t statresponse_parse_rvas[] = {0x0134D01D, 0x0134D032};
+	inline constexpr uint32_t i_atoi64_rva = 0x0227C180;
+
 	// SV_AddModifiedStats(clientNum) (PS4 0xF5D780), called first by SV_BeginClientSnapshot
 	// 0x021FA650. svs.clients is the pointer at svs+0xC18 (PS4 svs+0xB98); PC client_t
 	// stride 0xE5170 (PS4 0xD69F0). Offsets from the PC SV_ReceiveTransferData 0x021EB330:

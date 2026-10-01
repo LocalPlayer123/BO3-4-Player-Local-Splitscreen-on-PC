@@ -246,6 +246,8 @@ namespace splitscreen
 			// A client validated without a stats context must not crash the snapshot.
 			hook_if_stock(sv_add_modified_stats_hook, sv_add_modified_stats_rva,
 			              sv_add_modified_stats_prologue, sv_add_modified_stats_stub);
+			// Stats transfer: read the server's missing-packet masks unsigned (load hang).
+			install_statresponse_parse();
 			// Before R_Init allocates the culler object (see grow_umbra_client_arrays).
 			grow_umbra_client_arrays();
 			install_perclient_buffer_guard();

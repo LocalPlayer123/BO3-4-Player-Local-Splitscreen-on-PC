@@ -81,6 +81,19 @@ component's startup completes first). Intermittent; starting again works.
 
 ## B. Fixed (listed because they show where to look next)
 
+### B16. Load hang at the end of the loading screen - stock PC bug (fixed in 2.6.5)
+Clients stay in CA_SENDINGDATA, server clients in CS_CONNECTED. The stats transfer goes out in
+0x4C0-byte packets (CL_CheckForResend `0x0134B990`, one per 100 ms); the server answers
+`va("statresponse %Iu %Iu", missingLo, missingHi)` (SV_ReceiveTransferData `0x021EB62C`,
+string `0x02FD1740`) and CL_DispatchConnectionlessPacket reads both with `I_atoi64`
+(`0x0227C180` = CRT `_atoi64`, signed, saturates to `_I64_MAX`) at `0x0134D01D`/`0x0134D032`.
+While packet 63 is missing the low mask is >= 2^63, the client gets `0x7FFFFFFFFFFFFFFF`,
+drops packet 63 and never sends it again. Hang dump: server received masks
+`0x7FFFFFFFFFFFFFFF` / `0x3FFF` (packet 63 missing), client pending `0x7FFFFFFFFFFFFFFF` / 0,
+94309 bytes (78 packets). Deterministic once a profile's transfer needs 64+ packets; any
+player count. PS4 has one mask (`statresponse %zu`). Fix: both calls -> `strtoull`. Verified:
+the profile that hung every time loads.
+
 ### B15. 3-4 players: fail-fast in DynEntCl_CleanUpOldModels (fixed in 2.6.4)
 `0xC0000409` code 2 (`int 29h` at `0x02BC814C` after `__security_check_cookie`), no ezz dialog
 - only a WER dump. Stack: CG_ProcessDestructibleEvents -> DynEntCl_CreateEntityModel ->
