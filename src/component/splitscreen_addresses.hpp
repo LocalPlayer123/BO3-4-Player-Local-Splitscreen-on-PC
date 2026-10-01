@@ -3593,6 +3593,17 @@ namespace splitscreen
 
 	// ======== splitscreen/15_stats_cache.inl ========
 
+	// SV_AddModifiedStats(clientNum) (PS4 0xF5D780), called first by SV_BeginClientSnapshot
+	// 0x021FA650. svs.clients is the pointer at svs+0xC18 (PS4 svs+0xB98); PC client_t
+	// stride 0xE5170 (PS4 0xD69F0). Offsets from the PC SV_ReceiveTransferData 0x021EB330:
+	// statsDDLCtx +0xE0B80 (DDLContext {buff, len, def +0x10, ...}), statsModified +0xE5038.
+	inline constexpr uint32_t sv_add_modified_stats_rva = 0x02206180;
+	inline constexpr uint8_t sv_add_modified_stats_prologue[] = {0x4C, 0x8B, 0xDC, 0x55, 0x41, 0x54, 0x41, 0x57};
+	inline constexpr uint32_t svs_clients_ptr_rva = 0x1767A398;
+	inline constexpr size_t sv_client_stride = 0xE5170;
+	inline constexpr size_t sv_client_stats_def = 0xE0B80 + 0x10;
+	inline constexpr size_t sv_client_stats_modified = 0xE5038;
+
 	// PS4 s_cachedStatsChanges cachedStats_t[4] x 0x1984 (0x0E3BF670); PC [2] x 0x4404.
 	inline constexpr uint32_t statscache_rva = 0x1139B860;            // engine slots 0/1, count at +0x4400
 	inline constexpr uint32_t statscache_stride = 0x4404;             // 0x100 x {u8[0x40]; int} + int count

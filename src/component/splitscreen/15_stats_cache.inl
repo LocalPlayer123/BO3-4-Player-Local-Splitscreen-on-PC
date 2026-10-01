@@ -166,3 +166,37 @@
 			note("[splitscreen] statscache: installed\n");
 			return true;
 		}
+
+		// SV_AddModifiedStats (PS4 0xF5D780) sends a client the stats it changed. The PC
+		// loop bound is statsDDLCtx.def->+0x18, read without a check (PS4 loops to the
+		// constant 55 * 1024). A client can be transferValidated with an EMPTY statsDDLCtx:
+		// Storage_DeserializedTransferData (0x02219E10) returns true without creating a
+		// context when the transfer holds no stats file. The match-start history writes
+		// (LiveStats_GameHistory_* -> SV_CacheClientStatChange 0x021EAA80) still set
+		// statsModified, and the next snapshot read def == NULL - two crashes on
+		// 2026-10-01, both at a Multiplayer round start, client 0 validated, context zero.
+		// Without a context there is nothing to send: drop the flag instead.
+		utils::hook::detour sv_add_modified_stats_hook;
+
+		void sv_add_modified_stats_stub(const int client_num)
+		{
+			uint64_t clients = 0;
+			std::memcpy(&clients, reinterpret_cast<const void*>(base() + svs_clients_ptr_rva), sizeof(clients));
+			if (clients && client_num >= 0)
+			{
+				const auto client = clients + static_cast<uint64_t>(client_num) * sv_client_stride;
+				const auto* def = reinterpret_cast<const uint64_t*>(client + sv_client_stats_def);
+				auto* modified = reinterpret_cast<uint32_t*>(client + sv_client_stats_modified);
+				if (readable(def, sizeof(*def)) && readable(modified, sizeof(*modified)) && *def == 0)
+				{
+					if (*modified)
+					{
+						note("[splitscreen] client %d: stats modified without a stats context - not sent\n",
+						     client_num);
+						*modified = 0;
+					}
+					return;
+				}
+			}
+			sv_add_modified_stats_hook.invoke<void>(client_num);
+		}

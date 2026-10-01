@@ -81,6 +81,22 @@ component's startup completes first). Intermittent; starting again works.
 
 ## B. Fixed (listed because they show where to look next)
 
+### B14. MP: crash in SV_AddModifiedStats at the end of loading (fixed in 2.6.3)
+`0x02206280` `cmp edi, [rax+0x18]` with rax = statsDDLCtx.def = NULL. PC client_t
+(stride 0xE5170, svs.clients pointer `0x1767A398`): statsDDLCtx +0xE0B80, transferValidated
++0xE0B78, statsModified +0xE5038 (offsets from SV_ReceiveTransferData `0x021EB330`).
+Measured live (read-only, every 5 ms): the LOCAL clients are transferValidated with an
+empty stats context on PC - Storage_DeserializedTransferData (`0x02219E10`) returns true
+without creating one - while bots (SV_AddTestClient) have a full one. Stat writes during
+the match (match history, `SV_CacheClientStatChange` `0x021EAA80`) still set statsModified
+on a local client, and the PC SV_AddModifiedStats takes its loop bound from ctx.def+0x18
+unchecked (PS4 0xF5D780 loops to a constant). Crashed 3 of 3 times with keyboard and
+mouse for player 1 and a pad for player 2 (twice for the user, once reproduced with
+ACTIVATE SPLITSCREEN on Nuk3town TDM with bots); a 2-pad session did not crash.
+Fix: SV_AddModifiedStats is detoured; a client without a stats context gets statsModified
+cleared instead of a send (nothing to send from). Same flow with the fix: the guard fired
+repeatedly during the match, no crash.
+
 ### B13. A lone player's new controller became player 2 (fixed in 2.6.2)
 `splitscreen_playerCount` (dvar pointer `0x05355A00`, current int at +0x28) carries
 DVAR_ARCHIVE on the PC (flags at +0x18 = 0x1); PS4 CL_RegisterDvars registers it
