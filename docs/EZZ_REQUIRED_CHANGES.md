@@ -24,6 +24,7 @@ workaround") and what ezz could change instead ("Fix in ezz").
 | 12 | ClientCommand hook hangs the server (every ezz user) | worked around, verified |
 | 13 | plugin loader: start point, `p_name`, unload at exit | worked around by the plugin |
 | 14 | `splitscreen_playerCount` saved to config.cfg | worked around, verified (2.6.2) |
+| 15 | player 2 has no Start/Back on a controller (stock PC) | worked around, verified (2.6.6) |
 
 Every item names the ezz source line (ezz commit `5aa7fac`, `src/client/...`)
 and the game address in exe **0x06531394** (Steam build 24784313, the exe ezz
@@ -434,3 +435,28 @@ case was not tested.
   03_signin_seats.inl) - ezz's next config write then drops the line - and answers
   the assignment's call at `0x02284AE8` with min(count, signed-in seats)
   (`assign_player_count`, 14_player4_fixes.inl).
+
+## 15. Player 2 has no Start/Back on a controller - stock PC, every split-screen user (worked around, verified)
+
+Not caused by ezz; listed because it hits stock 2-player split screen too and is a
+two-line fix where ezz already runs configs. The PC binds `BUTTON_START "togglemenu"` and
+`BUTTON_BACK "togglescores"` only in `default_bindings_<language>.cfg`, which runs for
+player 1. The per-controller pad layouts that `Settings_UpdateButtonConfig`
+(`0x016501B0`, PS4 `0x6F5350`) execs (`gamedata/configs/common/buttons/<layout>[_fl]`)
+bind neither, so player 2's Start and Back reach the game (`s_gamePads` bits) and do
+nothing: no pause menu, no scoreboard. Measured live: `playerKeys[lc].keys[14]`/`[15]`
+bound for lc 0 only.
+
+Related: with every client local, `CG_CanPauseGame` (`0x00843BD0`) is true in
+Multiplayer and `UI_SetActiveMenu` opens the pause menu on every other local client's
+screen (`0x0223371D`). The PC already refuses Zombies/Campaign with more than one player
+(`0x00843C12`).
+
+* **Ask (optional):** run `bind BUTTON_START "togglemenu"` and `bind BUTTON_BACK
+  "togglescores"` for each local client after its pad layout (Cmd_ExecuteSingleCommand
+  with that client), e.g. from ezz's existing config handling.
+* **The mod meanwhile:** replaces that function's Cmd_ExecuteSingleCommand call
+  (`0x01650206`, `exec_button_config`) and adds the two binds for lc > 0; a midhook at
+  `0x00843C35` makes CG_CanPauseGame false with 2+ local players
+  (`install_no_shared_pause`, 14_player4_fixes.inl). Not a detour there: the function
+  tail-jumps into CG_AllClientsAreLocal `0x008C1AA0`, which has an Arxan caller guard.

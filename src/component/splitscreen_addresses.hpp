@@ -3350,6 +3350,8 @@ namespace splitscreen
 	};
 	inline constexpr entcoll_site perctrl_sites[] = {
 		{0x01F14F0D, 3, 7, true , 0x8},    // lea rcx,[+8]    subscribers++
+		{0x01F14F47, 3, 7, true , 0x4},    // lea rax,[+4]    UI_CoD_BlurWorld (setter; was missing:
+		                                   // controllers 2/3 wrote 0x1626333C / 0x16263350, the glyph buffer)
 		{0x01F1A550, 3, 7, true , 0x4},    // lea rcx,[+4]    float getter
 		{0x01F1C68C, 5, 9, false, 0xC},    // mulss xmm1,[rbp+rbx*4+RVA+0xC]
 		{0x01F1C6B8, 5, 9, false, 0x10},   // mulss xmm1,[rbp+rbx*4+RVA+0x10]
@@ -3547,6 +3549,92 @@ namespace splitscreen
 	inline constexpr uint32_t dynent_cleanup_viewer_bound_rva = 0x0146F3F8;
 	inline constexpr uint8_t dynent_cleanup_viewer_bound_stock[] = {0x41, 0x3B, 0xD8};
 	inline constexpr uint8_t dynent_cleanup_viewer_bound_fixed[] = {0x83, 0xFB, 0x02};
+
+	// Streamer view positions. PS4 streamFrontendGlob +0x1CE4BC savedClientPrevViewPos[4],
+	// +0x1CE4EC savedClientViewPos[4], +0x1CE51C numClientsLastFrame. PC glob 0x10698100:
+	// prev[2] 0x10AB2768, cur[2] 0x10AB2780, a PC-only bool[2] 0x10AB2798 (set: no
+	// prev->cur extrapolation), numClientsLastFrame 0x10AB279C. A third view's position
+	// lands on numClientsLastFrame, so `queryClient == numClientsLastFrame` never holds and
+	// the combine/sort jobs never run: no streamed mesh loads (Nuk3town cars, 2026-10-01).
+	// Every access (rip-relative and glob+disp32 scans): the three sites below.
+	inline constexpr uint32_t stream_glob_rva = 0x10698100;
+	// R_Stream_BeginUpdateFrame 0x01D07480: prev = cur; cur = 0; bool[0..1] = 0.
+	inline constexpr uint32_t stream_begin_views_rva = 0x01D075B8;
+	inline constexpr uint8_t stream_begin_views_bytes[] = {
+		0x0F, 0x28, 0x05, 0xC1, 0xB1, 0xDA, 0x0E,       // movaps xmm0, [cur]
+		0x0F, 0x11, 0x05, 0xA2, 0xB1, 0xDA, 0x0E,       // movups [prev], xmm0
+		0xF2, 0x0F, 0x10, 0x0D, 0xC2, 0xB1, 0xDA, 0x0E, // movsd xmm1, [cur+0x10]
+		0xF2, 0x0F, 0x11, 0x0D, 0xA2, 0xB1, 0xDA, 0x0E, // movsd [prev+0x10], xmm1
+		0x33, 0xC0,                                     // xor eax, eax
+		0x48, 0x89, 0x05, 0xA1, 0xB1, 0xDA, 0x0E,       // mov [cur], rax
+		0x48, 0x89, 0x05, 0xA2, 0xB1, 0xDA, 0x0E,       // mov [cur+8], rax
+		0x48, 0x89, 0x05, 0xA3, 0xB1, 0xDA, 0x0E,       // mov [cur+0x10], rax
+		0x66, 0x89, 0x05, 0xA4, 0xB1, 0xDA, 0x0E,       // mov word [bool], ax
+	};
+	// R_Stream_UpdateForClient (inlined, PS4 0xA68A60), r12 = glob: cur[qc].x/y/z and bool[qc].
+	struct stream_disp_site
+	{
+		uint32_t rva;      // instruction start; the disp32 is at +4
+		uint8_t bytes[8];
+	};
+	inline constexpr stream_disp_site stream_view_stores[] = {
+		{0x01D09856, {0x41, 0x89, 0x84, 0x94, 0x80, 0xA6, 0x41, 0x00}}, // [r12+rdx*4+0x41A680], eax
+		{0x01D09862, {0x41, 0x89, 0x84, 0x94, 0x84, 0xA6, 0x41, 0x00}}, // [r12+rdx*4+0x41A684], eax
+		{0x01D0986E, {0x41, 0x89, 0x84, 0x94, 0x88, 0xA6, 0x41, 0x00}}, // [r12+rdx*4+0x41A688], eax
+		{0x01D0987D, {0x46, 0x88, 0xBC, 0x20, 0x98, 0xA6, 0x41, 0x00}}, // [rax+r12+0x41A698], r15b
+	};
+	// R_Stream_UpdateStaticAllClients_Internal 0x01D09A70: per view i < numClientsLastFrame,
+	// r14 = &bool[i], rbx = &cur[i].y, prev[i] read as rbx-0x1C/-0x18/-0x14.
+	inline constexpr uint32_t stream_static_bool_lea_rva = 0x01D09CF3;
+	inline constexpr uint8_t stream_static_bool_lea_bytes[] = {0x4C, 0x8D, 0x35, 0x9E, 0x8A, 0xDA, 0x0E};
+	inline constexpr uint32_t stream_static_cur_lea_rva = 0x01D09CFF;
+	inline constexpr uint8_t stream_static_cur_lea_bytes[] = {0x48, 0x8D, 0x1D, 0x7E, 0x8A, 0xDA, 0x0E};
+	inline constexpr uint32_t stream_static_prev_subs_rva = 0x01D09D1C;
+	inline constexpr uint8_t stream_static_prev_subs_bytes[] = {
+		0xF3, 0x0F, 0x5C, 0x43, 0xE4,  // subss xmm0, [rbx-0x1C]
+		0xF3, 0x0F, 0x10, 0x0B,        // movss xmm1, [rbx]
+		0xF3, 0x0F, 0x5C, 0x4B, 0xE8,  // subss xmm1, [rbx-0x18]
+		0xF3, 0x0F, 0x10, 0x53, 0x04,  // movss xmm2, [rbx+4]
+		0xF3, 0x0F, 0x5C, 0x53, 0xEC,  // subss xmm2, [rbx-0x14]
+	};
+	inline constexpr size_t stream_static_prev_disp8_offs[] = {4, 13, 23};
+	// Then the 8 streamer hints are appended to the same stack StreamUpdateCmd. Its
+	// streamView array holds 10 (cmd at rsp+0x50, count at rsp+0x58, views from rsp+0x5C,
+	// stride 0x1C, stack cookie at rsp+0x180): 2 views + 8 hints on the PC, unchecked.
+	// Hint loop body; the midhook takes the first 8 bytes, the jbe stays.
+	inline constexpr uint32_t stream_hint_body_rva = 0x01D09DA0;
+	inline constexpr uint8_t stream_hint_body_bytes[] = {
+		0xF3, 0x0F, 0x10, 0x4B, 0x10,       // movss xmm1, [rbx+0x10]
+		0x0F, 0x2F, 0xCE,                   // comiss xmm1, xmm6
+		0x0F, 0x86, 0x87, 0x00, 0x00, 0x00, // jbe 0x01D09E35 (skip this hint)
+	};
+	inline constexpr size_t stream_hint_hook_len = 8;
+	inline constexpr uint32_t stream_hint_skip_rva = 0x01D09E35;
+	static_assert(stream_hint_body_rva + 14 + 0x87 == stream_hint_skip_rva);
+	inline constexpr int32_t stream_update_cmd_views = 10;
+
+	// Pad Start/Back for players 2-4. The PC binds BUTTON_START "togglemenu" and
+	// BUTTON_BACK "togglescores" only in default_bindings_<language>.cfg, which runs for
+	// player 1; the per-controller pad layouts (gamedata/configs/common/buttons/<layout>
+	// [_fl], exec'd by Settings_UpdateButtonConfig 0x016501B0, PS4 0x6F5350) bind
+	// neither. Measured 2026-10-01: playerKeys keys[14] (K_BUTTON_START) and [15]
+	// (K_BUTTON_BACK) bound for lc0 only. The layout exec call:
+	inline constexpr uint32_t button_config_exec_call_rva = 0x01650206;
+	inline constexpr uint8_t button_config_exec_call_bytes[] = {0xE8, 0xF5, 0x09, 0xA9, 0x00};
+	inline constexpr uint32_t cmd_execute_single_command_rva = 0x020E0C00;   // (lc, controller, text, r9)
+	static_assert(button_config_exec_call_rva + 5 + 0x00A909F5 == cmd_execute_single_command_rva);
+
+	// CG_CanPauseGame 0x00843BD0 (PS4 0x224FB0). The PC adds "Zombies/Campaign with more
+	// than one player: no pause" (0x00843C12..0x00843C33); Multiplayer pauses whenever
+	// every client is local, and UI_SetActiveMenu then opens the pause menu for every
+	// other local client (PC loop 0x0223371D, PS4 0xFA21B8). Not a detour: the function
+	// tail-jumps into CG_AllClientsAreLocal 0x008C1AA0, which has an Arxan caller guard
+	// (hangs for a caller outside the image). Midhook on the instruction every
+	// "may pause" path passes; its false exit:
+	inline constexpr uint32_t cg_can_pause_mp_rva = 0x00843C35;
+	inline constexpr uint8_t cg_can_pause_mp_bytes[] = {0xB9, 0x01, 0x00, 0x00, 0x00};   // mov ecx, 1
+	inline constexpr uint32_t cg_can_pause_false_rva = 0x00843BF2;
+	inline constexpr uint8_t cg_can_pause_false_bytes[] = {0x32, 0xC0, 0x48, 0x83, 0xC4, 0x28, 0xC3};
 
 	// Gamepad device assignment 0x022849F0: `call CL_SplitscreenPlayerCount` in its final
 	// test (new device && count > 1 && slot 1 has no device -> give it to controller 1).

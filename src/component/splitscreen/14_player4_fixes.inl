@@ -235,6 +235,179 @@
 			}
 		}
 
+		// Start and Back for players 2-4: after the game runs a guest's pad layout, the two
+		// binds player 1 gets from default_bindings_<language>.cfg are run for that guest
+		// too (button_config_exec_call_rva). Without them the guest's Start and Back reach
+		// the game and are bound to nothing: no pause menu, no scoreboard.
+		void exec_button_config(const int lc, const int controller, const char* text, const int arg)
+		{
+			const auto exec = reinterpret_cast<void (*)(int, int, const char*, int)>(
+				base() + cmd_execute_single_command_rva);
+			exec(lc, controller, text, arg);
+			if (lc > 0)
+			{
+				exec(lc, controller, "bind BUTTON_START \"togglemenu\"", arg);
+				exec(lc, controller, "bind BUTTON_BACK \"togglescores\"", arg);
+			}
+		}
+
+		void install_guest_pad_binds()
+		{
+			if (!engine_bytes_match(button_config_exec_call_rva, button_config_exec_call_bytes)
+			    || !call_site_to(button_config_exec_call_rva, sizeof(button_config_exec_call_bytes),
+			                     reinterpret_cast<const void*>(&exec_button_config)))
+			{
+				note("[splitscreen] guest pad binds: engine bytes differ - not installed\n");
+			}
+		}
+
+		// With two or more local players the game no longer pauses, in any mode: the PC
+		// already applies that to Zombies and Campaign, and in Multiplayer one player's
+		// Start paused the match and opened the pause menu on every screen (user,
+		// 2026-10-01: "only for the one who presses it"). Console Multiplayer never pauses.
+		// CG_CanPauseGame takes its own false exit (rsp is that function's frame there).
+		void cg_can_pause_guard(midhook::context& c)
+		{
+			if (stock_splitscreen_player_count() > 1)
+			{
+				c.rip = base() + cg_can_pause_false_rva;
+			}
+		}
+
+		void install_no_shared_pause()
+		{
+			if (!engine_bytes_match(cg_can_pause_false_rva, cg_can_pause_false_bytes)
+			    || !midhook::install(base() + cg_can_pause_mp_rva, cg_can_pause_mp_bytes,
+			                         sizeof(cg_can_pause_mp_bytes), &cg_can_pause_guard, &allocate_near_module))
+			{
+				note("[splitscreen] no shared pause: engine bytes differ - not installed\n");
+			}
+		}
+
+		// The mesh/image streamer keeps one view position per rendered client: prev[2],
+		// cur[2] and a bool[2] on the PC, [4] on PS4. A third view wrote over
+		// numClientsLastFrame, the streamer's combine/sort never ran again and no streamed
+		// mesh loaded for anyone (Nuk3town cars gone with 3-4 players: the car models got
+		// LOD 0xFF from XModelSelectStreamableLod). The three arrays move to a block with
+		// room for 8 views, the size of PS4's s_viewPos. Their accesses are the three
+		// stream_* sites, patched all-or-nothing.
+		struct stream_view_block
+		{
+			float prev[8][3];
+			float cur[8][3];
+			uint8_t still[8]; // PC-only: set -> no prev->cur extrapolation for that view
+		};
+		static_assert(offsetof(stream_view_block, cur) == 0x60);
+
+		stream_view_block* stream_views = nullptr;
+
+		// Replaces R_Stream_BeginUpdateFrame's copy-and-clear of the [2] arrays.
+		void stream_begin_views()
+		{
+			std::memcpy(stream_views->prev, stream_views->cur, sizeof(stream_views->cur));
+			std::memset(stream_views->cur, 0, sizeof(stream_views->cur));
+			std::memset(stream_views->still, 0, sizeof(stream_views->still));
+		}
+
+		// The static update then appends the 8 streamer hints to its stack StreamUpdateCmd,
+		// whose streamView array holds 10: 2 views + 8 hints fit stock, 4 views + 8 would
+		// reach the stack cookie. Hook on the hint loop's `movss xmm1,[rbx+0x10] ; comiss
+		// xmm1,xmm6` (its `jbe skip` stays in place): a full cmd skips the hint.
+		void stream_hint_guard(midhook::context& c)
+		{
+			const auto views = *reinterpret_cast<const int32_t*>(midhook::site_rsp(c) + 0x58);
+			if (views >= stream_update_cmd_views)
+			{
+				c.rip = base() + stream_hint_skip_rva;
+			}
+		}
+
+		void relocate_stream_views()
+		{
+			const auto b = base();
+			bool stock = engine_bytes_match(stream_begin_views_rva, stream_begin_views_bytes)
+				&& engine_bytes_match(stream_static_bool_lea_rva, stream_static_bool_lea_bytes)
+				&& engine_bytes_match(stream_static_cur_lea_rva, stream_static_cur_lea_bytes)
+				&& engine_bytes_match(stream_static_prev_subs_rva, stream_static_prev_subs_bytes)
+				&& engine_bytes_match(stream_hint_body_rva, stream_hint_body_bytes);
+			for (const auto& s : stream_view_stores)
+			{
+				stock = stock && engine_bytes_match(s.rva, s.bytes);
+			}
+			if (!stock)
+			{
+				note("[splitscreen] stream views: engine bytes differ - not relocated\n");
+				return;
+			}
+
+			auto* block = static_cast<stream_view_block*>(allocate_near_module(sizeof(stream_view_block)));
+			uint8_t begin_call[sizeof(stream_begin_views_bytes)]{};
+			uint8_t hint_hook[stream_hint_hook_len]{};
+			if (!block
+				|| !call_site_bytes(stream_begin_views_rva, sizeof(begin_call),
+				                    reinterpret_cast<const void*>(&stream_begin_views), begin_call)
+				|| !midhook::prepare(b + stream_hint_body_rva, stream_hint_body_bytes, stream_hint_hook_len,
+				                     &stream_hint_guard, &allocate_near_module, hint_hook))
+			{
+				note("[splitscreen] stream views: allocation failed - not relocated\n");
+				return;
+			}
+
+			const auto disp32 = [](const size_t to, const size_t from, int32_t& out)
+			{
+				const auto d = static_cast<int64_t>(to) - static_cast<int64_t>(from);
+				out = static_cast<int32_t>(d);
+				return d == out;
+			};
+			const auto glob = b + stream_glob_rva;
+			const auto at = reinterpret_cast<size_t>(block);
+			int32_t store[4]{}, bool_lea{}, cur_lea{};
+			bool fits = disp32(at + offsetof(stream_view_block, cur), glob, store[0])
+				&& disp32(at + offsetof(stream_view_block, cur) + 4, glob, store[1])
+				&& disp32(at + offsetof(stream_view_block, cur) + 8, glob, store[2])
+				&& disp32(at + offsetof(stream_view_block, still), glob, store[3])
+				&& disp32(at + offsetof(stream_view_block, still), b + stream_static_bool_lea_rva + 7, bool_lea)
+				&& disp32(at + offsetof(stream_view_block, cur) + 4, b + stream_static_cur_lea_rva + 7, cur_lea);
+			if (!fits)
+			{
+				note("[splitscreen] stream views: block out of disp32 reach - not relocated\n");
+				return;
+			}
+
+			// prev[i] sits sizeof(prev) below cur[i]; the loop reads it from rbx = &cur[i].y.
+			uint8_t subs[sizeof(stream_static_prev_subs_bytes)];
+			std::memcpy(subs, stream_static_prev_subs_bytes, sizeof(subs));
+			for (size_t i = 0; i < std::size(stream_static_prev_disp8_offs); ++i)
+			{
+				subs[stream_static_prev_disp8_offs[i]] = static_cast<uint8_t>(
+					static_cast<int8_t>(-static_cast<int>(sizeof(stream_view_block::prev)) - 4 + 4 * static_cast<int>(i)));
+			}
+			stream_views = block;
+			uint32_t failed = 0;
+			const auto put = [&](const uint32_t rva, const void* data, const size_t len)
+			{
+				if (!write_bytes(reinterpret_cast<void*>(b + rva), data, len))
+				{
+					++failed;
+				}
+			};
+			// Readers first, then the writer, then the frame reset: until the last write the
+			// stock code still clears the old arrays, and the new block starts zeroed.
+			put(stream_static_bool_lea_rva + 3, &bool_lea, 4);
+			put(stream_static_cur_lea_rva + 3, &cur_lea, 4);
+			put(stream_static_prev_subs_rva, subs, sizeof(subs));
+			put(stream_hint_body_rva, hint_hook, sizeof(hint_hook));
+			for (size_t i = 0; i < std::size(stream_view_stores); ++i)
+			{
+				put(stream_view_stores[i].rva + 4, &store[i], 4);
+			}
+			put(stream_begin_views_rva, begin_call, sizeof(begin_call));
+			if (failed)
+			{
+				note("[splitscreen] stream views: %u writes failed\n", failed);
+			}
+		}
+
 		utils::hook::detour per_controller_update_hook;
 
 		void storage_pump_stub(const int controller)

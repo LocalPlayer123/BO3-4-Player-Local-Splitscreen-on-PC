@@ -318,8 +318,10 @@
 		// CL_IsUIActive 0x415330 checks s_perController[ctrl] byte +1; PS4 has [4] x
 		// 0x14, the PC clears only 0x28 bytes (= [2]). Slots 2/3 lie in the
 		// button-glyph buffer that follows, so a glyph name marked player 4 as "in
-		// a menu". 12 references into slots 0/1 are rewritten; 5 more address the
-		// glyph buffer and stay. Moved at startup, so the engine's init clear
+		// a menu". 13 references into slots 0/1 are rewritten (the BlurWorld setter
+		// 0x01F14F47 was missing until 2.6.6: blur went to the old slots, which the
+		// relocated getter never reads, and 2/3 wrote into the glyph buffer); 5 more
+		// address the glyph buffer and stay. Moved at startup, so the engine's init clear
 		// (widened 0x28 -> 0x50) initialises slots 2/3.
 		constexpr uint32_t perctrl_stride = 0x14;
 		constexpr uint32_t perctrl_old_count = 2;

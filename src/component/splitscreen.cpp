@@ -379,6 +379,11 @@ namespace splitscreen
 			install_assign_player_count();
 			// Debris cleanup: two view origins fit its stack array (see the function).
 			bound_dynent_cleanup_viewers();
+			// Streamer view positions [2] -> [8] (see relocate_stream_views).
+			relocate_stream_views();
+			// Start/Back bound for players 2-4; no shared pause with 2+ local players.
+			install_guest_pad_binds();
+			install_no_shared_pause();
 
 			// CL_LocalClient_SetActive: the trigger for CL_Init(2) (see set_active_stub).
 			hook_if_stock(set_active_hook, set_active_rva, set_active_prologue, set_active_stub);

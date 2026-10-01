@@ -49,6 +49,13 @@ namespace splitscreen::midhook
 
 	using callback = void (*)(context&);
 
+	// The game's rsp at the site: the site jumps (no return address) and the context is
+	// the 0x88-byte stack image the trampoline pushes directly below it.
+	inline uint64_t site_rsp(const context& c)
+	{
+		return reinterpret_cast<uint64_t>(&c) + sizeof(context);
+	}
+
 	namespace detail
 	{
 		inline void put(std::vector<uint8_t>& v, std::initializer_list<uint8_t> bytes)

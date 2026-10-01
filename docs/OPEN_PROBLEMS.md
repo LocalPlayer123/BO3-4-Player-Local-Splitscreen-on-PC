@@ -79,7 +79,58 @@ mixed third-party + Xbox pads (one pad probably seen through two APIs).
 Exit code 0, no dialog, no dump, inside the game's own `Com_Init` (the
 component's startup completes first). Intermittent; starting again works.
 
+### A9. Crash at match start after the lobby went from 4 players back to 2 (2.6.6)
+`0xC0000005` at `0x00A11EC0` `cmp dword ptr [rcx+0x24], 0x12` with rcx =
+`[base + lc*0x342720 + 0x30] + 0x8C390` = `0x8C390`: a per-client pointer that is NULL.
+The loop runs `lc < cl_maxLocalClients` (`cmp r9d, [0x05323720]` at `0x00A11E8B`); after 4
+seats the count stays 4, the 2-player match sets up clients 0/1 only. Seen once (watcher:
+both clients reached CA_ACTIVE, then the process died; ezz deleted its minidump on the next
+start). The function is Arxan-flattened; not looked up on PS4 yet.
+
+### A10. Controller slots after hot-plugging (2.6.6)
+Removing a seated guest's controller in the lobby and plugging another one in mixes up
+seats: the real pad turned on after three virtual pads became device 0 (player 1's pad)
+instead of player 4 - Steam Input lists physical pads first. The seat stays bound to the
+slot, not to the pad. Needs a defined rule for unplug/replug (console: the seat waits for
+its controller).
+
 ## B. Fixed (listed because they show where to look next)
+
+### B19. s_perController: BlurWorld setter not relocated (fixed in 2.6.6)
+The [2] -> [4] relocation of LUI_CoD `s_perController` (`0x16263310`, stride 0x14) missed
+`UI_CoD_BlurWorld` `0x01F14F40` (`lea rax,[rip+..]` at `0x01F14F47`, field +4). Blur radii
+went to the old slots, which the relocated getter (`0x01F1A550`) never reads, and controllers
+2/3 wrote floats into the glyph buffer behind the array (`0x1626333C`, `0x16263350`).
+
+### B18. Players 2-4: no Start/Back, and one player's menu paused everyone (fixed in 2.6.6)
+Their presses reach `s_gamePads` (bits `0x10` / `0x20`) but `playerKeys[lc].keys[14]`
+(K_BUTTON_START) and `[15]` (K_BUTTON_BACK) are bound for lc 0 only. The PC binds them in
+`default_bindings_<language>.cfg` (`bind BUTTON_START "togglemenu"` / `bind BUTTON_BACK
+"togglescores"`), run for player 1; the pad layouts Settings_UpdateButtonConfig `0x016501B0`
+(PS4 `0x6F5350`) execs per controller (`gamedata/configs/common/buttons/<layout>[_fl]`) bind
+neither. Fix: its Cmd_ExecuteSingleCommand call `0x01650206` also runs those two binds for
+lc > 0. Pause: CG_CanPauseGame `0x00843BD0` (PS4 `0x224FB0`) is true in MP when every client
+is local, and UI_SetActiveMenu then opens the pause menu for every other local client (PC
+loop `0x0223371D`, PS4 `0xFA21B8`); the PC already refuses ZM/CP with more than one player
+(`0x00843C12`). A midhook on `0x00843C35` takes the function's false exit `0x00843BF2` when
+2+ local players exist. Not a detour: the function tail-jumps into CG_AllClientsAreLocal
+`0x008C1AA0`, which has an Arxan caller guard. Verified: Back/Start per player, catcher
+`0x08`/`0x10` only on the pressing client.
+
+### B17. 3-4 players: streamed models never load (Nuk3town cars) (fixed in 2.6.6)
+XModelSelectStreamableLod returns -1 when no LOD mesh of a model is resident; the car models
+got LOD `0xFF` for every player, only with 3-4 players. PS4 `streamFrontendGlob` has
+`savedClientPrevViewPos[4]`, `savedClientViewPos[4]`, then `numClientsLastFrame`; the PC
+(glob `0x10698100`) has prev[2] `0x10AB2768`, cur[2] `0x10AB2780`, a PC-only bool[2]
+`0x10AB2798`, then numClientsLastFrame `0x10AB279C`. R_Stream_UpdateForClient stores
+`cur[queryClient]` (`0x01D09856..0x01D0987D`, r12 = glob), so the third view's y overwrote
+numClientsLastFrame and `queryClient == numClientsLastFrame` (`0x01D09891`) never held:
+combine and sort never ran. Live: after cur[1] a camera position (x 128.0, z 0.125) where the
+count belongs. Fix: the three arrays move to a block for 8 views; every access (rip scan +
+glob+disp32 scan of all code): BeginUpdateFrame's copy/clear `0x01D075B8` (now a call),
+the four stores, the static-update loop (`0x01D09CF3`/`0x01D09CFF` and three prev disp8).
+That loop also appends 8 streamer hints to a stack StreamUpdateCmd holding 10; a midhook on
+`0x01D09DA0` stops at 10. Verified: cars drawn with 3 players, numClientsLastFrame intact.
 
 ### B16. Load hang at the end of the loading screen - stock PC bug (fixed in 2.6.5)
 Clients stay in CA_SENDINGDATA, server clients in CS_CONNECTED. The stats transfer goes out in

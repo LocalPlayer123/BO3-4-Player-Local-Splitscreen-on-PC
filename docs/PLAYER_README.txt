@@ -1,4 +1,4 @@
-BO3 Local Splitscreen 2.6.5  -  build {VERSION}
+BO3 Local Splitscreen 2.6.6  -  build {VERSION}
 ================================================
 
 Up to FOUR local split-screen players for Call of Duty: Black Ops III on PC -
@@ -6,6 +6,26 @@ Zombies and Multiplayer (offline custom games, bots work too). An ezz BOIII
 plugin. Local (offline) play only.
 
 This is a BETA. Please report what works and what does not.
+
+
+NEW IN 2.6.6
+------------
+* Fixed: with 3 or 4 players some models were missing for everyone, most
+  visibly the cars on Nuketown. The game loads detailed models on demand,
+  based on where the players look from, and kept those positions for only
+  two players. Player 3's position overwrote the game's own count, after
+  which nothing new was loaded any more. It now has room for all players.
+* Fixed: players 2-4 could not open the scoreboard (Back / View button) or
+  the menu (Start / Menu button) with a controller. On PC only player 1 got
+  these two buttons; now every player has them, as on console.
+* Changed: with 2 or more players, Start (or ESC) opens the menu only for
+  the player who pressed it, and the match keeps running - as in console
+  Multiplayer. Before, one player's menu paused the match and opened the
+  menu on every screen.
+* Fixed: the background blur behind in-game menus was missing, and with 3
+  or 4 players it wrote into memory it does not own.
+
+Updating from 2.2 - 2.6.5: extract this zip over the old files.
 
 
 NEW IN 2.6.5
@@ -325,6 +345,13 @@ KNOWN ISSUES
 * Let players 3 and 4 join in the lobby (after choosing ZOMBIES or
   MULTIPLAYER), not in the main menu - a controller joining in the main
   menu can get a garbled name.
+* Connect all controllers before players join, and do not switch a
+  controller off while its player is in the lobby: the players can end up
+  on the wrong controller. If that happens, restart the game.
+* After the lobby had 3 or 4 players, going back to fewer players and
+  starting a match can crash at the end of the loading screen
+  (BlackOps3.exe+0x140A11EC0). Restart the game before playing with fewer
+  players.
 * 1.0 showed blocky, wrongly lit patches on the screens of players 3 and 4
   in some indoor areas (Der Eisendrache). Not re-tested since - reports
   welcome.
