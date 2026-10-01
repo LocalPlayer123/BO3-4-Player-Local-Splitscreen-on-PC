@@ -23,6 +23,7 @@ workaround") and what ezz could change instead ("Fix in ezz").
 | 11 | observations | the ignored A press: fixed in the mod (2.2.3) |
 | 12 | ClientCommand hook hangs the server (every ezz user) | worked around, verified |
 | 13 | plugin loader: start point, `p_name`, unload at exit | worked around by the plugin |
+| 14 | `splitscreen_playerCount` saved to config.cfg | worked around, verified (2.6.2) |
 
 Every item names the ezz source line (ezz commit `5aa7fac`, `src/client/...`)
 and the game address in exe **0x06531394** (Steam build 24784313, the exe ezz
@@ -411,3 +412,25 @@ items 2-4 and 12 in place).
 * **Updater.** A precaution, not a problem seen: please make sure the
   updater never removes files from `<game>\boiii\plugins\` (not checked in
   ezz's updater code yet).
+
+## 14. `splitscreen_playerCount` saved to config.cfg - BUG, every ezz user who plays split screen (worked around, verified)
+
+`component/dvars.cpp` `write_archive_dvars` writes every dvar with DVAR_ARCHIVE to
+`boiii_players/user/config.cfg`, and `read_archive_dvars` runs that file at the
+next start. On the PC `splitscreen_playerCount` carries DVAR_ARCHIVE (dvar pointer
+`0x05355A00`, flags at +0x18 = 0x1, measured live); PS4 `CL_RegisterDvars`
+registers it with flags 0 (`0x414191`). So a session that ended with 2 players
+starts the next one at 2 with one player signed in. The gamepad device assignment
+(`0x022849F0`) ends with "new device && `CL_SplitscreenPlayerCount()` > 1 && slot 1
+has no device -> give it to controller 1", so a controller plugged in by a lone
+player becomes player 2. Measured with the mod (2026-10-01): the pad went to slot 0
+and 50 ms later to slot 1. Without the mod the same assignment code runs; that
+case was not tested.
+
+* **Ask:** one line in `dvar_patches.cpp`, next to the existing
+  `dvar_remove_flags` calls: `dvar_remove_flags("splitscreen_playerCount",
+  DVAR_ARCHIVE);` - so it is never written, as on console.
+* **The mod meanwhile:** clears the flag every 50 ms (`unarchive_player_count`,
+  03_signin_seats.inl) - ezz's next config write then drops the line - and answers
+  the assignment's call at `0x02284AE8` with min(count, signed-in seats)
+  (`assign_player_count`, 14_player4_fixes.inl).

@@ -3541,6 +3541,12 @@ namespace splitscreen
 
 	// ======== splitscreen/14_player4_fixes.inl ========
 
+	// Gamepad device assignment 0x022849F0: `call CL_SplitscreenPlayerCount` in its final
+	// test (new device && count > 1 && slot 1 has no device -> give it to controller 1).
+	inline constexpr uint32_t assign_player_count_call_rva = 0x02284AE8;
+	inline constexpr uint8_t assign_player_count_call_bytes[] = {0xE8, 0xC3, 0xCF, 0x53, 0x00};
+	static_assert(assign_player_count_call_rva + 5 + 0x0053CFC3 == splitscreen_player_count_rva);
+
 	inline constexpr uint32_t per_controller_update_rva = 0x01E19AE0;
 	inline constexpr uint8_t per_controller_update_prologue[] = {0x48, 0x8B, 0xC4, 0x55, 0x41, 0x54};
 	inline constexpr end_bound_fix client_ui_end_bounds[] = {

@@ -1,4 +1,4 @@
-BO3 Local Splitscreen 2.6.1  -  build {VERSION}
+BO3 Local Splitscreen 2.6.2  -  build {VERSION}
 ================================================
 
 Up to FOUR local split-screen players for Call of Duty: Black Ops III on PC -
@@ -8,11 +8,26 @@ plugin. Local (offline) play only.
 This is a BETA. Please report what works and what does not.
 
 
+NEW IN 2.6.2
+------------
+* Fixed: a controller plugged in while you played alone could become a
+  second player instead of yours, and a button press on it (even the D-pad)
+  made that second player join. The cause: the game saved the number of
+  split-screen players in boiii_players\user\config.cfg, so the first start
+  after a game with 2 or more players began with that number although you
+  were alone, and the game handed the next controller to player 2. The
+  number is no longer saved (as on console), and a newly connected
+  controller goes to player 2 only when a player 2 has really joined.
+* Changed: in the offline lobby an extra controller joins with A only, as
+  described below. Other buttons no longer make it join.
+
+Updating from 2.2 - 2.6.1: extract this zip over the old files.
+
+
 NEW IN 2.6.1
 ------------
 * Fixed: Multiplayer with 3 or 4 players could crash now and then while
-  the game drew player names ("EXCEPTION_ACCESS_VIOLATION", often right
-  after spawning). The name drawing kept six of its lists for two players
+  the game drew player names ("EXCEPTION_ACCESS_VIOLATION"). The name drawing kept six of its lists for two players
   only, so player 3 and 4 wrote into the neighbouring lists - one of them
   the list of names to draw. All six now have room for four players. The
   crash was in every earlier version.

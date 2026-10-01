@@ -118,6 +118,13 @@ local function console_handle_button_press(menu, controller, button, model)
 		if Engine.GetLobbyNetworkMode == nil or Engine.GetLobbyNetworkMode() == 2 then
 			return
 		end
+		-- A joins, nothing else (measured 2026-10-01: the D-pad of a freshly plugged
+		-- pad joined player 2). Without the enum the old behaviour stays.
+		local a_button = Enum ~= nil and Enum.LUIButton ~= nil and Enum.LUIButton.LUI_KEY_XBA_PSCROSS or nil
+		log("unused press c" .. tostring(controller) .. " button " .. tostring(button) .. " A=" .. tostring(a_button))
+		if a_button ~= nil and button ~= a_button then
+			return
+		end
 		if IsGameTypeDOA ~= nil and IsGameTypeDOA() and Engine.IsSplitscreen() then
 			menu:setOwner(controller)
 		end

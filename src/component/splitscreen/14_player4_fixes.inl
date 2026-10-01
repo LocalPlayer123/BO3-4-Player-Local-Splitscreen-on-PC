@@ -192,6 +192,32 @@
 			return stock_splitscreen_player_count();
 		}
 
+		// The device assignment's last test (assign_player_count_call_rva) gives a new
+		// controller to player 2 when the count is above 1 and player 2 has no device.
+		// The count can read 2 with one player signed in (2026-10-01: ezz restored a 2
+		// from config.cfg, see unarchive_player_count, and the first pad plugged in
+		// became player 2 on its first press). Here the smaller of the count and the
+		// signed-in seats wins:
+		// the pad moves only when a second player exists, and never where the count
+		// alone would have kept it.
+		int assign_player_count()
+		{
+			const int count = player_count_detoured ? splitscreen_player_count_stub()
+			                                        : stock_splitscreen_player_count();
+			const auto seats = static_cast<int>(bridged_seat_count());
+			return seats > 0 ? std::min(count, seats) : count;
+		}
+
+		void install_assign_player_count()
+		{
+			if (!engine_bytes_match(assign_player_count_call_rva, assign_player_count_call_bytes)
+			    || !call_site_to(assign_player_count_call_rva, sizeof(assign_player_count_call_bytes),
+			                     reinterpret_cast<const void*>(&assign_player_count)))
+			{
+				note("[splitscreen] assign_player_count: engine bytes differ - not installed\n");
+			}
+		}
+
 		utils::hook::detour per_controller_update_hook;
 
 		void storage_pump_stub(const int controller)

@@ -81,6 +81,22 @@ component's startup completes first). Intermittent; starting again works.
 
 ## B. Fixed (listed because they show where to look next)
 
+### B13. A lone player's new controller became player 2 (fixed in 2.6.2)
+`splitscreen_playerCount` (dvar pointer `0x05355A00`, current int at +0x28) carries
+DVAR_ARCHIVE on the PC (flags at +0x18 = 0x1); PS4 CL_RegisterDvars registers it
+with flags 0 (`0x414191`). ezz writes archived dvars to
+`boiii_players/user/config.cfg` and runs that file at the next start, so a session
+that ended with 2 players began the next one at 2 with one player signed in. The
+gamepad device assignment (`0x022849F0`) then ends with "new device && count > 1 &&
+slot 1 has no device -> give it to controller 1", and the zz_splitscreen lobby join
+took any button of that unused controller. Measured with a read-only monitor
+(device table `0x17DEF3A0`, s_gamePads, seat bits via IsBeingUsed `0x020E3210`):
+pad to slot 0, 50 ms later to slot 1. Fixes: the archive flag is cleared (as on
+console; ezz's next config write drops the line), the assignment's call at
+`0x02284AE8` gets min(count, signed-in seats), and the lobby joins on A only.
+A/B in the measured state (count 2, one seat): 2.6.1 moved the pad to slot 1,
+2.6.2 kept it in slot 0.
+
 ### B12. MP 3-4 players: crash in CG_DrawNames (fixed in 2.6.1)
 The crash of A8 above. A sixth array belongs to the same group: `playerDetails`
 `0x04945090` [2][18] x 0x68 (PS4 `[4][18]`, cleared by CG_ClearPlayerDetails

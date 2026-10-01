@@ -127,6 +127,40 @@
 			}
 		}
 
+		// splitscreen_playerCount is not a saved setting on console: PS4 CL_RegisterDvars
+		// registers it with flags 0 (0x414191). The PC dvar carries DVAR_ARCHIVE (flags
+		// at +0x18 read 0x1 live, 2026-10-01), so ezz writes it to
+		// boiii_players/user/config.cfg and runs that file at the next start: a session
+		// that ended with two players began the next one at 2 with one player signed in,
+		// and the first pad plugged in became player 2 (see assign_player_count). Clear
+		// the flag as on console; ezz's next config write drops the line. Checked on
+		// every tick: a one-shot clear ran before the flag was set and never stuck
+		// (measured 2026-10-01; an external clear then held).
+		constexpr size_t dvar_flags_offset = 0x18;
+		constexpr uint32_t dvar_archive = 1;
+
+		void unarchive_player_count()
+		{
+			uint64_t dvar = 0;
+			std::memcpy(&dvar,
+			            reinterpret_cast<const void*>(base() + splitscreen_player_count_dvar_rva),
+			            sizeof(dvar));
+			if (dvar == 0)
+			{
+				return;
+			}
+			auto* flags = reinterpret_cast<uint32_t*>(dvar + dvar_flags_offset);
+			if (!readable(flags, sizeof(uint32_t)))
+			{
+				return;
+			}
+			if (*flags & dvar_archive)
+			{
+				const uint32_t cleared = *flags & ~dvar_archive;
+				write_bytes(flags, &cleared, sizeof(cleared));
+			}
+		}
+
 		// Keeps splitscreen_playerCount at the real local-client count; every 50 ms
 		// from mirror_signin_state. Set in the lobby: allocation happens before
 		// activation, and per_controller_update_stub stops running after a
@@ -134,6 +168,8 @@
 		// dvar system during early startup black-screened the client.
 		void sync_player_count()
 		{
+			unarchive_player_count();
+
 			uint32_t max_local = 0;
 			std::memcpy(&max_local,
 			            reinterpret_cast<const void*>(base() + cl_max_local_clients_rva),
