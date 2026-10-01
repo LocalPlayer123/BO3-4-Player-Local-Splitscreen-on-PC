@@ -96,6 +96,34 @@ its controller).
 
 ## B. Fixed (listed because they show where to look next)
 
+### B20. Players 3/4: L3 cannot sprint while moving
+Measured on 2.6.6 with four real controllers, ezz BOIII 3.0.0 and Proton
+Experimental: all four clients bind key 16 (L3) to action 9 (`+breath_sprint`),
+but players 3/4 never receive the L3 event while moving forward. Their
+`gpad_button_lstick_deflect_max` and `gpad_button_rstick_deflect_max` settings
+(16/17) are 0.0; players 1/2 have 1.0. The pad button update at `0x02286030`
+strips L3 when either left-stick axis exceeds the threshold (`0x02286117`,
+`0x02286130`), and R3 similarly for the right stick. A centered L3 press on
+player 4 did reach key 16 and sprint action state before the fix; R3 works
+while its stick is centered. Even slight deflection can suppress a click
+with a zero threshold.
+
+`settings_read_result_stub` deliberately skips the normal settings/default
+initialization for controllers 2/3 to avoid writes into PC `[2]` arrays. Its
+reset DDL context alone does not supply these float defaults. Intercept only
+the two `Settings_GetFloat` (`0x0164E800`) calls at `0x022860AB` and
+`0x022860BA`: for controller 2/3 and a zero value, return the pad update's
+stock no-profile fallback, 1.0. Other values and players 1/2 are preserved;
+profiles and bindings are not changed. Both call sites are checked before
+patching. The float getter has no Arxan caller guard or guarded tail call.
+
+Verified after the fix: L3/key 16 and sprint kbutton 32 while moving forward
+on all four clients; the player confirmed visible sprint, and R3/melee worked
+for players 3/4. `tools/sprint_probe.py --watch 120 --output sprint.jsonl`
+records bindings, DDL thresholds, stick axes, pad bits and action state through
+read-only `/proc/PID/mem` access on Linux. It needs permission to read the
+running process. Diagnostic builds log profile/effective threshold changes.
+
 ### B19. s_perController: BlurWorld setter not relocated (fixed in 2.6.6)
 The [2] -> [4] relocation of LUI_CoD `s_perController` (`0x16263310`, stride 0x14) missed
 `UI_CoD_BlurWorld` `0x01F14F40` (`lea rax,[rip+..]` at `0x01F14F47`, field +4). Blur radii

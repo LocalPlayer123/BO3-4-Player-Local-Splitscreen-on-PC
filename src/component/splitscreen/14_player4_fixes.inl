@@ -261,6 +261,67 @@
 			}
 		}
 
+		// L3 -> key 16 -> action 9 (+breath_sprint) is already bound on all four
+		// clients. The failure is earlier: guest profile settings 16/17 read 0.0,
+		// so UpdateButtons removes L3/R3 whenever the associated stick is deflected.
+		// Use its own no-profile default only for zero-valued added guest settings.
+		// Do not edit the profile, change bindings, or alter players 1/2.
+		float guest_stick_click_threshold(const int setting, const int controller)
+		{
+			const auto get_float = reinterpret_cast<float (*)(int, int)>(base() + stick_click_get_float_rva);
+			// Settings_GetFloat is an unguarded wrapper with a normal call to the
+			// settings reader (not a tail call into an Arxan caller check).
+			const float value = get_float(setting, controller);
+			const bool repaired = controller >= 2 && controller < 4
+				&& (setting == 16 || setting == 17) && value == 0.0f;
+			const float effective = repaired ? 1.0f : value;
+#ifdef SS_DIAG
+			if (controller >= 0 && controller < 4 && (setting == 16 || setting == 17))
+			{
+				// Log changes only, bounded even if a profile continually reloads.
+				static float previous[4][2]{};
+				static uint8_t logged[4][2]{};
+				const int stick = setting - 16;
+				auto& count = logged[controller][stick];
+				if (count < 16 && (count == 0 || previous[controller][stick] != value))
+				{
+					previous[controller][stick] = value;
+					++count;
+					note("[sprint] controller %d setting %d: profile %.6f -> effective %.6f%s",
+					     controller, setting, value, effective, repaired ? " (guest fallback)" : "");
+				}
+			}
+#endif
+			return effective;
+		}
+
+		void install_guest_stick_click_thresholds()
+		{
+			uint8_t left[5]{}, right[5]{};
+			const auto* fn = reinterpret_cast<const void*>(&guest_stick_click_threshold);
+			if (!engine_bytes_match(stick_click_left_call_rva, stick_click_left_call_bytes)
+				|| !engine_bytes_match(stick_click_right_call_rva, stick_click_right_call_bytes)
+				|| !call_site_bytes(stick_click_left_call_rva, sizeof(left), fn, left)
+				|| !call_site_bytes(stick_click_right_call_rva, sizeof(right), fn, right))
+			{
+				note("[sprint] stick-click thresholds: engine bytes differ or relay failed - not installed");
+				return;
+			}
+			if (!write_bytes(reinterpret_cast<void*>(base() + stick_click_left_call_rva), left, sizeof(left)))
+			{
+				note("[sprint] stick-click thresholds: left write failed - not installed");
+				return;
+			}
+			if (!write_bytes(reinterpret_cast<void*>(base() + stick_click_right_call_rva), right, sizeof(right)))
+			{
+				write_bytes(reinterpret_cast<void*>(base() + stick_click_left_call_rva),
+				            stick_click_left_call_bytes, sizeof(stick_click_left_call_bytes));
+				note("[sprint] stick-click thresholds: right write failed - left restored");
+				return;
+			}
+			note("[sprint] stick-click thresholds: both call sites installed");
+		}
+
 		// With two or more local players the game no longer pauses, in any mode: the PC
 		// already applies that to Zombies and Campaign, and in Multiplayer one player's
 		// Start paused the match and opened the pause menu on every screen (user,

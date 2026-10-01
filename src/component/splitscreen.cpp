@@ -383,6 +383,7 @@ namespace splitscreen
 			relocate_stream_views();
 			// Start/Back bound for players 2-4; no shared pause with 2+ local players.
 			install_guest_pad_binds();
+			install_guest_stick_click_thresholds();
 			install_no_shared_pause();
 
 			// CL_LocalClient_SetActive: the trigger for CL_Init(2) (see set_active_stub).

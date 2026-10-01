@@ -3543,6 +3543,17 @@ namespace splitscreen
 
 	// ======== splitscreen/14_player4_fixes.inl ========
 
+	// GamePad::UpdateButtons reads settings 16/17 before suppressing L3/R3 when
+	// abs(stick axis) exceeds the threshold. Added guests have zero-filled values;
+	// the stock no-profile fallback at 0x0228608E is 1.0f. Intercept only these reads.
+	inline constexpr uint32_t stick_click_get_float_rva = 0x0164E800;
+	inline constexpr uint32_t stick_click_left_call_rva = 0x022860AB;
+	inline constexpr uint32_t stick_click_right_call_rva = 0x022860BA;
+	inline constexpr uint8_t stick_click_left_call_bytes[] = {0xE8, 0x50, 0x87, 0x3C, 0xFF};
+	inline constexpr uint8_t stick_click_right_call_bytes[] = {0xE8, 0x41, 0x87, 0x3C, 0xFF};
+	static_assert(stick_click_left_call_rva + 5 - 0x00C378B0 == stick_click_get_float_rva);
+	static_assert(stick_click_right_call_rva + 5 - 0x00C378BF == stick_click_get_float_rva);
+
 	// DynEntCl_CleanUpOldModels 0x0146DBE0 (PS4 0x595790): `vec3_t viewOrigins[4]` on PS4,
 	// room for 2 on the PC ([rbp-0x49], stride 0xC, stack cookie at [rbp-0x29]); the loop
 	// runs `lc < cl_maxLocalClients`. Loop condition `cmp ebx, r8d` -> `cmp ebx, 2`.
