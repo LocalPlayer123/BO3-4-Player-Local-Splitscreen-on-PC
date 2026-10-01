@@ -3541,6 +3541,13 @@ namespace splitscreen
 
 	// ======== splitscreen/14_player4_fixes.inl ========
 
+	// DynEntCl_CleanUpOldModels 0x0146DBE0 (PS4 0x595790): `vec3_t viewOrigins[4]` on PS4,
+	// room for 2 on the PC ([rbp-0x49], stride 0xC, stack cookie at [rbp-0x29]); the loop
+	// runs `lc < cl_maxLocalClients`. Loop condition `cmp ebx, r8d` -> `cmp ebx, 2`.
+	inline constexpr uint32_t dynent_cleanup_viewer_bound_rva = 0x0146F3F8;
+	inline constexpr uint8_t dynent_cleanup_viewer_bound_stock[] = {0x41, 0x3B, 0xD8};
+	inline constexpr uint8_t dynent_cleanup_viewer_bound_fixed[] = {0x83, 0xFB, 0x02};
+
 	// Gamepad device assignment 0x022849F0: `call CL_SplitscreenPlayerCount` in its final
 	// test (new device && count > 1 && slot 1 has no device -> give it to controller 1).
 	inline constexpr uint32_t assign_player_count_call_rva = 0x02284AE8;

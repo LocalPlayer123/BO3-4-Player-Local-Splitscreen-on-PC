@@ -218,6 +218,23 @@
 			}
 		}
 
+		// DynEntCl_CleanUpOldModels removes the extra dynent model furthest from every
+		// viewer once the limit is reached (destructible debris - the Nuketown cars). It
+		// collects one view origin per active local client into a stack array: [4] on PS4,
+		// room for 2 on the PC, while the loop runs to cl_maxLocalClients. A third player
+		// wrote over the stack cookie: __fastfail(2) at 0x02BC814C (2026-10-01, 4-player
+		// MP on Nuk3town, WER dump boiii.exe.8172.dmp). The frame cannot grow, so the loop
+		// stops at two viewers: debris near players 3/4 may be cleaned up a little sooner.
+		void bound_dynent_cleanup_viewers()
+		{
+			if (!engine_bytes_match(dynent_cleanup_viewer_bound_rva, dynent_cleanup_viewer_bound_stock)
+			    || !write_bytes(reinterpret_cast<void*>(base() + dynent_cleanup_viewer_bound_rva),
+			                    dynent_cleanup_viewer_bound_fixed, sizeof(dynent_cleanup_viewer_bound_fixed)))
+			{
+				note("[splitscreen] dynent cleanup: engine bytes differ - not bounded\n");
+			}
+		}
+
 		utils::hook::detour per_controller_update_hook;
 
 		void storage_pump_stub(const int controller)

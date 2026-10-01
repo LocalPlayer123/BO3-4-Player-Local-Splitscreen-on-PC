@@ -81,6 +81,18 @@ component's startup completes first). Intermittent; starting again works.
 
 ## B. Fixed (listed because they show where to look next)
 
+### B15. 3-4 players: fail-fast in DynEntCl_CleanUpOldModels (fixed in 2.6.4)
+`0xC0000409` code 2 (`int 29h` at `0x02BC814C` after `__security_check_cookie`), no ezz dialog
+- only a WER dump. Stack: CG_ProcessDestructibleEvents -> DynEntCl_CreateEntityModel ->
+DynEntCl_AddEntityModel -> DynEntCl_CleanUpOldModels `0x0146DBE0`, which runs once the extra
+dynent model count reaches its limit (halved in split screen). PS4 `0x595790` collects one view
+origin per active local client into `vec3_t viewOrigins[4]`; the PC frame stores them at
+`[rbp+rcx*4-0x49]` (stride 0xC) with the stack cookie at `[rbp-0x29]` - room for two - while the
+loop still runs to `cl_maxLocalClients`, so the third origin's z lands on the cookie. The frame
+cannot grow: the loop condition at `0x0146F3F8` (`cmp ebx, r8d`) becomes `cmp ebx, 2`. Debris
+near players 3/4 may be cleaned up a little sooner. Seen once (4-player MP, Nuk3town); a
+4-player Nuk3town round with the fix ran without it (the path was not provoked on purpose).
+
 ### B14. MP: crash in SV_AddModifiedStats at the end of loading (fixed in 2.6.3)
 `0x02206280` `cmp edi, [rax+0x18]` with rax = statsDDLCtx.def = NULL. PC client_t
 (stride 0xE5170, svs.clients pointer `0x1767A398`): statsDDLCtx +0xE0B80, transferValidated

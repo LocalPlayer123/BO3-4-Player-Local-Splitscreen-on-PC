@@ -375,6 +375,8 @@ namespace splitscreen
 			                                      splitscreen_player_count_prologue, splitscreen_player_count_stub);
 			// A pad plugged in by a lone player stays player 1 (see assign_player_count).
 			install_assign_player_count();
+			// Debris cleanup: two view origins fit its stack array (see the function).
+			bound_dynent_cleanup_viewers();
 
 			// CL_LocalClient_SetActive: the trigger for CL_Init(2) (see set_active_stub).
 			hook_if_stock(set_active_hook, set_active_rva, set_active_prologue, set_active_stub);
