@@ -19,6 +19,12 @@ namespace utils::hook
 
 		void create(void* place, void* target);
 		void create(size_t place, void* target);
+
+		template <typename Place, typename Return, typename... Args>
+		void create(Place place, Return (*target)(Args...))
+		{
+			this->create(place, reinterpret_cast<void*>(target));
+		}
 		void clear();
 
 		void* get_place() const
@@ -34,13 +40,13 @@ namespace utils::hook
 		template <typename T>
 		T* get() const
 		{
-			return static_cast<T*>(this->get_original());
+			return reinterpret_cast<T*>(this->get_original());
 		}
 
 		template <typename T = void, typename... Args>
 		T invoke(Args... args)
 		{
-			return static_cast<T(*)(Args...)>(this->get_original())(args...);
+			return reinterpret_cast<T(*)(Args...)>(this->get_original())(args...);
 		}
 
 	private:
@@ -52,4 +58,10 @@ namespace utils::hook
 	// thunk when data is out of rel32 range.
 	void call(void* pointer, void* data);
 	void call(size_t pointer, void* data);
+
+	template <typename Place, typename Return, typename... Args>
+	void call(Place pointer, Return (*data)(Args...))
+	{
+		call(pointer, reinterpret_cast<void*>(data));
+	}
 }

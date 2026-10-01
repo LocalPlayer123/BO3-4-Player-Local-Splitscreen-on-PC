@@ -132,6 +132,18 @@ set MINHOOK=<folder with the MinHook source>
 build_standalone.cmd            (or: build_standalone.cmd diag)
 ```
 
+On Linux, cross-build with LLVM-MinGW and the same MinHook source:
+
+```sh
+LLVM_MINGW=/path/to/llvm-mingw MINHOOK=/path/to/minhook bash build_linux.sh release
+# Use diag instead of release to include trace logging.
+```
+
+Linux output is `out/linux-release/bo3_local_splitscreen.dll` (or
+`out/linux-diag/bo3_local_splitscreen.dll`), plus `smoke.exe` for the existing
+offline DLL load test. LLVM-MinGW UCRT 20260922 was tested under Proton
+Experimental; no Windows build environment is needed.
+
 Output `out\bo3_local_splitscreen.dll`. Players put it in
 `<game folder>\boiii\plugins\` together with `boiii\ui_scripts\zz_table_insert`,
 `zz_splitscreen` and `zz_mplan`. ezz loads every DLL in that folder and needs
