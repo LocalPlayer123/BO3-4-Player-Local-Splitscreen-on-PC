@@ -1327,6 +1327,10 @@ namespace splitscreen
 	inline constexpr uint32_t settings_read_result_rva = 0x0164DC50;
 	inline constexpr uint8_t settings_read_result_prologue[] = {0x40, 0x57, 0x48, 0x83, 0xEC, 0x20};
 	inline constexpr uint32_t storage_reset_rva = 0x0221AB10;
+	// Storage_GetDDLContext(controller, file type, slot) -> DDLContext* or null when the
+	// file is not ready (PS4 0xF7EC00). The reader of the stick-click limits uses it.
+	inline constexpr uint32_t storage_get_ddl_context_rva = 0x02219F80;
+	inline constexpr uint8_t storage_get_ddl_context_prologue[] = {0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10};
 	inline constexpr uint32_t shoutcaster_read_result_rva = 0x01650640;
 	inline constexpr uint8_t shoutcaster_read_result_prologue[] = {0x40, 0x53, 0x48, 0x83, 0xEC, 0x20};
 	inline constexpr uint32_t storage_read_rva = 0x0221AA70;
@@ -3324,6 +3328,13 @@ namespace splitscreen
 	};
 	inline constexpr uint32_t uiroot_bound_rva = 0x01F1CC37;
 	inline constexpr uint8_t uiroot_bound_expected[] = {0x83, 0xFB, 0x02};
+	// UI_CoD_Init's s_rootData clear (PS4 0xD046B1: memset 0x2C0, all four roots): the PC
+	// clears 0x160 = two roots, so roots 2/3 kept "in use" (+0xAC) from an earlier UI init.
+	// A later UI init without player 3 builds no Lua UIRoot2, and Live_RaiseLUIEvent for
+	// controller 2 (a pad plugged in mid-match) indexed nil -> Lua panic, int3 at 0x01D3C84B
+	// (2026-10-02). `mov r8d, 0x160` -> 0x2C0, the relocated block's size.
+	inline constexpr uint32_t uiroot_clear_size_rva = 0x01F1C9E2;
+	inline constexpr uint8_t uiroot_clear_size_expected[] = {0x41, 0xB8, 0x60, 0x01, 0x00, 0x00};
 	inline constexpr uint32_t uiroot_bound2_rva = 0x01F1CCDB;
 	inline constexpr uint8_t uiroot_bound2_expected[] = {0x83, 0xFB, 0x02};
 	inline constexpr uiroot_ref uiroot_refs[] = {

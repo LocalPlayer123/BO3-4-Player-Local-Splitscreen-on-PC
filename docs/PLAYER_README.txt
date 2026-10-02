@@ -1,4 +1,4 @@
-BO3 Local Splitscreen 2.6.6  -  build {VERSION}
+BO3 Local Splitscreen 2.6.7  -  build {VERSION}
 ================================================
 
 Up to FOUR local split-screen players for Call of Duty: Black Ops III on PC -
@@ -6,6 +6,24 @@ Zombies and Multiplayer (offline custom games, bots work too). An ezz BOIII
 plugin. Local (offline) play only.
 
 This is a BETA. Please report what works and what does not.
+
+
+NEW IN 2.6.7
+------------
+* Fixed: players 3 and 4 could not sprint with a controller (click the
+  left stick), in Zombies and Multiplayer, although the click worked in
+  menus. On PC the game ignores a stick click while that stick is pushed
+  further than a limit stored in the player's settings. Players 3 and 4
+  started with empty settings, so the limit was 0 and pushing forward -
+  which you do to sprint - cancelled the click. They now start from
+  player 1's settings. If you switched to the lefty layout or a Steam
+  remap to work around it, you can switch back.
+* Fixed: switching on a controller during a match could freeze the game
+  (error EXCEPTION_BREAKPOINT) when the same session had 3 or 4 players
+  before. The menu system kept the earlier player's screen marked as in
+  use and sent the new controller to a menu that no longer existed.
+
+Updating from 2.2 - 2.6.6: extract this zip over the old files.
 
 
 NEW IN 2.6.6
@@ -351,7 +369,8 @@ KNOWN ISSUES
 * After the lobby had 3 or 4 players, going back to fewer players and
   starting a match can crash at the end of the loading screen
   (BlackOps3.exe+0x140A11EC0). Restart the game before playing with fewer
-  players.
+  players. With 3 or 4 players the lobby button still reads ACTIVATE
+  SPLITSCREEN and does not reliably remove players.
 * 1.0 showed blocky, wrongly lit patches on the screens of players 3 and 4
   in some indoor areas (Der Eisendrache). Not re-tested since - reports
   welcome.

@@ -259,6 +259,23 @@
 				return false;
 			}
 
+			// UI_CoD_Init's clear covers all four roots again (PS4 clears 0x2C0), so a
+			// root is "in use" only if its client was active at the last UI init. On a
+			// byte mismatch only this site is skipped.
+			if (readable(reinterpret_cast<const void*>(b + uiroot_clear_size_rva),
+			             sizeof(uiroot_clear_size_expected))
+				&& std::memcmp(reinterpret_cast<const void*>(b + uiroot_clear_size_rva),
+				               uiroot_clear_size_expected, sizeof(uiroot_clear_size_expected)) == 0)
+			{
+				const uint32_t clear_size = uiroot_new_size;
+				write_bytes(reinterpret_cast<void*>(b + uiroot_clear_size_rva + 2), &clear_size,
+				            sizeof(clear_size));
+			}
+			else
+			{
+				note("[splitscreen] s_rootData clear size: engine bytes differ - left at two roots\n");
+			}
+
 			// The second bound; on a byte mismatch only this site is skipped.
 			if (readable(reinterpret_cast<const void*>(b + uiroot_bound2_rva),
 			             sizeof(uiroot_bound2_expected))

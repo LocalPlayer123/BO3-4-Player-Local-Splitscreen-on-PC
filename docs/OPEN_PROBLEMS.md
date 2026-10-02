@@ -92,9 +92,40 @@ Removing a seated guest's controller in the lobby and plugging another one in mi
 seats: the real pad turned on after three virtual pads became device 0 (player 1's pad)
 instead of player 4 - Steam Input lists physical pads first. The seat stays bound to the
 slot, not to the pad. Needs a defined rule for unplug/replug (console: the seat waits for
-its controller).
+its controller). Also seen (user screenshot, 2.6.6): with 3 players the lobby button still
+reads ACTIVATE SPLITSCREEN, and the lobby gives no reliable way back to fewer players.
+Not analysed yet.
 
 ## B. Fixed (listed because they show where to look next)
+
+### B21. Players 3/4 could not sprint: stick-click limits 0.0 (fixed in 2.6.7)
+User reports: L3 (sprint) dead for players 3/4 in MP and ZM, fine in menus, the same pad
+sprints as player 1/2; R3 bound to sprint worked. PS4 GPad_UpdateDigitals (`0xDB8130`)
+clears L3 (`0x40`) / R3 (`0x80`) while max(|stick.x|, |stick.y|) exceeds the constant 1.0.
+The PC gate `0x02286030` (per slot, from the pad update `0x02285D10`) takes both limits
+from the controller's profile once its user_settings file is ready: `0x0164E800(0x10 / 0x11,
+c)` = ProfileSetting `GPAD_BUTTON_L/R_STICK_DEFLECT`, DDL members
+`gpad_button_[lr]stick_deflect_max` of `profile_common.ddl`. The guest SettingsReadResult
+runs only Storage_Reset (see the stock path's dangers in the source), and the DDL reset
+memsets the buffer (PS4 `DDL_Buffer_ResetContext`): with no `user_settings_N.cgp` both
+limits read 0.0, so pushing forward drops the click. PS4 SaveChanges (`0x6F59B0`) writes a
+new profile as initialized, so the zeros can also come back from disk. Machines with
+`user_settings_2/3.cgp` from older builds read 1.0 - why tests here always sprinted. Fix:
+after the guest's settings read, its limits are decoded from the DDL context
+(Storage_GetDDLContext `0x02219F80`); if one is <= 0, player 1's settings buffer is copied
+in (same def and length). Verified without guest settings files: controllers 2/3 buffer =
+player 1's, limits 1.0.
+
+### B20. Freeze when a controller is switched on mid-match (fixed in 2.6.7)
+ezz dialog EXCEPTION_BREAKPOINT at `0x01D3C84B` (hksDefaultPanic): Gpadupdate_f
+`0x02286010` -> pad assignment `0x02284780` -> Live_RaiseLUIEvent `0x01E00EE0` -> "attempt
+to index a nil value": the event for controller 2 went to `LUI.roots.UIRoot2`, which did
+not exist in a 2-player match. UI_CoD_Init (PS4 `0xD04570`) clears s_rootData with memset
+`0x2C0` (all four roots) before marking roots of active clients in use; the PC clears
+`0x160` (`mov r8d, 0x160` at `0x01F1C9E2`), and the relocated roots 2/3 kept their in-use
+flag (+0xAC) from an earlier 3-player UI init, so UI_CoD_GetRootNameForController
+`0x01F1C1C0` answered "UIRoot2" instead of "UIRootFull". Fix: the clear covers the
+relocated block (`0x2C0`), verified in the live process.
 
 ### B19. s_perController: BlurWorld setter not relocated (fixed in 2.6.6)
 The [2] -> [4] relocation of LUI_CoD `s_perController` (`0x16263310`, stride 0x14) missed
