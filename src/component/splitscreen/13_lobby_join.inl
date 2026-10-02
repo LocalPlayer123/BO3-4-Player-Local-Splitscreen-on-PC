@@ -291,7 +291,7 @@
 			}
 		}
 
-		// Defined further down: player 3's own controller (A joins, B / unplug leaves).
+		// Defined further down: player 3's own controller (A joins, B leaves).
 		void guest2_input_frame();
 
 		// Every frame (per_controller_update_stub, controller 2).
@@ -532,18 +532,21 @@
 			}
 		}
 
-		// --- Player 3's own controller: A joins, B / unplugging leaves ---------
+		// --- Player 3's own controller: A joins, B leaves -----------------------
 		// On PC the lobby menu only listens to controllers below
 		// GetMaxLocalControllers() (2), so the component reads controller 2's buttons
 		// itself, frontend only. Console runs the same join/leave from Lua.
 		// Button bits: gamepad record +0x08; A = 0x100, B = 0x200.
+		// Unplugging keeps the seat, as on console: CL_ControllerRemoved (PS4 0x415D80)
+		// only raises the LUI event, and no stock Lua signs a player out on it (only
+		// the two lobby button widgets listen, to refresh their label). The engine's
+		// device assignment (0x022849F0) gives the next new pad to the lowest empty
+		// slot - the waiting seat. Until 2.6.7 a guest left after 30 frames unplugged.
 		constexpr size_t gamepad_buttons = 0x08;
 		constexpr uint64_t guest2_join_request_ms = 3000;
-		constexpr uint32_t guest2_unplug_frames = 30;
 		uint32_t guest2_prev_buttons = 0;
 		bool guest2_join_requested = false;
 		uint64_t guest2_join_request_tick = 0;
-		uint32_t guest2_unplugged_frames = 0;
 		bool guest2_leave_in_progress = false;
 
 		uint32_t gamepad_buttons_of(const size_t slot)
@@ -625,13 +628,11 @@
 			if (!game::Com_IsRunningUILevel())
 			{
 				guest2_join_requested = false;
-				guest2_unplugged_frames = 0;
 				return;
 			}
 
 			if (!controller_seated(2))
 			{
-				guest2_unplugged_frames = 0;
 				// Seat lost but still listed: finish the leave (no member without a seat).
 				if (guest2_lobby_enrolled && guest2_listed_in_game_lobby())
 				{
@@ -669,50 +670,21 @@
 			if ((pressed & game_button_b) && !gamepad_models_widened)
 			{
 				guest2_leave();
-				return;
 			}
-			if (!connected)
-			{
-				if (++guest2_unplugged_frames >= guest2_unplug_frames)
-				{
-					guest2_unplugged_frames = 0;
-					guest2_leave();
-				}
-				return;
-			}
-			guest2_unplugged_frames = 0;
 		}
 
-		// Player 4's controller: A and B go through the stock Lua. Leaving on unplug,
-		// or when the seat is gone but the lobby still lists him, is done here.
-		uint32_t guest3_unplugged_frames = 0;
-
+		// Player 4's controller: A and B go through the stock Lua. Only the cleanup is
+		// done here: the seat is gone but the lobby still lists him.
 		void guest3_input_frame()
 		{
 			if (!gamepads_activated || !game::Com_IsRunningUILevel())
 			{
-				guest3_unplugged_frames = 0;
 				return;
 			}
-			if (!controller_seated(3))
+			if (!controller_seated(3) && guest3_lobby.enrolled && guest_listed_in_game_lobby(3))
 			{
-				guest3_unplugged_frames = 0;
-				if (guest3_lobby.enrolled && guest_listed_in_game_lobby(3))
-				{
-					guest_leave(3);
-				}
-				return;
+				guest_leave(3);
 			}
-			if (!gamepad_connected(3))
-			{
-				if (++guest3_unplugged_frames >= guest2_unplug_frames)
-				{
-					guest3_unplugged_frames = 0;
-					guest_leave(3);
-				}
-				return;
-			}
-			guest3_unplugged_frames = 0;
 		}
 
 		void cl_init_watch()
@@ -753,11 +725,37 @@
 
 		void run_cl_init_for_local_client2();
 
+		// ---- Count per match (A9; docs/SIGNIN_REDESIGN.md D3) ----
+		// PS4 CL_SetupClientsForIngame (0x40B870: CompressClients, AssignUIContextsForInGame,
+		// SetAllUsedActive) runs right before each match's CL_AllocatePerLocalClientMemory
+		// (CL_ConnectFromLobby 0x4154DB -> 0x4155A0, LobbyLaunch_PreloadMap; SV_SpawnServer
+		// only for a map not preloaded from the menus, i.e. devmap). Every match is sized for
+		// the clients in use at its start, smaller or larger than the last. The PC has the
+		// same sequence (0x0135CD10, an inline copy at 0x0134C5DB). set_active_stub latches
+		// that count; the allocator's next count call consumes it (splitscreen_player_count_stub).
+		uint32_t match_latch = 0;
+		bool match_latch_pending = false;
+		bool alloc_count_site_ok = false;   // the allocator's count call is stock (install)
+
 		// SetAllUsedActive takes no arguments (PS4 0x1517020: for i in 0..3
 		// SetActive(i, IsBeingUsed(i))). Run the engine's pass first, then ours.
 		void set_active_stub()
 		{
 			set_active_hook.invoke<void>();
+
+			// The clients this match starts with, by the predicate the engine pass just used.
+			// Seat records 2/3 exist only once relocated.
+			if (signin_relocated)
+			{
+				const auto used = reinterpret_cast<bool (*)(int)>(base() + is_being_used_rva);
+				uint32_t players = 0;
+				for (int lc = 0; lc < 4; ++lc)
+				{
+					players += used(lc) ? 1 : 0;
+				}
+				match_latch = players;
+				match_latch_pending = players > 0;
+			}
 
 			// Seat check: without it the first call at boot ran CL_Init(2) for a client
 			// that did not exist yet and killed startup. Three used seats (bit 0 of each

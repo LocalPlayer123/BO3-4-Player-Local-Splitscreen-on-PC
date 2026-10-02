@@ -1,4 +1,4 @@
-BO3 Local Splitscreen 2.6.7  -  build {VERSION}
+BO3 Local Splitscreen 2.6.8  -  build {VERSION}
 ================================================
 
 Up to FOUR local split-screen players for Call of Duty: Black Ops III on PC -
@@ -6,6 +6,29 @@ Zombies and Multiplayer (offline custom games, bots work too). An ezz BOIII
 plugin. Local (offline) play only.
 
 This is a BETA. Please report what works and what does not.
+
+
+NEW IN 2.6.8
+------------
+* Fixed: after the lobby had 3 or 4 players, going back to fewer players
+  and starting a match crashed at the end of the loading screen
+  (BlackOps3.exe+0x140A11EC0). The game was still set up for the larger
+  number of players. Now every match is set up for the players it starts
+  with, as on console - fewer or more than the last one.
+* Changed: the lobby button now reads DEACTIVATE SPLITSCREEN as soon as
+  extra players are in and no further controller is waiting to join, so you
+  can always go back to one player (then ACTIVATE adds player 2 again).
+  Before, it kept saying ACTIVATE with 2 or 3 players. Players can also
+  leave on their own with B.
+* Changed: a player whose controller switches off in the lobby keeps their
+  place, as on console; the next controller you connect takes it. Before,
+  that player was removed after half a second.
+* New: update notice. Once per start the mod asks GitHub whether a newer
+  version exists and, if so, shows a message in the menu. Nothing about you
+  or your PC is sent. To switch it off, add -splitscreen_noupdate to the
+  launch options.
+
+Updating from 2.2 - 2.6.7: extract this zip over the old files.
 
 
 NEW IN 2.6.7
@@ -344,7 +367,8 @@ PLAY
    game's own rule).
 3. In the lobby, every extra player presses A on their controller to join.
    B on that controller leaves again.
-   ("Activate Splitscreen" also adds the next controller.)
+   ("Activate Splitscreen" also adds the next waiting controller;
+   "Deactivate Splitscreen" removes every extra player.)
 4. Start the game. 3 players = 3 screens, 4 players = 2 x 2 screens.
 
 Players 2-4 get a copy of player 1's weapon kits and stats every time they
@@ -363,14 +387,9 @@ KNOWN ISSUES
 * Let players 3 and 4 join in the lobby (after choosing ZOMBIES or
   MULTIPLAYER), not in the main menu - a controller joining in the main
   menu can get a garbled name.
-* Connect all controllers before players join, and do not switch a
-  controller off while its player is in the lobby: the players can end up
-  on the wrong controller. If that happens, restart the game.
-* After the lobby had 3 or 4 players, going back to fewer players and
-  starting a match can crash at the end of the loading screen
-  (BlackOps3.exe+0x140A11EC0). Restart the game before playing with fewer
-  players. With 3 or 4 players the lobby button still reads ACTIVATE
-  SPLITSCREEN and does not reliably remove players.
+* Connect all controllers before players join. Steam numbers the
+  controllers (connected controllers first), and a controller connected
+  later can take another player's place. If that happens, restart the game.
 * 1.0 showed blocky, wrongly lit patches on the screens of players 3 and 4
   in some indoor areas (Der Eisendrache). Not re-tested since - reports
   welcome.

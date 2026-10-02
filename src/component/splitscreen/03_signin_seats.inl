@@ -583,8 +583,9 @@
 		// clears only the flag, so it is honoured at once.
 		uint8_t remembered_seat_bits = 0;
 
-		// Highest seat count seen this session with flags == 1. Drives the one-way
-		// allocation-floor commit in the stub.
+		// Highest seat count seen with flags == 1 since the last match that had fewer
+		// players (a smaller match lowers it to its own size, see set_active_stub). Drives
+		// the allocation-floor commit in the stub.
 		uint32_t committed_seats = 0;
 
 		uint32_t bridged_seat_count()

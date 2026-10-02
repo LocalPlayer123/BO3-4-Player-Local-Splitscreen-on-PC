@@ -79,13 +79,7 @@ mixed third-party + Xbox pads (one pad probably seen through two APIs).
 Exit code 0, no dialog, no dump, inside the game's own `Com_Init` (the
 component's startup completes first). Intermittent; starting again works.
 
-### A9. Crash at match start after the lobby went from 4 players back to 2 (2.6.6)
-`0xC0000005` at `0x00A11EC0` `cmp dword ptr [rcx+0x24], 0x12` with rcx =
-`[base + lc*0x342720 + 0x30] + 0x8C390` = `0x8C390`: a per-client pointer that is NULL.
-The loop runs `lc < cl_maxLocalClients` (`cmp r9d, [0x05323720]` at `0x00A11E8B`); after 4
-seats the count stays 4, the 2-player match sets up clients 0/1 only. Seen once (watcher:
-both clients reached CA_ACTIVE, then the process died; ezz deleted its minidump on the next
-start). The function is Arxan-flattened; not looked up on PS4 yet.
+### A9. (fixed in 2.6.8, see B22)
 
 ### A10. Controller slots after hot-plugging (2.6.6)
 Removing a seated guest's controller in the lobby and plugging another one in mixes up
@@ -94,9 +88,34 @@ instead of player 4 - Steam Input lists physical pads first. The seat stays boun
 slot, not to the pad. Needs a defined rule for unplug/replug (console: the seat waits for
 its controller). Also seen (user screenshot, 2.6.6): with 3 players the lobby button still
 reads ACTIVATE SPLITSCREEN, and the lobby gives no reliable way back to fewer players.
-Not analysed yet.
+Since 2.6.8 the button reads DEACTIVATE whenever guests are in and no further pad is waiting, and an unplugged guest keeps the seat (B23). Still open: Steam's renumbering is invisible to the game (no device disappears); the PC's own per-player Gamepad option (Options > Controls, `Engine.GamepadsConnectedMap(controller, port)` -> `0x02284C30`, no 2-slot bound once the pad table is relocated) is the planned answer (docs/SIGNIN_REDESIGN.md D4).
 
 ## B. Fixed (listed because they show where to look next)
+
+### B23. Lobby button could not remove players; unplug removed a guest (2.6.8)
+The PC button (SplitscreenLobbyButtonPC) takes the first matching state: Hide, MapController,
+Available (ACTIVATE: play available, `IsSplitscreenLobbyRoomAvailable()`, any pad), Active
+(DEACTIVATE), AddController. Offline there is room for 4, so with 2-3 players DEACTIVATE never
+showed. zz_splitscreen narrows `IsSplitscreenLobbyRoomAvailable` while guests are in: room only
+while a controller has an active pad and no seat (`Engine.GamepadsConnectedIsActive` = `0x02285700`,
+the per-controller test of GetNonUsedControllerCount, PS4 `0xD5BBA0`); the click uses the same
+predicate. The component's 30-frame unplug leave for controllers 2/3 is gone: PS4
+CL_ControllerRemoved (`0x415D80`) only raises the LUI event and no stock Lua signs a player out.
+
+### B22. Smaller match after 3-4 players crashed at 0x00A11EC0 (fixed in 2.6.8)
+`lc < cl_maxLocalClients` (`0x00A11E8B`) dereferenced client 2's NULL per-client pointer: the mod
+committed the player count and the allocation floor one-way per session, so cl_maxLocalClients
+(2632 compares; written only by the allocator, `0x0135D4A9` / `0x0135DC8D`) stayed 3-4. PS4
+CL_SetupClientsForIngame (`0x40B870`: CompressClients, AssignUIContextsForInGame,
+SetAllUsedActive) runs right before each match's CL_AllocatePerLocalClientMemory (`0x416A10`), so
+every match is sized for its own players. Fix: the SetAllUsedActive detour latches the clients in
+use; the count detour recognises the allocator by the return address of its count call
+(`0x0135D685`) and consumes the latch. A smaller match lowers the session commitment to its size
+and gets the state of a fresh match of that size first: frame pump, netchan poll and cgame frame
+loop bounds (they index heap memory sized by cl_maxLocalClients), the LUI context bound back to
+3, allocation floor 2. The deferred widens return once a larger match is allocated. Verified: 3
+seated -> 2-player match sized 2 (was 3); then a 3-player round sized 3 with the bounds back at 3.
+
 
 ### B21. Players 3/4 could not sprint: stick-click limits 0.0 (fixed in 2.6.7)
 User reports: L3 (sprint) dead for players 3/4 in MP and ZM, fine in menus, the same pad

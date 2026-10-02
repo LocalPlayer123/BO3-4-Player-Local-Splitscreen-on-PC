@@ -45,6 +45,87 @@
 			}
 		}
 
+		// Count per match (see set_active_stub): a match with fewer players than the session
+		// has seated gets the state of a fresh match of its size before it is allocated - the
+		// four per-frame loop bounds (they index heap memory sized by cl_maxLocalClients, see
+		// above), the stock allocation floor 2 and the dvar. The LUI context bound goes back
+		// to 3, the value held since startup that every 1-3 player match runs with. Lowering
+		// only ever visits fewer clients; run_cl_init_for_local_client2 and
+		// widen_round_for_four raise the bounds again once a larger match is allocated.
+		void size_match_for_players(const uint32_t players)
+		{
+			const auto target = static_cast<uint8_t>(std::clamp<uint32_t>(players, 2, 4));
+			const auto b = base();
+			const auto lower = [&](const size_t rva, const uint8_t to)
+			{
+				auto* at = reinterpret_cast<uint8_t*>(b + rva);
+				return readable(at, 1) && *at > to && *at <= 4 && write_bytes(at, &to, 1);
+			};
+
+			bool lowered = lower(cl_frame_pump_imm_rva, target);
+			lowered = lower(netchan_poll_imm_rva, target) || lowered;
+
+			// The cgame frame loop is one group: all five or none (run_cl_init_for_local_client2).
+			uint8_t group = 0;
+			bool group_above = true;
+			for (const auto rva : cg_frame_imms)
+			{
+				const auto* at = reinterpret_cast<const uint8_t*>(b + rva);
+				if (!readable(at, 1) || *at <= target || *at > 4 || (group && *at != group))
+				{
+					group_above = false;
+					break;
+				}
+				group = *at;
+			}
+			if (group_above)
+			{
+				uint32_t wrote = 0;
+				for (const auto rva : cg_frame_imms)
+				{
+					wrote += write_bytes(reinterpret_cast<uint8_t*>(b + rva), &target, 1) ? 1 : 0;
+				}
+				if (wrote != std::size(cg_frame_imms))
+				{
+					for (const auto rva : cg_frame_imms)
+					{
+						write_bytes(reinterpret_cast<uint8_t*>(b + rva), &group, 1);
+					}
+				}
+				else
+				{
+					lowered = true;
+				}
+			}
+
+			if (target < 4 && lui_ctx_held)
+			{
+				lowered = lower(lui_ctx_bound_rva + 3, 3) || lowered;
+			}
+
+			auto* floor_imm = reinterpret_cast<uint8_t*>(b + alloc_floor_rva);
+			if (readable(floor_imm, 1) && *floor_imm > 0x02 && *floor_imm <= 0x04)
+			{
+				const uint8_t stock_floor = 0x02;
+				write_bytes(floor_imm, &stock_floor, 1);
+			}
+
+			if (lowered)
+			{
+				if (target < 3)
+				{
+					lc2_widens_done = false;
+				}
+				if (target < 4)
+				{
+					round4_widened = false;
+				}
+			}
+			set_splitscreen_player_count(std::max<uint32_t>(players, 1));
+			note("[splitscreen] match of %u players: bounds %u, floor 2%s", players, target,
+			     lowered ? ", lowered" : "");
+		}
+
 		// The stock answer, computed here - never through invoke(): the original
 		// (0x027C1AB0, PS4 0x01516BE0) is "no dvar -> 1, else jmp to the dvar getter",
 		// and that getter's Arxan check (0x02261DF2: byte before the return address
@@ -110,11 +191,31 @@
 					}
 				}
 
+				// Count per match (set_active_stub, size_match_for_players). The allocator asks
+				// first thing (alloc_count_return_rva) and consumes the latch this match's setup
+				// set. A match with fewer players than the session's commitment lowers the
+				// commitment to its own size, so the logic below sizes and answers it as itself,
+				// also through the map-load re-seat dip. Afterwards the commitment grows only as
+				// players seat again - the state of a fresh session, whose menus run with the
+				// stock allocation and loop bounds while players join; the widens return once a
+				// larger match has been allocated.
+				if (alloc_count_site_ok && match_latch_pending
+				    && _ReturnAddress() == reinterpret_cast<void*>(base() + alloc_count_return_rva))
+				{
+					match_latch_pending = false;
+					if (raise_local_client_count && match_latch < committed_seats)
+					{
+						committed_seats = match_latch;
+						size_match_for_players(match_latch);
+					}
+				}
+
 				// Commit the allocation floor: max(count, floor) at alloc_floor_rva feeds
 				// every per-client allocation and cl_maxLocalClients. Once three (four) seats
 				// have genuinely seated it stays 3 (4) for the session, so the map-load
 				// reallocation cannot shrink below the party. Race-free: our caller is the
-				// allocator itself. Only 02 -> 03 -> 04, one-way.
+				// allocator itself. Only 02 -> 03 -> 04, one-way - except for the match
+				// itself, above.
 				if (raise_local_client_count)
 				{
 					const uint32_t constituted = seat_count();
@@ -430,9 +531,12 @@
 		// Per-controller update detour: advances the guest joins on the game's
 		// own thread. (Reaping wedged guest storage tasks here was tried and
 		// disabled: it blacked out the renderer. History: LOG.md, "reaper".)
+		void publish_update_notice(int controller);   // 16_update_check.inl
+
 		void per_controller_update_stub(const int controller)
 		{
 			per_controller_update_hook.invoke<void>(controller);
+			publish_update_notice(controller);
 
 			// Guest sign-in: on the game's own thread (the renderer pipeline
 			// answers engine predicates wrongly, see cl_init_watch) and outside

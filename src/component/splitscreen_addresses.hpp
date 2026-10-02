@@ -1340,6 +1340,12 @@ namespace splitscreen
 		0x48, 0x8B, 0x0D, 0x49, 0x3F, 0xB9, 0x02, // mov rcx, [rip -> splitscreen_playerCount]
 		0x48, 0x85, 0xC9,                         // test rcx, rcx
 	};
+	// CL_AllocatePerLocalClientMemory (0x0135D670, PS4 0x416A10) asks the count first:
+	// `call splitscreen_player_count_rva` here. The count detour recognises the allocator
+	// by this call's return address (count per match, docs/SIGNIN_REDESIGN.md D3).
+	inline constexpr uint32_t alloc_count_call_rva = 0x0135D685;
+	inline constexpr uint32_t alloc_count_return_rva = alloc_count_call_rva + 5;
+	static_assert(alloc_count_return_rva + 0x01464426 == splitscreen_player_count_rva);
 	inline constexpr uint32_t cl_init_rva = 0x01359410;
 	inline constexpr uint32_t cl_init_range_imm_rva = 0x0135948B;
 	inline constexpr uint32_t cbuf_execute_range_imm_rva = 0x020DFA30;
@@ -3633,6 +3639,12 @@ namespace splitscreen
 	inline constexpr uint32_t button_config_exec_call_rva = 0x01650206;
 	inline constexpr uint8_t button_config_exec_call_bytes[] = {0xE8, 0xF5, 0x09, 0xA9, 0x00};
 	inline constexpr uint32_t cmd_execute_single_command_rva = 0x020E0C00;   // (lc, controller, text, r9)
+	// `sub rsp,38h; mov byte [rsp+20h],0` - checked before the update notice calls it directly.
+	inline constexpr uint8_t cmd_execute_single_command_prologue[] = {0x48, 0x83, 0xEC, 0x38, 0xC6, 0x44, 0x24, 0x20, 0x00};
+	// Live_RaiseLUIEvent(controller, name) (PS4 0xC13EA0; CL_ControllerInserted raises
+	// "controller_inserted" with it): `push rdi; sub rsp,0A0h`.
+	inline constexpr uint32_t live_raise_lui_event_rva = 0x01E00EE0;
+	inline constexpr uint8_t live_raise_lui_event_prologue[] = {0x40, 0x57, 0x48, 0x81, 0xEC, 0xA0, 0x00, 0x00, 0x00};
 	static_assert(button_config_exec_call_rva + 5 + 0x00A909F5 == cmd_execute_single_command_rva);
 
 	// CG_CanPauseGame 0x00843BD0 (PS4 0x224FB0). The PC adds "Zombies/Campaign with more

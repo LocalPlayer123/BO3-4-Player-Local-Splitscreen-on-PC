@@ -17,6 +17,8 @@
 #include "splitscreen_ezz.hpp"
 
 #include <d3d11.h>   // sun shadow sidecar views (COM calls only, no import library)
+#include <winhttp.h> // update notice: one HTTPS GET per start (splitscreen/16_update_check.inl)
+#pragma comment(lib, "winhttp.lib")
 
 // Local splitscreen for up to four players; the stock PC build stops at two.
 //
@@ -64,6 +66,7 @@ namespace splitscreen
 		#include "splitscreen/13_lobby_join.inl"
 		#include "splitscreen/14_player4_fixes.inl"
 		#include "splitscreen/15_stats_cache.inl"
+		#include "splitscreen/16_update_check.inl"
 
 		// Marks the image as patched: runtime.cpp's patched-twice check reads this
 		// magic and stands down instead of applying the component a second time.
@@ -375,6 +378,9 @@ namespace splitscreen
 
 			player_count_detoured = hook_if_stock(splitscreen_player_count_hook, splitscreen_player_count_rva,
 			                                      splitscreen_player_count_prologue, splitscreen_player_count_stub);
+			// Count per match: the allocator's own count call must be the stock one.
+			alloc_count_site_ok = player_count_detoured
+				&& call_site_targets(alloc_count_call_rva, splitscreen_player_count_rva);
 			// A pad plugged in by a lone player stays player 1 (see assign_player_count).
 			install_assign_player_count();
 			// Debris cleanup: two view origins fit its stack array (see the function).
@@ -384,6 +390,8 @@ namespace splitscreen
 			// Start/Back bound for players 2-4; no shared pause with 2+ local players.
 			install_guest_pad_binds();
 			install_no_shared_pause();
+			// Once per start: is a newer release out? (see run_update_check)
+			start_update_check();
 
 			// CL_LocalClient_SetActive: the trigger for CL_Init(2) (see set_active_stub).
 			hook_if_stock(set_active_hook, set_active_rva, set_active_prologue, set_active_stub);

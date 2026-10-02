@@ -17,11 +17,15 @@
 -- CoD.Menu.HandleButtonPress on PC as well - the stock body, unchanged otherwise.
 --
 -- The PC-only button (LobbySplitscreenToggle, FE_ListAdditonal) only ever adds
--- or removes CONTROLLER 1. Its label (SplitscreenLobbyButtonPC) reads ACTIVATE
--- while there is room (used controllers < lobby_maxLocalPlayers) and DEACTIVATE
--- once the lobby is full. The override makes the click do what the label says:
--- ACTIVATE adds the next unused controller through the stock join, DEACTIVATE
--- removes every extra local player.
+-- or removes CONTROLLER 1. Its label (SplitscreenLobbyButtonPC) takes the first
+-- matching state of Hide, MapController, Available (ACTIVATE: play available,
+-- IsSplitscreenLobbyRoomAvailable(), any pad), Active (DEACTIVATE: more than one
+-- player), AddController. Offline there is room for 4, so with 2 or 3 players
+-- ACTIVATE always won and nobody could be removed. Now, with guests in the lobby,
+-- there is "room" only while a connected pad has no seat; otherwise the label
+-- reads DEACTIVATE. The click asks the same question as the label: ACTIVATE adds
+-- that pad's controller through the stock join (alone: the stock toggle, which
+-- also serves keyboard + one pad), DEACTIVATE removes every extra local player.
 --
 -- BOIII's LUI sandbox has no pcall: every global is checked for nil first.
 -- The overrides are (re)installed from a timer, so load order does not matter.
@@ -173,11 +177,57 @@ local function drop_offline_restricted_warning()
 	return true
 end
 
-local function room_left()
+-- A controller with a connected pad and no seat. Engine.GamepadsConnectedIsActive
+-- is the per-controller test of GetNonUsedControllerCount (PS4 0xD5BBA0: pad active,
+-- not being used); the component widens both to four controllers.
+local function free_pad_controller()
+	if Engine.GamepadsConnectedIsActive == nil then
+		return nil
+	end
+	for c = 1, SUPPORTED - 1 do
+		if Engine.IsControllerBeingUsed(c) ~= true and Engine.GamepadsConnectedIsActive(c) == true then
+			return c
+		end
+	end
+	return nil
+end
+
+local function guests_seated()
+	return Engine.GetUsedControllerCount() > 1
+end
+
+-- The stock "room" (CoD.LobbyBase.SplitscreenLobbyRoomAvailable; used <
+-- lobby_maxLocalPlayers), narrowed while guests are in: then only a pad without a
+-- seat makes room. Alone the stock answer stands.
+local stock_room = nil
+local wrapped_room = nil
+local function stock_room_left()
+	if stock_room ~= nil then
+		return stock_room() == true
+	end
 	if Dvar.lobby_maxLocalPlayers == nil then
 		return false
 	end
 	return Engine.GetUsedControllerCount() < Dvar.lobby_maxLocalPlayers:get()
+end
+
+local function room_for_another()
+	if not stock_room_left() then
+		return false
+	end
+	return not guests_seated() or free_pad_controller() ~= nil
+end
+
+-- The button's own decision (SplitscreenLobbyButtonPC "Available"), so the click
+-- always does what the label says.
+local function button_reads_activate()
+	if IsSplitscreenPlayAvailable ~= nil and not IsSplitscreenPlayAvailable() then
+		return false
+	end
+	if GamepadsConnectedAny ~= nil and not GamepadsConnectedAny() then
+		return false
+	end
+	return room_for_another()
 end
 
 local function install()
@@ -188,6 +238,15 @@ local function install()
 		log("CoD.Menu.HandleButtonPress: console branch installed")
 	end
 
+	if IsSplitscreenLobbyRoomAvailable ~= nil and IsSplitscreenLobbyRoomAvailable ~= wrapped_room then
+		stock_room = IsSplitscreenLobbyRoomAvailable
+		wrapped_room = function()
+			return room_for_another()
+		end
+		IsSplitscreenLobbyRoomAvailable = wrapped_room
+		log("IsSplitscreenLobbyRoomAvailable: guests need a free pad")
+	end
+
 	if LobbySplitscreenToggle ~= nil and LobbySplitscreenToggle ~= wrapped_toggle then
 		local stock_toggle = LobbySplitscreenToggle
 		wrapped_toggle = function(menu, controller)
@@ -195,7 +254,7 @@ local function install()
 				and not LuaUtils.LobbyProcessQueueEmpty() then
 				return
 			end
-			if not room_left() then
+			if not button_reads_activate() then
 				-- DEACTIVATE: every extra local player leaves, in the engine's own
 				-- order (LobbyRemoveAllLocalSplitscreenClient walks 1..n).
 				log("toggle: deactivate all, used=" .. tostring(Engine.GetUsedControllerCount()))
@@ -208,20 +267,16 @@ local function install()
 				end
 				return
 			end
-			if Engine.IsControllerBeingUsed(1) ~= true then
+			if not guests_seated() then
 				log("toggle: activate controller 1 (stock)")
 				return stock_toggle(menu, controller)
 			end
-			-- ACTIVATE with player 2 already in: the next unused controller joins
-			-- through the stock join (the same call its own A press makes).
-			for c = 2, SUPPORTED - 1 do
-				if Engine.IsControllerBeingUsed(c) ~= true then
-					log("toggle: activate controller " .. c .. " (stock join)")
-					if LobbyAddLocalClient ~= nil then
-						LobbyAddLocalClient(menu, c)
-					end
-					return
-				end
+			-- ACTIVATE with guests already in: the controller of a pad without a seat
+			-- joins through the stock join (the same call its own A press makes).
+			local c = free_pad_controller()
+			if c ~= nil and LobbyAddLocalClient ~= nil then
+				log("toggle: activate controller " .. c .. " (stock join)")
+				LobbyAddLocalClient(menu, c)
 			end
 		end
 		LobbySplitscreenToggle = wrapped_toggle
@@ -250,19 +305,81 @@ local function install()
 	end
 end
 
-local host = LUI.roots.UIRoot0
-if host == nil then
-	return
+-- Update notice. The component asks GitHub once per start whether a newer release
+-- exists and, if so, sets splitscreen_update_current and splitscreen_update_latest
+-- (game thread, menus only). Shown once per game start with the game's own message
+-- dialog (LuaUtils.ShowMessageDialog, the call BOIII uses for its own notices), in
+-- the menus and while one player is in, so it never takes a joining player's press.
+-- "Shown" is kept in the dvar: this script starts again after every match.
+-- Engine.DvarString answers "" for a dvar that does not exist (PC 0x01FD52C0).
+local UPDATE_SHOWN = "shown"
+local update_shown = false
+
+local function is_version(text)
+	return type(text) == "string" and string ~= nil and string.match ~= nil
+		and string.match(text, "^%d+%.%d+%.%d+$") ~= nil
+end
+
+local function update_notice()
+	if update_shown or Engine.DvarString == nil or Engine.Exec == nil
+		or Engine.IsInGame == nil or Engine.IsInGame() then
+		return
+	end
+	if LuaUtils == nil or LuaUtils.ShowMessageDialog == nil then
+		return
+	end
+	local latest = Engine.DvarString(nil, "splitscreen_update_latest")
+	if not is_version(latest) then
+		return
+	end
+	if Engine.GetUsedControllerCount() > 1 then
+		return
+	end
+	if LuaUtils.LobbyProcessQueueEmpty ~= nil and not LuaUtils.LobbyProcessQueueEmpty() then
+		return
+	end
+	local current = Engine.DvarString(nil, "splitscreen_update_current")
+	if not is_version(current) then
+		current = "?"
+	end
+	update_shown = true
+	Engine.Exec(0, "set splitscreen_update_latest " .. UPDATE_SHOWN)
+	log("update notice: " .. latest .. " (installed " .. current .. ")")
+	-- The address is text: BOIII stubs OpenURL for Lua (unsafe-Lua warning).
+	LuaUtils.ShowMessageDialog(0, 0,
+		"Version " .. latest .. " is available (you have " .. current .. ").\n"
+			.. "Download: nexusmods.com/callofdutyblackops3/mods/53\n(or the GitHub releases page)",
+		"BO3 Local Splitscreen")
 end
 
 install()
 log("loaded")
 
-local watcher = LUI.UIElement.new()
-watcher.id = "zz_splitscreen"
-watcher:registerEventHandler("zz_splitscreen_tick", function(self, event)
-	install()
-	return true
-end)
-host:addElement(watcher)
-watcher:addElement(LUI.UITimer.new(500, "zz_splitscreen_tick", false, watcher))
+-- In the menus the game routes the whole UI to UIRootFull (UI_CoD_GetRootNameForController
+-- answers "UIRootFull" while the byte at 0x03394BE8 is set: 1 in the frontend, measured
+-- 2026-10-02), so a timer on UIRoot0 does not tick there. A watcher sits on both roots.
+-- "splitscreen_update" is raised by the component (Live_RaiseLUIEvent, controller 0)
+-- once the update check has an answer, so the notice does not depend on a timer.
+local function attach_watcher(root, id)
+	if root == nil then
+		return
+	end
+	local watcher = LUI.UIElement.new()
+	watcher.id = id
+	watcher:registerEventHandler("zz_splitscreen_tick", function(self, event)
+		install()
+		update_notice()
+		return true
+	end)
+	watcher:registerEventHandler("splitscreen_update", function(self, event)
+		update_notice()
+		return true
+	end)
+	root:addElement(watcher)
+	watcher:addElement(LUI.UITimer.new(500, "zz_splitscreen_tick", false, watcher))
+end
+
+attach_watcher(LUI.roots.UIRoot0, "zz_splitscreen")
+if LUI.roots.UIRootFull ~= nil and LUI.roots.UIRootFull ~= LUI.roots.UIRoot0 then
+	attach_watcher(LUI.roots.UIRootFull, "zz_splitscreen_full")
+end
