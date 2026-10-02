@@ -1327,10 +1327,6 @@ namespace splitscreen
 	inline constexpr uint32_t settings_read_result_rva = 0x0164DC50;
 	inline constexpr uint8_t settings_read_result_prologue[] = {0x40, 0x57, 0x48, 0x83, 0xEC, 0x20};
 	inline constexpr uint32_t storage_reset_rva = 0x0221AB10;
-	// Storage_GetDDLContext(controller, file type, slot) -> DDLContext* or null when the
-	// file is not ready (PS4 0xF7EC00). The reader of the stick-click limits uses it.
-	inline constexpr uint32_t storage_get_ddl_context_rva = 0x02219F80;
-	inline constexpr uint8_t storage_get_ddl_context_prologue[] = {0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10};
 	inline constexpr uint32_t shoutcaster_read_result_rva = 0x01650640;
 	inline constexpr uint8_t shoutcaster_read_result_prologue[] = {0x40, 0x53, 0x48, 0x83, 0xEC, 0x20};
 	inline constexpr uint32_t storage_read_rva = 0x0221AA70;
@@ -3639,6 +3635,16 @@ namespace splitscreen
 	inline constexpr uint32_t button_config_exec_call_rva = 0x01650206;
 	inline constexpr uint8_t button_config_exec_call_bytes[] = {0xE8, 0xF5, 0x09, 0xA9, 0x00};
 	inline constexpr uint32_t cmd_execute_single_command_rva = 0x020E0C00;   // (lc, controller, text, r9)
+	// Pad update 0x02286030: settings 16/17 (stick-click limits) read via Settings_GetFloat
+	// before L3/R3 are dropped for a deflected stick; no-profile fallback 1.0 at 0x0228608E.
+	// install_guest_stick_click_thresholds (patch by rdevathu, public PR 1) redirects both reads.
+	inline constexpr uint32_t stick_click_get_float_rva = 0x0164E800;
+	inline constexpr uint32_t stick_click_left_call_rva = 0x022860AB;
+	inline constexpr uint32_t stick_click_right_call_rva = 0x022860BA;
+	inline constexpr uint8_t stick_click_left_call_bytes[] = {0xE8, 0x50, 0x87, 0x3C, 0xFF};
+	inline constexpr uint8_t stick_click_right_call_bytes[] = {0xE8, 0x41, 0x87, 0x3C, 0xFF};
+	static_assert(stick_click_left_call_rva + 5 - 0x00C378B0 == stick_click_get_float_rva);
+	static_assert(stick_click_right_call_rva + 5 - 0x00C378BF == stick_click_get_float_rva);
 	// `sub rsp,38h; mov byte [rsp+20h],0` - checked before the update notice calls it directly.
 	inline constexpr uint8_t cmd_execute_single_command_prologue[] = {0x48, 0x83, 0xEC, 0x38, 0xC6, 0x44, 0x24, 0x20, 0x00};
 	// Live_RaiseLUIEvent(controller, name) (PS4 0xC13EA0; CL_ControllerInserted raises

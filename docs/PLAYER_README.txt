@@ -1,4 +1,4 @@
-BO3 Local Splitscreen 2.6.8  -  build {VERSION}
+BO3 Local Splitscreen 2.6.9  -  build {VERSION}
 ================================================
 
 Up to FOUR local split-screen players for Call of Duty: Black Ops III on PC -
@@ -6,6 +6,24 @@ Zombies and Multiplayer (offline custom games, bots work too). An ezz BOIII
 plugin. Local (offline) play only.
 
 This is a BETA. Please report what works and what does not.
+
+
+NEW IN 2.6.9
+------------
+* New: choose which controller each player uses - Options > Controls >
+  Split Screen now lists "Player 1 controller" to "Player 4 controller"
+  (players 3/4 while they are in the game). Picking a controller that
+  another player has swaps the two. The game had this for player 2 only.
+* Changed: the sprint fix for players 3 and 4 from 2.6.7 is replaced by a
+  smaller one by rdevathu (GitHub), who found the same bug on their own
+  and tested it with four controllers: only the stick-click limit the game
+  reads for players 3/4 is corrected; their settings are no longer
+  replaced by a copy of player 1's.
+* The download from Nexus Mods contains no update check (Nexus rules do
+  not allow mods that connect to the internet); the GitHub download keeps
+  the update notice.
+
+Updating from 2.2 - 2.6.8: extract this zip over the old files.
 
 
 NEW IN 2.6.8

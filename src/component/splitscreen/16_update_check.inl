@@ -4,6 +4,7 @@
 		// One HTTPS GET of the public repository's latest release, with a fixed
 		// User-Agent: nothing about the player or the PC is sent and nothing is stored.
 		// Off with -splitscreen_noupdate on the command line (boiii.exe passes its own).
+		// The Nexus variant (release/build.ps1 -Nexus) compiles all of it out, see the end.
 		// The request runs on its own thread and never touches the engine. A newer
 		// version is handed to the menu Lua (ui_scripts/zz_splitscreen) through two dvars
 		// and the LUI event "splitscreen_update", on the game thread:
@@ -16,8 +17,9 @@
 		// 0x10A53C0 -> _Dvar_RegisterString).
 
 		// This build's version. release/build.ps1 refuses a package whose README says otherwise.
-		constexpr char mod_version[] = "2.6.8";
+		constexpr char mod_version[] = "2.6.9";
 
+#ifndef SS_NO_UPDATE_CHECK
 		constexpr wchar_t update_host[] = L"api.github.com";
 		constexpr wchar_t update_path[] = L"/repos/LocalPlayer123/BO3-4-Player-Local-Splitscreen-on-PC/releases/latest";
 		constexpr wchar_t update_agent[] = L"BO3-Local-Splitscreen";
@@ -236,3 +238,14 @@
 					0, "splitscreen_update");
 			}
 		}
+#else
+		// Nexus variant (release/build.ps1 -Nexus): no network code at all - Nexus' file
+		// submission guidelines prohibit files that connect to the internet unless crucial.
+		void start_update_check()
+		{
+		}
+
+		void publish_update_notice(int)
+		{
+		}
+#endif

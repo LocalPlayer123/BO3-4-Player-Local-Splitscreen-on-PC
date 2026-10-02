@@ -17,8 +17,10 @@
 #include "splitscreen_ezz.hpp"
 
 #include <d3d11.h>   // sun shadow sidecar views (COM calls only, no import library)
+#ifndef SS_NO_UPDATE_CHECK   // the Nexus variant has no network code (release/build.ps1 -Nexus)
 #include <winhttp.h> // update notice: one HTTPS GET per start (splitscreen/16_update_check.inl)
 #pragma comment(lib, "winhttp.lib")
+#endif
 
 // Local splitscreen for up to four players; the stock PC build stops at two.
 //
@@ -389,6 +391,8 @@ namespace splitscreen
 			relocate_stream_views();
 			// Start/Back bound for players 2-4; no shared pause with 2+ local players.
 			install_guest_pad_binds();
+			// Players 3/4: L3 (sprint) not dropped by a zero stick-click limit.
+			install_guest_stick_click_thresholds();
 			install_no_shared_pause();
 			// Once per start: is a newer release out? (see run_update_check)
 			start_update_check();

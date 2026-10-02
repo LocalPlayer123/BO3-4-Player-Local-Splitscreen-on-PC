@@ -88,7 +88,11 @@ instead of player 4 - Steam Input lists physical pads first. The seat stays boun
 slot, not to the pad. Needs a defined rule for unplug/replug (console: the seat waits for
 its controller). Also seen (user screenshot, 2.6.6): with 3 players the lobby button still
 reads ACTIVATE SPLITSCREEN, and the lobby gives no reliable way back to fewer players.
-Since 2.6.8 the button reads DEACTIVATE whenever guests are in and no further pad is waiting, and an unplugged guest keeps the seat (B23). Still open: Steam's renumbering is invisible to the game (no device disappears); the PC's own per-player Gamepad option (Options > Controls, `Engine.GamepadsConnectedMap(controller, port)` -> `0x02284C30`, no 2-slot bound once the pad table is relocated) is the planned answer (docs/SIGNIN_REDESIGN.md D4).
+Since 2.6.8 the button reads DEACTIVATE whenever guests are in and no further pad is waiting, and an unplugged guest keeps the seat (B23). Still open: Steam's renumbering is invisible to the game (no device disappears); the PC's own per-player Gamepad option (Options > Controls, `Engine.GamepadsConnectedMap(controller, port)` -> `0x02284C30`, no 2-slot bound once the pad table is relocated) is the planned answer (docs/SIGNIN_REDESIGN.md D4). Since 2.6.9 the menu lists one entry per
+player (zz_splitscreen wraps `OptionGamepadSettingsPC.prepare`; PCUtility passes each entry's
+`optionController` to get/set), and choosing another player's pad swaps the two (the engine call
+`0x02284C30` alone leaves the previous owner without a pad). The swap is not yet confirmed with
+real pads.
 
 ## B. Fixed (listed because they show where to look next)
 
@@ -134,6 +138,11 @@ after the guest's settings read, its limits are decoded from the DDL context
 (Storage_GetDDLContext `0x02219F80`); if one is <= 0, player 1's settings buffer is copied
 in (same def and length). Verified without guest settings files: controllers 2/3 buffer =
 player 1's, limits 1.0.
+**2.6.9:** replaced by the narrower fix of rdevathu (pull request 1 of this repository, found
+independently and tested with four real controllers on Linux/Proton): only the two Settings_GetFloat
+reads of the pad update (`0x022860AB` setting 16, `0x022860BA` setting 17) are redirected, and a zero
+for controllers 2/3 becomes 1.0 - the PC's own no-profile fallback (`0x0228608E`) and the PS4's
+constant. Guest profiles are no longer overwritten with player 1's settings.
 
 ### B20. Freeze when a controller is switched on mid-match (fixed in 2.6.7)
 ezz dialog EXCEPTION_BREAKPOINT at `0x01D3C84B` (hksDefaultPanic): Gpadupdate_f

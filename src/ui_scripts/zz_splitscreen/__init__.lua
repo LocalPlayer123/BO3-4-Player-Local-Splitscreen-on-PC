@@ -230,7 +230,128 @@ local function button_reads_activate()
 	return room_for_another()
 end
 
+-- Controller choice per player (docs/SIGNIN_REDESIGN.md D4). The PC's Options > Controls
+-- gamepad list (StartMenu_Options_Controls_PC.lua, OptionGamepadSettingsPC) has one
+-- "Splitscreen controller" entry, fixed to controller 1 (optionController = 1):
+-- Engine.GamepadsConnectedMap(controller, port) gives that pad to the controller
+-- (0x02284C30; the previous owner is left without one, 0x02284FC0) and the stock code
+-- repairs only "the other of two". PCUtility passes optionController to getFunction and
+-- setFunction, so one entry per player works with the stock widget. Entries for players
+-- 3/4 appear only while they are seated: their pad slots exist only once the pad table
+-- is relocated, which a seated guest guarantees. Choosing a pad that another player
+-- holds swaps the two pads.
+local wrapped_gamepad_prepare = nil
+
+local function controller_has_pad_slot(c)
+	return c < 2 or Engine.IsControllerBeingUsed(c) == true
+end
+
+local function map_controller_pad(c, port)
+	if Engine.GamepadsConnectedMap == nil or Engine.GamepadsConnectedPort == nil then
+		return
+	end
+	local old = Engine.GamepadsConnectedPort(c)
+	local owner = nil
+	for o = 0, SUPPORTED - 1 do
+		if o ~= c and owner == nil and controller_has_pad_slot(o) and Engine.GamepadsConnectedPort(o) == port then
+			owner = o
+		end
+	end
+	log("controller choice: c" .. tostring(c) .. " port " .. tostring(port) .. " (had " .. tostring(old)
+		.. ", owner " .. tostring(owner) .. ")")
+	Engine.GamepadsConnectedMap(c, port)
+	if owner == nil then
+		return
+	end
+	if old ~= nil and old ~= port and Engine.GamepadsConnectedValidPort ~= nil
+		and Engine.GamepadsConnectedValidPort(old) == true then
+		Engine.GamepadsConnectedMap(owner, old)
+	elseif Engine.GamepadsConnectedMapAny ~= nil then
+		Engine.GamepadsConnectedMapAny(owner)
+	end
+end
+
+local function controller_entry(c)
+	return {
+		label = "Player " .. tostring(c + 1) .. " controller",
+		description = "PLATFORM_SPLITSCREEN_CONTROLLER_DESC",
+		profileVarName = "splitscreen_controller_" .. tostring(c),
+		profileType = "function",
+		optionController = c,
+		datasource = "OptionGamepadMap",
+		widgetType = "dropdown",
+		getFunction = function(controller)
+			return Engine.GamepadsConnectedPort(controller)
+		end,
+		setFunction = function(controller, port)
+			map_controller_pad(controller, port)
+		end,
+		disabledFunction = function()
+			return Engine.GamepadsConnectedCount() == 0
+		end
+	}
+end
+
+-- After the stock list is built: the stock entry (controller 1) gets the swap and the
+-- label "Player 2 controller"; players 1, 3 and 4 get entries of the same kind around it.
+local function add_controller_entries(list)
+	if list == nil or list.customDataSourceHelper == nil or ListHelper_GetListHelperModel == nil
+		or ListHelper_CreateModelsFromTable == nil or Engine.GamepadsConnectedPort == nil then
+		return
+	end
+	local items = list[list.customDataSourceHelper]
+	if items == nil then
+		return
+	end
+	local stock_at = nil
+	for i, item in ipairs(items) do
+		local var = item.model ~= nil and Engine.GetModel(item.model, "profileVarName") or nil
+		if var ~= nil and Engine.GetModelValue(var) == "splitscreen_controller" then
+			stock_at = i
+		end
+	end
+	if stock_at == nil then
+		return
+	end
+	local stock = items[stock_at]
+	Engine.SetModelValue(Engine.CreateModel(stock.model, "label"), "Player 2 controller")
+	Engine.SetModelValue(Engine.CreateModel(stock.model, "setFunction"), function(controller, port)
+		map_controller_pad(controller, port)
+	end)
+	local root = ListHelper_GetListHelperModel(list, true)
+	local next_index = #items
+	local function make(c)
+		next_index = next_index + 1
+		local old_model = Engine.GetModel(root, next_index)
+		if old_model ~= nil then
+			Engine.UnsubscribeAndFreeModel(old_model)
+		end
+		local model = Engine.CreateModel(root, next_index)
+		ListHelper_CreateModelsFromTable(model, controller_entry(c))
+		return { model = model, properties = stock.properties }
+	end
+	table.insert(items, stock_at, make(0))
+	local at = stock_at + 2
+	for c = 2, SUPPORTED - 1 do
+		if controller_has_pad_slot(c) then
+			table.insert(items, at, make(c))
+			at = at + 1
+		end
+	end
+end
+
 local function install()
+	local gamepad_list = DataSources ~= nil and DataSources.OptionGamepadSettingsPC or nil
+	if gamepad_list ~= nil and gamepad_list.prepare ~= nil and gamepad_list.prepare ~= wrapped_gamepad_prepare then
+		local stock_prepare = gamepad_list.prepare
+		wrapped_gamepad_prepare = function(controller, list, filter)
+			stock_prepare(controller, list, filter)
+			add_controller_entries(list)
+		end
+		gamepad_list.prepare = wrapped_gamepad_prepare
+		log("OptionGamepadSettingsPC: a controller entry per player")
+	end
+
 	if CoD ~= nil and CoD.Menu ~= nil and CoD.Menu.HandleButtonPress ~= nil
 		and CoD.Menu.HandleButtonPress ~= wrapped_handle_press then
 		wrapped_handle_press = console_handle_button_press

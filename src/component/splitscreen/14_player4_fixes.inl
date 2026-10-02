@@ -362,6 +362,52 @@
 			}
 		}
 
+		// Stick-click limits for players 3/4 (sprint on L3). Approach and patch by rdevathu
+		// (LocalPlayer123/BO3-4-Player-Local-Splitscreen-on-PC pull request 1), found and
+		// tested independently with four real controllers; replaces the 2.6.7 copy of player
+		// 1's settings buffer. L3 -> key 16 -> +breath_sprint is bound on all four clients;
+		// the pad update (0x02286030) drops L3/R3 while |stick| exceeds the controller's
+		// profile settings 16/17 (gpad_button_[lr]stick_deflect_max). A guest without its
+		// own user_settings file has a zeroed profile (only Storage_Reset runs for it, see
+		// settings_read_result_stub), so both read 0.0. PS4 GPad_UpdateDigitals (0xDB8130)
+		// uses the constant 1.0, and the PC uses 1.0 itself when no profile is ready
+		// (0x0228608E). Only these two reads change: zero for controllers 2/3 becomes 1.0;
+		// profiles, bindings and players 1/2 stay as they are.
+		float guest_stick_click_threshold(const int setting, const int controller)
+		{
+			// Settings_GetFloat: a plain wrapper around the settings reader, no caller guard
+			// (tools/caller_guard_audit.py).
+			const auto get_float = reinterpret_cast<float (*)(int, int)>(base() + stick_click_get_float_rva);
+			const float value = get_float(setting, controller);
+			const bool guest_zero = controller >= 2 && controller < 4
+				&& (setting == 16 || setting == 17) && value == 0.0f;
+			return guest_zero ? 1.0f : value;
+		}
+
+		void install_guest_stick_click_thresholds()
+		{
+			uint8_t left[5]{}, right[5]{};
+			const auto* fn = reinterpret_cast<const void*>(&guest_stick_click_threshold);
+			if (!engine_bytes_match(stick_click_left_call_rva, stick_click_left_call_bytes)
+				|| !engine_bytes_match(stick_click_right_call_rva, stick_click_right_call_bytes)
+				|| !call_site_bytes(stick_click_left_call_rva, sizeof(left), fn, left)
+				|| !call_site_bytes(stick_click_right_call_rva, sizeof(right), fn, right))
+			{
+				note("[splitscreen] stick-click limits: engine bytes differ - not installed\n");
+				return;
+			}
+			if (!write_bytes(reinterpret_cast<void*>(base() + stick_click_left_call_rva), left, sizeof(left)))
+			{
+				return;
+			}
+			if (!write_bytes(reinterpret_cast<void*>(base() + stick_click_right_call_rva), right, sizeof(right)))
+			{
+				write_bytes(reinterpret_cast<void*>(base() + stick_click_left_call_rva),
+				            stick_click_left_call_bytes, sizeof(stick_click_left_call_bytes));
+				note("[splitscreen] stick-click limits: second write failed - first restored\n");
+			}
+		}
+
 		// With two or more local players the game no longer pauses, in any mode: the PC
 		// already applies that to Zombies and Campaign, and in Multiplayer one player's
 		// Start paused the match and opened the pause menu on every screen (user,
