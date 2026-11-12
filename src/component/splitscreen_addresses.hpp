@@ -1147,6 +1147,19 @@ namespace splitscreen
 		// keyCatcher state into the round.
 		{0x01359BF8, 0x02, 0x04, "map-load reset loop: local clients 2 -> 4"},
 
+		// The same function's fast path - taken by a map restart (all clients already at
+		// connectionState >= 7) - was still two clients wide: the check loop (IsActive and
+		// state >= 7), and the reset loop that puts each client back to connectionState 7,
+		// clears its clientConnection and the per-client byte 0x05355988[lc]. Restart
+		// timeline (user, 2026-11-11, 4 players): states 7/7/11/11 - clients 2/3 were never
+		// reset, never got a gamestate, never ran CG_Init, and ran on torn-down cgame state
+		// (crashes at 0x014D2A27 and through a NULL at 0x0260455F). Same arrays and bounds as
+		// the connect loop above (slow path), which already covers four.
+		{0x01359C4F, 0x02, 0x04, "map-restart check loop: local clients 2 -> 4"},
+		{0x01359CD4, 0xF0, 0xE0, "map-restart reset loop range check: 2*0x1078 -> 4*0x1078 (low)"},
+		{0x01359CD5, 0x20, 0x41, "map-restart reset loop range check: 2*0x1078 -> 4*0x1078 (high)"},
+		{0x01359CF8, 0x02, 0x04, "map-restart reset loop: local clients 2 -> 4"},
+
 		// /GS range check on the per-client byte array 0x052F29C4 (index >= 2 ->
 		// __report_rangecheckfailure, 0xC0000409), hit via CL_ClearKeys. Widened in
 		// place: slots 2 and 3 (0x052F29C6/7) have no code references, they are
@@ -3772,6 +3785,149 @@ namespace splitscreen
 		{0x01E989A2, 3, 7, true, 0x4400}, // mov r8d, [slot0.count]
 		{0x01E989AD, 3, 7, true, 0x4400}, // mov [slot0.count], r15d
 	};
+
+	// Umbra gate bit test with gate id 0 (user crash 2026-11-11, 4 players: Kino door to
+	// the outside, Der Eisendrache power switch; both AV at 0x01C8DA0C, 3 players fine).
+	// Tail of an Umbra query (next to the persistent tome-trigger reader 0x01C8DA1C):
+	//   01C8D9F1  add eax,0xFFFB0000         id - 0x50000 (gate ids start at 0x50000)
+	//   01C8D9F6  movsxd rcx,eax
+	//   01C8D9F9  movzx eax,cl ; shr rcx,5 ; and al,0x1F ; movzx edx,al
+	//   01C8DA05  mov rax,[sUmbra]           (image 0x0AE15BF8)
+	//   01C8DA0C  mov ecx,[rax+rcx*4+0x11CBC0]   <- AV: id 0 gives rcx 0x07FF..FD800
+	//   01C8DA13  bt ecx,edx ; setae al ; jmp 0x01C8D9B4 (epilogue: cookie check, ret al)
+	// Registers in the dump: rcx = 0x07FFFFFFFFFFD800, edx = 0 -> eax was 0 at the add.
+	// Bytes read from the decrypted image in the user's ezz crash dump.
+	inline constexpr uint32_t umbra_gate_test_rva = 0x01C8D9F1;
+	inline constexpr uint8_t umbra_gate_test_bytes[] = {0x05, 0x00, 0x00, 0xFB, 0xFF,   // add eax,0xFFFB0000
+	                                                    0x48, 0x63, 0xC8};              // movsxd rcx,eax
+	inline constexpr uint32_t umbra_gate_exit_rva = 0x01C8D9B4;
+	inline constexpr uint8_t umbra_gate_exit_bytes[] = {0x48, 0x8B, 0x8C, 0x24, 0xD0, 0x00, 0x00, 0x00,   // mov rcx,[rsp+0xD0]
+	                                                    0x48, 0x33, 0xCC};                              // xor rcx,rsp
+	inline constexpr uint32_t umbra_gate_first_id = 0x50000;
+	// The query's frame: sub rsp,0x110 after push rbx, so the return address is at site rsp + 0x118.
+	inline constexpr uint32_t umbra_gate_ret_off = 0x118;
+	// Per-view lighting objects (0x148 bytes each; list = view+0xB2680 -> +0x10 objects, +0x20 count;
+	// the same list is cg+0x2D88B8). Per-client data exists for two clients only:
+	//   +0x138  float[2]   per-client value set by script (0x0020088F), read per view (0x01CBE928)
+	//   +0x140  u8[2]      per-client skip flags (the renderer copies them as one u16, 0x01CBEB36)
+	//   +0x144  int        Umbra gate id (-1 = none)
+	// Client 2's float landed on the skip flags of clients 0/1 and client 3's on the gate id: the
+	// float 0.0 written there is the gate id 0 that crashed the Umbra gate test (0x01C8DA0C), and
+	// the fading "gate ids" of objects 193/194 in the diagnostic log were client 3's float. Clients
+	// 2/3 read those bytes back as their own float and flags: panes 3/4 lit with the wrong values.
+	// Every access indexed by client, each followed by its instruction's own continuation:
+	inline constexpr uint32_t lightobj_stride = 0x148;
+	inline constexpr uint32_t lightobj_value_off = 0x138;
+	inline constexpr uint32_t lightobj_flags_off = 0x140;
+	inline constexpr uint32_t lightobj_list_objects_off = 0x10;
+	inline constexpr uint32_t lightobj_view_list_off = 0xB2680;
+	// script setter: rcx objects, rdx = index*0x52 + lc, r10 index, r9 lc, xmm3 value
+	inline constexpr uint32_t lightobj_value_set_rva = 0x0020088F;
+	inline constexpr uint8_t lightobj_value_set_bytes[] = {0xF3, 0x0F, 0x11, 0x9C, 0x91, 0x38, 0x01, 0x00, 0x00};   // movss [rcx+rdx*4+0x138],xmm3
+	inline constexpr uint32_t lightobj_value_set_next_rva = 0x00200898;
+	// per-view walk: rax lc, rbx object, rsi view
+	inline constexpr uint32_t lightobj_value_get_rva = 0x01CBE928;
+	inline constexpr uint8_t lightobj_value_get_bytes[] = {0xF3, 0x0F, 0x10, 0x84, 0x83, 0x38, 0x01, 0x00, 0x00};   // movss xmm0,[rbx+rax*4+0x138]
+	inline constexpr uint32_t lightobj_value_get_next_rva = 0x01CBE931;
+	// per-view walk: rax lc, rsi object, r14 index*0x148; r13b = 0; jne 0x01CBE66F follows
+	inline constexpr uint32_t lightobj_flag_test_rva = 0x01CBE639;
+	inline constexpr uint8_t lightobj_flag_test_bytes[] = {0x44, 0x38, 0xAC, 0x30, 0x40, 0x01, 0x00, 0x00};   // cmp [rax+rsi+0x140],r13b
+	inline constexpr uint32_t lightobj_flag_test_set_rva = 0x01CBE66F;     // flag set: skip the object
+	inline constexpr uint32_t lightobj_flag_test_clear_rva = 0x01CBE643;   // behind `jne` (75 2C)
+	// script setter: rcx object, r11 index, r10 lc, dl value
+	inline constexpr uint32_t lightobj_flag_set_rva = 0x00203C75;
+	inline constexpr uint8_t lightobj_flag_set_bytes[] = {0x42, 0x88, 0x94, 0x11, 0x40, 0x01, 0x00, 0x00};   // mov [rcx+r10+0x140],dl
+	inline constexpr uint32_t lightobj_flag_set_next_rva = 0x00203C7D;
+	// restore: rcx/rax object = objects + edi*0x148 (edi index), r14 lc
+	inline constexpr uint32_t lightobj_flag_clear_rva = 0x000DCB23;
+	inline constexpr uint8_t lightobj_flag_clear_bytes[] = {0x42, 0xC6, 0x84, 0x31, 0x40, 0x01, 0x00, 0x00, 0x00};   // mov byte [rcx+r14+0x140],0
+	inline constexpr uint32_t lightobj_flag_clear_next_rva = 0x000DCB2C;
+	inline constexpr uint32_t lightobj_flag_mark_rva = 0x000DCB52;
+	inline constexpr uint8_t lightobj_flag_mark_bytes[] = {0x42, 0xC6, 0x84, 0x30, 0x40, 0x01, 0x00, 0x00, 0x01};   // mov byte [rax+r14+0x140],1
+	inline constexpr uint32_t lightobj_flag_mark_next_rva = 0x000DCB5B;
+	// save: rcx object, rbx + 1 index, rsi lc; je 0x000F2E56 follows (flag clear)
+	inline constexpr uint32_t lightobj_flag_save_rva = 0x000F2E1E;
+	inline constexpr uint8_t lightobj_flag_save_bytes[] = {0x80, 0xBC, 0x31, 0x40, 0x01, 0x00, 0x00, 0x00};   // cmp byte [rcx+rsi+0x140],0
+	inline constexpr uint32_t lightobj_flag_save_clear_rva = 0x000F2E56;
+	inline constexpr uint32_t lightobj_flag_save_set_rva = 0x000F2E28;     // behind `je` (74 2E)
+
+	// Restart crash (user, 2026-11-11, 4 players, Kino restarted from the menu): AV reading 0x2030 at
+	// 0x014D2A27, `mov rax,[rcx+0xB60]` -> NULL, entry of local client 2. Per-client table (count
+	// 0x09E977C0, base 0x09E977C8, stride 0x2D90; +0xB60 points at the entry's own +0xD20). The
+	// allocator 0x014D4720 gives every entry that pointer in its init loop (0x014D47D0, also
+	// [0x09E977D8 + lc*0x2AC40 + 0x29E00] = 1) unless flag bit 0 is set; the call at 0x0135D388
+	// sets it, leaving the full per-client init 0x014E95D0 to the cgame init - which a restart skips
+	// for clients > 0 (0x00F802C7..0x00F802E0). Clients 0/1 keep their pointer from before; a
+	// client 2/3 entry can come back empty. Site: right behind that allocator call.
+	inline constexpr uint32_t cltable_alloc_ret_rva = 0x0135D38D;
+	inline constexpr uint8_t cltable_alloc_ret_bytes[] = {0x45, 0x8B, 0xCF, 0x45, 0x8B, 0xC6};   // mov r9d,r15d ; mov r8d,r14d
+	// v7 test: the fill above never ran, yet entry 2 crashed with +0xB60 = NULL - the entry is
+	// emptied after allocation during the restart. The reader that crashed (its only caller is
+	// 0x014F79B0, per-client cgame init 0x014F7980): rcx = entry.
+	inline constexpr uint32_t cltable_reader_rva = 0x014D2A20;
+	inline constexpr uint8_t cltable_reader_bytes[] = {0x48, 0x8B, 0x81, 0x60, 0x0B, 0x00, 0x00};   // mov rax,[rcx+0xB60]
+	// Gamestate order (user PC log 2026-11-12): CL_ParseGamestate (0x01364F80, r14 = lc) holds a
+	// non-primary client's gamestate back while the primary client (0x033A256C) is below
+	// connectionState 10 (0x01364FCC..0x01364FE4); a held-back gamestate is dropped (0x01365469)
+	// and the server sends it again. Clients 1..3 are not ordered among themselves, so on a fast
+	// machine client 3 initialised before client 2; client 2's later cgame init reset the
+	// client-field registry (0x0495A430, 0x4018 bytes per type) while client 3 already ran frames,
+	// and the first frame read an empty entry (0x00133F31 / 0x00135525, every map, 3-4 players).
+	// The stock check only runs when two conditions hold (0x020EAD00, an ezz-hooked mode test,
+	// and the dvar at 0x056BC1E0); on the user's PC they did not, so nothing was ordered at all
+	// (CG_Init lc 0, 2, 3 - client 1 not yet - then lc 3 found cg_viewModelArray NULL). Site: the
+	// function's first instructions after r14 = lc (before the per-client reset 0x01339290, which
+	// runs again when the gamestate is resent), independent of those conditions.
+	inline constexpr uint32_t gamestate_order_rva = 0x01364FA1;
+	inline constexpr uint8_t gamestate_order_bytes[] = {0x48, 0x8B, 0xEA,         // mov rbp,rdx
+	                                                    0x41, 0x8B, 0xCE};        // mov ecx,r14d
+	inline constexpr uint32_t gamestate_hold_rva = 0x01365469;
+	inline constexpr uint8_t gamestate_hold_bytes[] = {0x48, 0x8B, 0x8C, 0x24, 0x70, 0x02, 0x00, 0x00};   // mov rcx,[rsp+0x270]
+	inline constexpr uint32_t uia_conn_state_off = 0x8;   // clientUIActives: connectionState
+	inline constexpr uint32_t cltable_count_rva = 0x09E977C0;
+	inline constexpr uint32_t cltable_base_rva = 0x09E977C8;
+	inline constexpr uint32_t cltable_side_rva = 0x09E977D8;
+	inline constexpr uint32_t cltable_stride = 0x2D90;
+	inline constexpr uint32_t cltable_self_ptr_off = 0xB60;
+	inline constexpr uint32_t cltable_self_target_off = 0xD20;
+	inline constexpr uint32_t cltable_side_stride = 0x2AC40;
+	inline constexpr uint32_t cltable_side_flag_off = 0x29E00;
+
+	// Controllers (18_controllers.inl). The engine's "give controller ecx the pad in device slot
+	// edx" (Engine.GamepadsConnectedMap); its Lua binding calls it from 0x01FD5749, the engine's
+	// own assignment from 0x02284B03. Device table: 8 slots of 8 bytes, the first dword is the
+	// device (>= 0 present), the second the controller holding it (0x02284C70, 0x02284CAD).
+	inline constexpr uint32_t pad_assign_rva = 0x02284C30;
+	inline constexpr uint8_t pad_assign_bytes[] = {0x48, 0x89, 0x5C, 0x24, 0x10};   // mov [rsp+0x10],rbx
+	inline constexpr uint32_t pad_assign_lua_return_rva = 0x01FD574E;
+	inline constexpr uint32_t pad_device_table_rva = 0x17DEF3A0;
+	inline constexpr uint32_t pad_device_stride = 8;
+	inline constexpr uint16_t pad_rumble_strength = 0xA000;
+	inline constexpr uint32_t pad_rumble_ms = 400;
+	// Engine.GamepadType (Lua binding 0x01FD5590, name table entry 0x0339F628): edi = the Lua
+	// argument, eax = GamepadType(edi) from 0x02285470. Behind the call the binding pushes eax.
+	// The component answers arguments 8..11 with 100 + Steam's controller type of XInput slot 0..3
+	// (zz_splitscreen names the split screen controller list from it); 0x02285470 itself reads the
+	// zero-filled padding of the relocated gamepad table for those arguments and returns 1.
+	inline constexpr uint32_t gamepad_type_binding_rva = 0x01FD55DB;
+	inline constexpr uint8_t gamepad_type_binding_bytes[] = {0x48, 0x8B, 0x4B, 0x48,                  // mov rcx,[rbx+0x48]
+	                                                         0xC7, 0x01, 0x03, 0x00, 0x00, 0x00};     // mov dword [rcx],3
+	inline constexpr int32_t pad_type_query_base = 8;
+	inline constexpr int32_t pad_type_answer_base = 100;
+	// Steam: ISteamClient "SteamClient020" - CreateSteamPipe 0,
+	// ConnectToGlobalUser 2, GetISteamGenericInterface 12; ISteamInput "SteamInput001" - Init 0,
+	// RunFrame 2, GetInputTypeForHandle 26, GetControllerForGamepadIndex 27 (declaration order of
+	// isteamclient.h / isteaminput001.h).
+	inline constexpr const char* steam_client_version = "SteamClient020";
+	inline constexpr const char* steam_input_version = "SteamInput001";
+	inline constexpr size_t steam_client_create_pipe = 0;
+	inline constexpr size_t steam_client_connect_user = 2;
+	inline constexpr size_t steam_client_generic_interface = 12;
+	inline constexpr size_t steam_input_init = 0;
+	inline constexpr size_t steam_input_run_frame = 2;
+	inline constexpr size_t steam_input_type_for_handle = 26;
+	inline constexpr size_t steam_input_controller_for_gamepad = 27;
+
 }
 
 namespace splitscreen::ezz

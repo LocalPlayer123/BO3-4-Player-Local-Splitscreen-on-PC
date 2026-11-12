@@ -340,7 +340,73 @@ local function add_controller_entries(list)
 	end
 end
 
+-- Real controller names in the controller list (Options > Controls > Split Screen). With Steam
+-- Input every pad reaches the game as XInput, so the list reads "XINPUT Controller 1..4" whatever
+-- the pad is. The component asks Steam which controller each XInput slot really is and answers
+-- Engine.GamepadType(8 + slot) with 100 + Steam's type (stock calls use 0..3 and get 0..3 back).
+-- A slot Steam does not know keeps the stock text.
+local PAD_TYPE_QUERY_BASE = 8
+local PAD_TYPE_ANSWER_BASE = 100
+local steam_pad_names = {
+	[1] = "Steam Controller",
+	[2] = "Xbox 360 Controller",
+	[3] = "Xbox One Controller",
+	[4] = "Gamepad",
+	[5] = "PS4 Controller",
+	[8] = "Joy-Con Pair",
+	[9] = "Joy-Con",
+	[10] = "Switch Pro Controller",
+	[12] = "PS3 Controller",
+	[13] = "PS5 Controller",
+	[14] = "Steam Deck",
+	[16] = "Switch 2 Pro Controller",
+}
+
+local function steam_pad_name(slot)
+	if Engine.GamepadType == nil then
+		return nil
+	end
+	local ok, answer = pcall(Engine.GamepadType, PAD_TYPE_QUERY_BASE + slot)
+	if not ok or type(answer) ~= "number" or answer <= PAD_TYPE_ANSWER_BASE then
+		return nil
+	end
+	return steam_pad_names[math.floor(answer - PAD_TYPE_ANSWER_BASE + 0.5)]
+end
+
+-- "XINPUT Controller 3" -> "PS4 Controller (3)", keeping the number so two alike pads stay apart.
+local function rename_pad_text(text)
+	if type(text) ~= "string" then
+		return nil
+	end
+	local n = string.match(string.upper(text), "XINPUT%s*CONTROLLER%s*(%d)")
+	if n == nil then
+		return nil
+	end
+	local name = steam_pad_name(tonumber(n) - 1)
+	if name == nil then
+		return nil
+	end
+	return name .. " (" .. n .. ")"
+end
+
+local wrapped_localize = nil
+
 local function install()
+	-- Controller names: whatever text reads "XINPUT Controller N" when the menu localizes it
+	-- gets Steam's name for that pad.
+	if Engine.Localize ~= nil and Engine.Localize ~= wrapped_localize then
+		local stock_localize = Engine.Localize
+		wrapped_localize = function(...)
+			local text = stock_localize(...)
+			local renamed = rename_pad_text(text)
+			if renamed ~= nil then
+				return renamed
+			end
+			return text
+		end
+		Engine.Localize = wrapped_localize
+	end
+
 	local gamepad_list = DataSources ~= nil and DataSources.OptionGamepadSettingsPC or nil
 	if gamepad_list ~= nil and gamepad_list.prepare ~= nil and gamepad_list.prepare ~= wrapped_gamepad_prepare then
 		local stock_prepare = gamepad_list.prepare
