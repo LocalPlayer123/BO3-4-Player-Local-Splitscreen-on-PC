@@ -102,10 +102,17 @@
 			return r;
 		}
 
+		bool relocate_local_entities(bool require_empty);   // 12_relocations_ui.inl
+
 		uint64_t free_per_lc_stub(const bool a)
 		{
 			const auto r = free_per_lc_hook.invoke<uint64_t>(a);
 			sync_csc_lc_bound();
+			// cg_localEntities [2] -> [4]: if the startup move was refused (its code sites not
+			// yet as recorded), retry now - no cgame runs between this free and the next match's
+			// CG_Inits. Without it client 2's CG_InitLocalEntities zeroed the client-field
+			// registry and cg_viewModelArray (user's PC, 2026-11-12: memset 0x0495A310, 0x7C00).
+			relocate_local_entities(false);
 			return r;
 		}
 
