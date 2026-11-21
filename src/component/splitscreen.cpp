@@ -69,6 +69,8 @@ namespace splitscreen
 		#include "splitscreen/14_player4_fixes.inl"
 		#include "splitscreen/15_stats_cache.inl"
 		#include "splitscreen/16_update_check.inl"
+		#include "splitscreen/17_lighting_and_restart.inl"
+		#include "splitscreen/18_controllers.inl"
 
 		// Marks the image as patched: runtime.cpp's patched-twice check reads this
 		// magic and stands down instead of applying the component a second time.
@@ -166,7 +168,7 @@ namespace splitscreen
 
 			// cg_localEntities and friends are [2] (PS4 [4]); slot 2 covered the
 			// clientfield system, which CG_InitLocalEntities(2) zeroed.
-			relocate_local_entities();
+			relocate_local_entities(true);
 
 			// The per-client LUI root array is [2] and element 2 would land on
 			// s_perController, so it moves before its bound is widened.
@@ -255,6 +257,17 @@ namespace splitscreen
 			install_statresponse_parse();
 			// Before R_Init allocates the culler object (see grow_umbra_client_arrays).
 			grow_umbra_client_arrays();
+			// 4 players: an Umbra query handed gate id 0 crashed at doors / power switches.
+			install_umbra_gate_guard();
+			// Panes 3/4: per-view lighting objects read client 0/1-only skip flags (overexposure, the crash above).
+			install_lightobj_flag_fix();
+			// Restart with 3-4 players: per-client table entries 2/3 left without their self pointer.
+			install_client_table_fill();
+			// 3-4 players: clients start in order, or a later client 2 init resets client 3's client fields.
+			install_gamestate_order();
+			// Controllers: a pad picked in the split screen menu rumbles; the menu names each pad by its model (Steam Input).
+			install_pad_rumble();
+			install_pad_names();
 			install_perclient_buffer_guard();
 			install_guest_copy();
 			widen_csc_lc_checks();
@@ -439,6 +452,40 @@ namespace splitscreen
 			{
 				note("Storage_Pump: not hooked - s_targets not widened or prologue differs");
 			}
+
+			// One line listing every per-client array that is still [2] after startup: on another
+			// machine a refused move (engine bytes not as recorded yet) left cg_localEntities at
+			// [2], and client 2 then overwrote the client-field registry. Diagnostic build only.
+#ifdef SS_DIAG
+			{
+				struct moved
+				{
+					const char* name;
+					bool done;
+				};
+				const moved list[] = {
+					{"tables", counts_ok},           {"signin", signin_relocated},
+					{"view_params", view_params_relocated}, {"uielem", uielem_relocated},
+					{"scrplace", scrplace_relocated}, {"perclient54", perclient54_relocated},
+					{"aaglob", aaglob_relocated},     {"lui_roots", lui_roots_relocated},
+					{"scene_b", scene_b_relocated},   {"entcoll", entcoll_relocated},
+					{"clientfields", cf_relocated},   {"entword", entword_relocated},
+					{"playerkeys", playerkeys_relocated}, {"lightq", lightq_relocated},
+					{"percg", percg_relocated},       {"local_entities", local_entities_relocated},
+					{"exploders", exploders_relocated},
+				};
+				char missing[512]{};
+				size_t pos = 0;
+				for (const auto& m : list)
+				{
+					if (!m.done && pos + 32 < sizeof(missing))
+					{
+						pos += std::snprintf(missing + pos, sizeof(missing) - pos, " %s", m.name);
+					}
+				}
+				note("[splitscreen] startup moves not applied:%s\n", pos ? missing : " none");
+			}
+#endif
 			return true;
 		}
 	}

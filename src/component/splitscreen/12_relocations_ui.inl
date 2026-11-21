@@ -541,7 +541,11 @@
 
 		bool local_entities_relocated = false;
 
-		bool relocate_local_entities()
+		// `require_empty`: at startup the three arrays must still be zero (cg_freeLocalEntities
+		// holds pointers into the pool). The retry from free_per_lc_stub runs while no cgame is
+		// up: CG_InitLocalEntities (0x0083D620) rebuilds a client's pool, free list and active
+		// list before that client uses them, so the old contents are not needed there.
+		bool relocate_local_entities(const bool require_empty)
 		{
 			if (local_entities_relocated)
 			{
@@ -556,6 +560,7 @@
 				const auto* p = reinterpret_cast<const void*>(b + r.rva);
 				if (!readable(p, r.len) || std::memcmp(p, r.expected, r.len) != 0)
 				{
+					note("[splitscreen] local entities: site 0x%08X differs - not moved (yet)\n", r.rva);
 					return false;
 				}
 			}
@@ -578,16 +583,19 @@
 				}
 				return true;
 			};
-			if (!all_zero(le_active_rva, le_old_active_size)
-				|| !all_zero(le_free_rva, le_old_free_size)
-				|| !all_zero(le_pool_rva, le_old_pool_size))
+			if (require_empty
+				&& (!all_zero(le_active_rva, le_old_active_size)
+				    || !all_zero(le_free_rva, le_old_free_size)
+				    || !all_zero(le_pool_rva, le_old_pool_size)))
 			{
+				note("[splitscreen] local entities: arrays already in use - not moved (yet)\n");
 				return false;
 			}
 
 			auto* destination = allocate_near_module(le_block_size);
 			if (!destination)
 			{
+				note("[splitscreen] local entities: no memory near the image - not moved\n");
 				return false;
 			}
 			const auto new_base = reinterpret_cast<size_t>(destination) - b;
@@ -650,6 +658,7 @@
 			}
 
 			local_entities_relocated = true;
+			note("[splitscreen] local entities: moved to 4 clients%s\n", require_empty ? "" : " (late, before a match)");
 			return true;
 		}
 

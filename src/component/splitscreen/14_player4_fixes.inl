@@ -285,6 +285,14 @@
 					}
 					if (n >= 4 && raise_local_client_count)
 					{
+						// Player 4's CL_Init(3) was only tried when seat 3 signed in. After a
+						// 3-player match a 4th player's attempt could miss, nothing retried it,
+						// and client 3 parked at connectionState 6 (user log 2026-11-11: states
+						// 11/10/9/6, kicked to the menu). Retry here like client 2's.
+						if (!cl_init3_done)
+						{
+							run_cl_init_for_local_client3();
+						}
 						widen_round_for_four();
 					}
 					return static_cast<int>(n);

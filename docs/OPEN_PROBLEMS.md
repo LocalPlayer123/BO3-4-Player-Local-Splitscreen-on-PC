@@ -28,7 +28,8 @@ again since.
 
 ### A2. Blocky, wrongly lit patches on panes 3/4 (Der Eisendrache)
 Hangar interior: grid-aligned rectangles on the upper walls, panes 3/4 only.
-Not re-tested since the sun-shadow change (B3); A4/A6 are the better leads.
+Not re-tested since the sun-shadow change (B3). Probably the same bug as B25 (per-view
+lighting objects, fixed after 2.6.9): re-test before closing.
 (`view+0xB267C` is the light-state index, copied from the refdef at
 `0x01CE01D0` - not a view index.)
 
@@ -41,6 +42,7 @@ pane, no white HUD blocks. Not re-tested on Splash, where it was first seen.
 For reference: exposure records `[5]` are relocated and selected per client
 (`0x01C5FC0C`); luminance target RT 35 (56x32) is shared by all views.
 Test trap: idle test players stand still, so a symptom looks "latched".
+Very likely B25 (fixed after 2.6.9: panes 3/4 lit with outdoor values indoors, every ZM map).
 
 ### A5. Garbled name for a 3rd controller joining in the main menu
 Frontend join of controllers 1-3 within ~2 s: seat 2's lobby member row
@@ -95,6 +97,67 @@ player (zz_splitscreen wraps `OptionGamepadSettingsPC.prepare`; PCUtility passes
 real pads.
 
 ## B. Fixed (listed because they show where to look next)
+
+### B28. cg_localEntities left at [2] on one PC: client 2 zeroed the client-field registry
+The diag memset watch on the user's PC: during client 2's CG_Init, CG_InitLocalEntities
+(`0x0083D651`) cleared 0x7C00 bytes at `0x0495A310` = `cg_localEntities` (`0x0494AB10`) + 2 *
+0x7C00 - the stock [2] pool, so `relocate_local_entities` had not moved it on that machine. Slot 2
+covers `cg_weaponsArray`, `cg_attachmentsArray`, `cg_viewModelArray` and the client-field registry
+(`0x0495A430`): client 3's CG_Init then zeroed a NULL view-model array (`0x02BC4D0F`), or the first
+frame read a NULL client field (`0x00133F31` / `0x00135525`). The move is all-or-nothing and was
+only tried once at startup; it now also retries from the CL_FreePerLocalClientMemory detour
+before every match (no cgame running; CG_InitLocalEntities rebuilds a client's lists), and the
+diagnostic build logs why a move was refused.
+
+### B27. Local clients 1..3 were not ordered at match start (fixed after 2.6.9)
+The B28 measurements came later; what this entry shows is real (client 3 initialised before
+client 2 on that PC) and the order fix stays, but the registry being empty was B28.
+Every map, 3 or 4 players, right after the loading screen (user's second PC; the laptop never):
+AV at `0x00133F31` / `0x00135525` reading a NULL client-field definition, and once
+`CG_Init` (lc 3) zeroing a NULL `cg_viewModelArray` (`0x0495A428`). The crash dumps show the
+client-field registry (`0x0495A430`, 0x4018 bytes per type) empty. Its order log: client 3 parsed
+its gamestate and ran CG_Init before client 2 (`CL_ParseGamestate` lc 0, 1, 3, 2); the stock
+hold-back in CL_ParseGamestate (`0x01364FCC`) only waits for the primary client, so clients 1..3
+were not ordered among themselves. Client 2's late cgame init reset the registry while client 3
+already ran frames (once: CG_Init lc 0, 2, 3 with client 1 not started, and lc 3 found
+`cg_viewModelArray` NULL). The stock check itself only runs when an ezz-hooked mode test
+(`0x020EAD00`) and a dvar (`0x056BC1E0`) agree - true on the laptop, false on that PC, so there
+nothing was held back at all. Fix (`install_gamestate_order`): at the start of CL_ParseGamestate
+(`0x01364FA1`, independent of those conditions) a client waits while any lower-numbered active
+client is at connectionState 6..9, through the stock hold-back path (`0x01365469`; the gamestate
+is dropped and the server sends it again).
+
+### B26. 3 players: the next match sent everyone to the menu (fixed after 2.6.9)
+With 3 players and a 4th controller plugged in, the 4th controller got signed in in the
+post-match lobby without its player joining (its profile was read; `Com_LocalClient_IsBeingUsed`
+`0x020E3210` = seat record bit 0). The next match's SetAllUsedActive counted 4 clients in use,
+so 4 local clients connected; the listen server (SV_DirectConnect `0x021ECD30`) admits the game
+lobby's members only and never answered the 4th. It stayed at connectionState 6 until the load
+timed out (~30 s) and everyone was sent to the menu - Deactivate/Activate cleared the seat, so
+that was the work-around. Fix (`drop_seats_outside_lobby`, before the engine pass of the
+SetAllUsedActive detour): a seated controller that `LobbySession_GetClientByXuid` does not find in
+the game lobby is signed out first; only when the host itself is found there (lookup trusted).
+Measured: 9 phantom seats signed out over a session of 2/3/4-player matches, no member touched.
+Same mechanism as the 3 -> 4 case where a 4th player joined between matches but was never
+enrolled in the game lobby (that match now starts with 3 instead of failing).
+
+### B25. Panes 3/4 overexposed indoors; 4-player crash at doors / power (fixed after 2.6.9)
+Per-view lighting objects (0x148 bytes; list view+0xB2680 -> +0x10 objects, +0x20 count) keep a
+per-client float at +0x138 and per-client skip flags at +0x140 for two clients only. Client 2's
+float landed on the skip flags of clients 0/1, client 3's on the Umbra gate id at +0x144: panes
+3/4 read back wrong values (outdoor lighting indoors, every ZM map, worst on Kino / Shi No Numa)
+and the float 0.0 became gate id 0, which crashed the Umbra gate test at `0x01C8DA0C` (index
+`id - 0x50000` negative; Kino door to the outside, Der Eisendrache power). Fix: own float and
+flag per object for clients 2/3, seven accessors redirected all-or-nothing
+(`17_lighting_and_restart.inl`); the gate test also skips ids below 0x50000 as a backstop.
+
+### B24. Map restart / next match with 3-4 players: fast path 2-wide (fixed after 2.6.9)
+The map-load function `0x01359B80` has a fast path for restarts whose check and reset loops ran
+for 2 local clients (`0x01359C4F`, `0x01359CD4/5` = 2*0x1078, `0x01359CF8`): clients 2/3 kept
+the previous match's state, which crashed a restart and made Deactivate/Activate necessary
+between matches. Widened to 4 in `local_client_count_patches`. Also: client 3's CL_Init is
+retried at match sizing, and per-client table entries 2/3 get the allocator's self pointer if a
+restart leaves them empty (`0x014D2A27`).
 
 ### B23. Lobby button could not remove players; unplug removed a guest (2.6.8)
 The PC button (SplitscreenLobbyButtonPC) takes the first matching state: Hide, MapController,

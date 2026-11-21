@@ -737,10 +737,51 @@
 		bool match_latch_pending = false;
 		bool alloc_count_site_ok = false;   // the allocator's count call is stock (install)
 
+		// A controller can be signed in (seated) without being a member of the game lobby:
+		// a 4th pad that is only plugged in got seated in the post-match lobby, and the
+		// next match then gave it a local client the server never admits (it answers the
+		// lobby's members only). That client sat at state 6 until the load timed out and
+		// sent everyone to the menu - the "3 players need Deactivate" bug. Before the
+		// engine counts the seats for a match, sign such controllers out. Only when the
+		// lobby lookup is trustworthy: the host must be found in the game lobby.
+		void drop_seats_outside_lobby()
+		{
+			if (!signin_relocated || !lobby_enrollment_api_matches() || !guest_listed_in_game_lobby(0))
+			{
+				return;
+			}
+			for (int controller = 1; controller < 4; ++controller)
+			{
+				if (!controller_seated(controller))
+				{
+					continue;
+				}
+				if (guest_listed_in_game_lobby(controller))
+				{
+					note("[seats] controller %d: seated and in the game lobby\n", controller);
+					continue;
+				}
+				note("[seats] controller %d: seated but not in the game lobby - signing it out before the match\n",
+				     controller);
+				reinterpret_cast<void (*)(int, bool, bool)>(base() + guest_signin_rva)(controller, false, false);
+				if (controller == 2)
+				{
+					reset_guest2_join();
+				}
+				else if (controller == 3)
+				{
+					guest3_lobby = {};
+				}
+				note("[seats] controller %d: %s\n", controller,
+				     controller_seated(controller) ? "still seated (sign-out did not take)" : "signed out");
+			}
+		}
+
 		// SetAllUsedActive takes no arguments (PS4 0x1517020: for i in 0..3
 		// SetActive(i, IsBeingUsed(i))). Run the engine's pass first, then ours.
 		void set_active_stub()
 		{
+			drop_seats_outside_lobby();
 			set_active_hook.invoke<void>();
 
 			// The clients this match starts with, by the predicate the engine pass just used.
@@ -755,6 +796,7 @@
 				}
 				match_latch = players;
 				match_latch_pending = players > 0;
+				note("[sizing] SetAllUsedActive: %u clients in use - latched for the next allocation\n", players);
 			}
 
 			// Seat check: without it the first call at boot ran CL_Init(2) for a client

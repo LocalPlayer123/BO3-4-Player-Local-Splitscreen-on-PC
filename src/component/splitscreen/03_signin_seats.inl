@@ -813,6 +813,7 @@
 		{
 			if (cl_init3_done || lc2_work_in_progress)
 			{
+				note("[sizing] CL_Init(3): %s - not now\n", cl_init3_done ? "already done" : "client 2 work in progress");
 				return;
 			}
 			const in_progress_guard guard(lc2_work_in_progress);
@@ -820,6 +821,8 @@
 			auto* range_b = reinterpret_cast<uint8_t*>(base() + cbuf_execute_range_imm_rva);
 			if (*range_a != 0x02 || *range_b != cbuf_range_resting)
 			{
+				note("[sizing] CL_Init(3): range checks read %02X/%02X (expected 02/%02X) - not now\n", *range_a, *range_b,
+				     cbuf_range_resting);
 				return;
 			}
 			auto* flags = reinterpret_cast<volatile uint32_t*>(base() + uia_base_rva + 3 * uia_stride);
@@ -843,6 +846,7 @@
 				}
 			}
 			cl_init3_done = (*flags & 0x2) != 0;
+			note("[sizing] CL_Init(3): %s\n", cl_init3_done ? "done" : "did not take (flag bit 1 clear) - will retry");
 		}
 
 		// cl_init_watch (further down) runs on the renderer pipeline, which keeps

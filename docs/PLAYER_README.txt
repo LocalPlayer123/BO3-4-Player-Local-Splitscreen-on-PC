@@ -8,6 +8,28 @@ plugin. Local (offline) play only.
 This is a BETA. Please report what works and what does not.
 
 
+NEXT VERSION (after 2.6.9, not released yet)
+--------------------------------------------
+* Fixed: players 3 and 4 were overexposed indoors on every map (worst on
+  Kino der Toten and Shi No Numa) - their panes used the outdoor lighting.
+* Fixed: with 4 players the game crashed (memory error) when the Kino door
+  to the outside was opened or the Der Eisendrache power was switched on.
+* Fixed: restarting a match from the menu with 3-4 players crashed.
+* Fixed: between matches you no longer have to Deactivate and Activate
+  split screen again - with 2, 3 or 4 players, also when the number of
+  players changes. A controller that is only plugged in (its player never
+  joined the lobby) no longer stops the next match from starting.
+* Fixed: on some PCs a 3 or 4 player match crashed right after the
+  loading screen, on every map (fine on others with the same setup). A
+  part of the mod that makes room for players 3/4 could be skipped at
+  startup on those PCs; it is now retried before every match. Players
+  also finish loading in order now (1, 2, 3, 4).
+* New: the controller you pick in Options > Controls > Split Screen
+  rumbles briefly, so everyone can see whose pad is whose.
+* New: that list shows each pad's real model (PS4, Xbox One, Joy-Con, ...)
+  instead of "XINPUT Controller 1-4", when Steam Input is on.
+
+
 NEW IN 2.6.9
 ------------
 * New: choose which controller each player uses - Options > Controls >
