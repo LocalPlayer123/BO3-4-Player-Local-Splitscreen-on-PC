@@ -686,6 +686,88 @@
 			return true;
 		}
 
+		// ---- The host's join handlers address the old [2] array (ezz BOIII 3.1) ----
+		// ezz 3.1 puts its own handlers into the client<-host lobby message table
+		// (src/client/component/lobby/msg/handler.cpp). Two of them, JoinAgreementRequest
+		// and JoinComplete, index s_joinClient at its original address, which the move
+		// above left behind: the agreement lands in the old array while the engine's
+		// join state machine waits on the new one, so every party join into a game
+		// lobby times out - "Failed to host lobby", with one player as with four
+		// (verified: ezz 3.1 alone hosts, ezz 3.1 + the mod does not). These two entries
+		// get the engine's handlers back; those reach s_joinClient through the relocated
+		// getter (0x01ED8223) and serve all four controllers. Entries are found by
+		// message type, and one is only rewritten while it points outside the game
+		// image (a host's handler): on official BOIII and ezz 3.0 nothing changes.
+		bool join_client_handlers_restored = false;
+
+		void restore_join_client_handlers()
+		{
+			if (!joinclient_new || join_client_handlers_restored)
+			{
+				return;
+			}
+			const auto b = base();
+			const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(b);
+			const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(b + dos->e_lfanew);
+			const size_t image_end = b + nt->OptionalHeader.SizeOfImage;
+
+			for (const auto& h : join_client_handlers)
+			{
+				const auto* code = reinterpret_cast<const void*>(b + h.rva);
+				if (!readable(code, sizeof(h.stock)) || std::memcmp(code, h.stock, sizeof(h.stock)) != 0)
+				{
+					note("join handlers: engine handler 0x%X differs - none restored", h.rva);
+					return;
+				}
+			}
+
+			uint32_t restored = 0;
+			for (const auto& h : join_client_handlers)
+			{
+				uint64_t* slot = nullptr;
+				for (uint32_t i = 0; i < client_host_handler_count; ++i)
+				{
+					const auto entry = b + client_host_handlers_rva + i * client_host_handler_stride;
+					if (!readable(reinterpret_cast<const void*>(entry), client_host_handler_stride))
+					{
+						break;
+					}
+					if (*reinterpret_cast<const int32_t*>(entry) == h.msg_type)
+					{
+						slot = reinterpret_cast<uint64_t*>(entry + client_host_handler_fn_off);
+						break;
+					}
+				}
+				if (!slot)
+				{
+					note("join handlers: no table entry for message type 0x%X", h.msg_type);
+					continue;
+				}
+				const uint64_t engine = b + h.rva;
+				const uint64_t current = *slot;
+				if (current == engine)
+				{
+					continue; // the engine's own handler
+				}
+				if (current >= b && current < image_end)
+				{
+					note("join handlers: type 0x%X points into the game at 0x%llX - left alone", h.msg_type,
+					     static_cast<unsigned long long>(current - b));
+					continue;
+				}
+				if (write_bytes(slot, &engine, sizeof(engine)))
+				{
+					++restored;
+				}
+			}
+			if (restored)
+			{
+				ezz::chained |= 1024;
+			}
+			note("join handlers: %u of %zu restored to the engine's", restored, std::size(join_client_handlers));
+			join_client_handlers_restored = true;
+		}
+
 		bool widen_lua_controller_checks()
 		{
 			const auto b = base();

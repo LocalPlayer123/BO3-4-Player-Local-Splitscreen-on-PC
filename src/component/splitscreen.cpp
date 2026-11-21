@@ -1,5 +1,5 @@
 ﻿// Game build: BlackOps3.exe, PE checksum 0x06531394 (Steam build 24784313,
-// the exe ezz BOIII 3.0 runs). Every address in CODE targets that build.
+// the exe ezz BOIII 3.0 and 3.1 run). Every address in CODE targets that build.
 // Some addresses in comments and trace strings still name older builds
 // (0x06517980, 0x0888C368); translate them with tools/port_map.py
 // (BO3_PORT_PAIR=2026 for 0x06517980).
@@ -190,6 +190,10 @@ namespace splitscreen
 
 			// Third screen, part 1: geometry. The IsActive cave comes later.
 			relocate_view_params();
+			// ezz BOIII 3.1 answers the geometry itself; chain on top of it. Its jump
+			// already exists: the plugin starts after every ezz component's
+			// post_unpack (release/src/ezz_plugin.cpp, unchanged in ezz 3.1).
+			chain_view_params_over_host();
 			// The two [2] arrays the pane path indexes at 2 (scrPlaceView overflowed).
 			// The pane bounds refuse without them, so a failure means two panes.
 			relocate_flat24("scrPlaceView", scrplaceview_rva, scrplaceview_stride,
@@ -240,6 +244,8 @@ namespace splitscreen
 			// Entering a mode with 3-4 players seated: the party join needs
 			// every member's agreement over the lobby message loop.
 			relocate_join_clients();
+			// ezz BOIII 3.1's join handlers still use the old [2] array.
+			restore_join_client_handlers();
 			// MP HUD players 3/4: Engine.GetClientNum answered -1 for them.
 			widen_lua_controller_checks();
 			// cl_voiceCommunication is moved by reloc_tables' voice_comm.

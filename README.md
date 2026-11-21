@@ -7,7 +7,8 @@ since 2.0 for **ezz BOIII** - and shipped as an ezz plugin
 
 Status: **beta**. 4-player Zombies and 4-player offline Multiplayer (bots too)
 work under ezz BOIII 3.0 (lobby, loadouts, 2x2 screens, HUD per pane,
-back-to-back rounds). See [OPEN_PROBLEMS.md](docs/OPEN_PROBLEMS.md) for
+back-to-back rounds); since 2.7.0 also under ezz BOIII 3.1 (3-player Zombies
+verified; items 16 and 17 in EZZ_REQUIRED_CHANGES are the two 3.1 changes). See [OPEN_PROBLEMS.md](docs/OPEN_PROBLEMS.md) for
 everything that is not solved yet - please read it before changing things.
 
 **ezz BOIII developers:** [EZZ_REQUIRED_CHANGES.md](docs/EZZ_REQUIRED_CHANGES.md)
@@ -56,7 +57,7 @@ almost every site names the PS4 function it was checked against and what was
 measured.
 
 **Game build:** everything targets `BlackOps3.exe` with PE checksum
-**0x06531394** (the build ezz BOIII 3.0 installs). On any other build the
+**0x06531394** (the build ezz BOIII 3.0 and 3.1 install). On any other build the
 component stands down and the game runs unmodified. A new game build needs
 every RVA re-mapped - they are all in one file,
 `src/component/splitscreen_addresses.hpp` (the code refers to them by name,

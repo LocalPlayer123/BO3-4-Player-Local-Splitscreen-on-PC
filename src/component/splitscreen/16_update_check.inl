@@ -17,7 +17,7 @@
 		// 0x10A53C0 -> _Dvar_RegisterString).
 
 		// This build's version. release/build.ps1 refuses a package whose README says otherwise.
-		constexpr char mod_version[] = "2.6.9";
+		constexpr char mod_version[] = "2.7.0";
 
 #ifndef SS_NO_UPDATE_CHECK
 		constexpr wchar_t update_host[] = L"api.github.com";

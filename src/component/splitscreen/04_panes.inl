@@ -110,6 +110,93 @@
 			return true;
 		}
 
+		// ---- The host answers GetLocalClientViewParams itself (ezz BOIII 3.1) ----
+		// ezz 3.1 replaces the function with its own version (client_patches.cpp,
+		// for its cg_splitscreen_letterbox option): a `jmp rel32` over the first
+		// instruction, the rest left in place. Its table has rows for one and two
+		// views only (ClientViewLayouts::forViewCount), so views 3/4 read past it,
+		// and the body patched above never runs. The chain hooks on top of the
+		// host's jump: three and four views go to the patched engine body (the
+		// replaced instruction, then a jump back), every other count stays with
+		// the host, letterbox option included. Nothing is hooked while the entry
+		// is the engine's own (official BOIII, ezz 3.0): the body answers all counts.
+
+		using view_params_fn = const void* (*)(int local_client, int view_index, int view_count);
+		utils::hook::detour view_params_host_hook;
+		view_params_fn view_params_engine = nullptr;
+		bool view_params_chained = false;
+
+		const void* view_params_stub(const int local_client, const int view_index, const int view_count)
+		{
+			if (view_count == 3 || view_count == 4)
+			{
+				return view_params_engine(local_client, view_index, view_count);
+			}
+			return view_params_host_hook.invoke<const void*>(local_client, view_index, view_count);
+		}
+
+		// True once chained. False while the entry is the engine's own, and on any
+		// mismatch, which is noted and leaves everything untouched.
+		bool chain_view_params_over_host()
+		{
+			if (view_params_chained)
+			{
+				return true;
+			}
+			const auto b = base();
+			const auto* entry = reinterpret_cast<const uint8_t*>(b + view_params_rva);
+			if (!readable(entry, sizeof(view_params_entry) + sizeof(view_params_after_entry)))
+			{
+				note("view params: entry unreadable - not chained");
+				return false;
+			}
+			note("view params: entry %02X %02X %02X %02X %02X, body patched %d", entry[0], entry[1], entry[2],
+			     entry[3], entry[4], view_params_relocated ? 1 : 0);
+			if (std::memcmp(entry, view_params_entry, sizeof(view_params_entry)) == 0)
+			{
+				return false; // the engine's own entry: no host to chain onto
+			}
+			if (!view_params_relocated)
+			{
+				note("view params: host jump found, but the body has no 3/4-view rows - not chained");
+				return false;
+			}
+			if (!ezz::host_jump_then(b, view_params_rva, view_params_after_entry, sizeof(view_params_after_entry)))
+			{
+				note("view params: entry is neither the engine's nor a host jump - not chained");
+				return false;
+			}
+
+			// The engine body's entry: the instruction the host's jump replaced, then
+			// `jmp [rip+0]` back to the first one it left in place.
+			auto* thunk = static_cast<uint8_t*>(allocate_near_module(sizeof(view_params_entry) + 14));
+			if (!thunk)
+			{
+				note("view params: no memory for the engine entry - not chained");
+				return false;
+			}
+			uint8_t back_jump[14] = {0xFF, 0x25, 0x00, 0x00, 0x00, 0x00};
+			const uint64_t back = b + view_params_rva + sizeof(view_params_entry);
+			std::memcpy(back_jump + 6, &back, sizeof(back));
+			std::memcpy(thunk, view_params_entry, sizeof(view_params_entry));
+			std::memcpy(thunk + sizeof(view_params_entry), back_jump, sizeof(back_jump));
+			view_params_engine = reinterpret_cast<view_params_fn>(thunk);
+
+			try
+			{
+				view_params_host_hook.create(b + view_params_rva, reinterpret_cast<void*>(&view_params_stub));
+			}
+			catch (...)
+			{
+				note("view params: detour over the host jump failed - not chained");
+				return false;
+			}
+			view_params_chained = true;
+			ezz::chained |= 512;
+			note("view params: chained over the host jump");
+			return true;
+		}
+
 		// ---- Two [2] arrays the third pane's code path indexes at 2 ----
 		// scrPlaceView (stride 0x7C; PS4: ScreenPlacement scrPlaceView[4], index
 		// assert compiled out on PC): pane 2's viewport setup overwrote a pointer

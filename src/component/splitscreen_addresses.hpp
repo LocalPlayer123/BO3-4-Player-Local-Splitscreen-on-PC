@@ -1426,6 +1426,16 @@ namespace splitscreen
 		{0x010CB5FA, 7, 3, true, 0x00, {0x48, 0x8D, 0x15, 0xEF, 0xB0, 0x19, 0x02}},
 		{0x010CB664, 7, 3, true, 0x00, {0x48, 0x8D, 0x15, 0x85, 0xB0, 0x19, 0x02}},
 	};
+	// chain_view_params_over_host: CG_GetLocalClientViewParams (PS4 0x2CC500). Its first
+	// instruction is exactly the 5 bytes a host's `jmp rel32` covers (ezz BOIII 3.1,
+	// client_patches.cpp); the rest of the prologue must still follow it.
+	inline constexpr uint32_t view_params_rva = 0x010CB540;
+	inline constexpr uint8_t view_params_entry[] = {0x48, 0x89, 0x5C, 0x24, 0x08};   // mov [rsp+8], rbx
+	inline constexpr uint8_t view_params_after_entry[] = {
+		0x48, 0x89, 0x74, 0x24, 0x10,   // mov [rsp+0x10], rsi
+		0x57,                           // push rdi
+		0x48, 0x83, 0xEC, 0x20,         // sub rsp, 0x20
+	};
 	inline constexpr uint8_t ps4_view_params[0x200] = {
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x80, 0x3F,
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -1832,6 +1842,30 @@ namespace splitscreen
 	inline constexpr entcoll_site joinclient_end_sites[] = {
 		{0x01ED81D8, 3, 7, true , 0x160},   // lea rsi,[base+2*0xB0]        reset loop end
 		{0x01ED86DE, 3, 7, true , 0x208},   // lea r14,[base+0xA8+2*0xB0]   update loop end
+	};
+	// restore_join_client_handlers (06_relocations_a.inl): the client<-host lobby message table
+	// (LobbyMsgHandler {int32 msgType; callback} x 12, 0x10 each; ezz 3.1 names it
+	// client_hostMessageHandlers) and the engine's own entries for the two message types whose
+	// handlers index s_joinClient. Original entries recovered from the image dump (28 of 29
+	// table pointers land on .pdata starts at one base); each is a wrapper that copies the
+	// sender address and calls the PS4-named handler.
+	inline constexpr uint32_t client_host_handlers_rva = 0x02F9EDA0;
+	inline constexpr uint32_t client_host_handler_count = 12;
+	inline constexpr uint32_t client_host_handler_stride = 0x10;
+	inline constexpr uint32_t client_host_handler_fn_off = 0x8;
+	struct msg_handler_entry
+	{
+		int32_t msg_type;
+		uint32_t rva;
+		uint8_t stock[0x1B];
+	};
+	inline constexpr msg_handler_entry join_client_handlers[] = {
+		// JOIN_AGREEMENT_REQUEST -> 0x01ED7C70 LobbyJoinClient_MsgAgreementRequest (PS4 0xCBA810)
+		{0x12, 0x01EC5CF0, {0x48, 0x83, 0xEC, 0x38, 0x0F, 0x10, 0x02, 0x48, 0x8D, 0x54, 0x24, 0x20, 0x0F, 0x29,
+		                    0x44, 0x24, 0x20, 0xE8, 0x6A, 0x1F, 0x01, 0x00, 0x48, 0x83, 0xC4, 0x38, 0xC3}},
+		// JOIN_COMPLETE -> 0x01ED7CC0 LobbyJoinClient_MsgJoinComplete (PS4 0xCBACA0)
+		{0x14, 0x01EC5D10, {0x48, 0x83, 0xEC, 0x38, 0x0F, 0x10, 0x02, 0x48, 0x8D, 0x54, 0x24, 0x20, 0x0F, 0x29,
+		                    0x44, 0x24, 0x20, 0xE8, 0x9A, 0x1F, 0x01, 0x00, 0x48, 0x83, 0xC4, 0x38, 0xC3}},
 	};
 	inline constexpr uint32_t lobbymsg_bound_rva = 0x01EEC68E;
 	inline constexpr uint8_t lobbymsg_bound_stock[] = {0x83, 0xFB, 0x02, 0x7C, 0xC5};   // cmp ebx,2 / jl

@@ -1,4 +1,4 @@
-BO3 Local Splitscreen 2.6.9  -  build {VERSION}
+BO3 Local Splitscreen 2.7.0  -  build {VERSION}
 ================================================
 
 Up to FOUR local split-screen players for Call of Duty: Black Ops III on PC -
@@ -8,8 +8,14 @@ plugin. Local (offline) play only.
 This is a BETA. Please report what works and what does not.
 
 
-NEXT VERSION (after 2.6.9, not released yet)
---------------------------------------------
+NEW IN 2.7.0
+------------
+* Works with ezz BOIII 3.1 (and still 3.0). Under ezz 3.1, 2.6.9 broke in
+  two places: no lobby could be hosted ("Failed to host lobby", even with
+  one player), and players 3/4 got no proper screen. Both fixed; tested with
+  three players in a Zombies match under ezz 3.1.
+* The fixes below are by Dodell-2007 (GitHub), who tracked them down on two
+  PCs and sent them in - thank you!
 * Fixed: players 3 and 4 were overexposed indoors on every map (worst on
   Kino der Toten and Shi No Numa) - their panes used the outdoor lighting.
 * Fixed: with 4 players the game crashed (memory error) when the Kino door
@@ -28,6 +34,9 @@ NEXT VERSION (after 2.6.9, not released yet)
   rumbles briefly, so everyone can see whose pad is whose.
 * New: that list shows each pad's real model (PS4, Xbox One, Joy-Con, ...)
   instead of "XINPUT Controller 1-4", when Steam Input is on.
+
+Updating from 2.2 - 2.6.9: extract this zip over the old files. If you
+update ezz BOIII itself to 3.1, update this mod to 2.7.0 too.
 
 
 NEW IN 2.6.9

@@ -25,6 +25,8 @@ workaround") and what ezz could change instead ("Fix in ezz").
 | 13 | plugin loader: start point, `p_name`, unload at exit | worked around by the plugin |
 | 14 | `splitscreen_playerCount` saved to config.cfg | worked around, verified (2.6.2) |
 | 15 | player 2 has no Start/Back on a controller (stock PC) | worked around, verified (2.6.6) |
+| 16 | ezz 3.1 view layouts for one and two views only | worked around (chained), verified with 3 players |
+| 17 | ezz 3.1 join message handlers index the moved `s_joinClient` | worked around, verified (lobby hosts) |
 
 Every item names the ezz source line (ezz commit `5aa7fac`, `src/client/...`)
 and the game address in exe **0x06531394** (Steam build 24784313, the exe ezz
@@ -460,3 +462,62 @@ screen (`0x0223371D`). The PC already refuses Zombies/Campaign with more than on
   `0x00843C35` makes CG_CanPauseGame false with 2+ local players
   (`install_no_shared_pause`, 14_player4_fixes.inl). Not a detour there: the function
   tail-jumps into CG_AllClientsAreLocal `0x008C1AA0`, which has an Arxan caller guard.
+
+## 16. ezz 3.1 view layouts for one and two views only - MATCH (worked around, verified with 3 players)
+
+ezz v3.1.0 (2026-11-19, commit `4e60eb5`) replaces `CG_GetLocalClientViewParams`
+(`0x010CB540`, PS4 `0x2CC500`) with a `jmp rel32` to
+`CG_GetLocalClientViewParams_Stub` (`src/client/component/client_patches.cpp`, for the
+new `cg_splitscreen_letterbox` dvar). Its `CG_GetLocalClientViewParams_Impl`
+(`src/client/game/impl/cg/cg.cpp`) reads `ClientViewLayouts`, which holds `oneView[2]`
+and `twoViews[2]` per aspect; `forViewCount()` returns `twoViews` for any count above
+one. With three or four views, panes 3 and 4 index `twoViews[2]` / `twoViews[3]`:
+the next aspect's rows, or past `s_localClientViewParams` (`0x032666F0`, 0x80 bytes)
+for widescreen. The mod's six in-body patches (item 4's method: the index scaled to the
+PS4 `[2][4][4]` table, `ps4_view_params`) no longer run, because the entry jumps away.
+Reported by a player two days after the release ("the mod stopped working").
+
+* **Fix in ezz:** give the layout table four view counts with up to four panes each
+  (PS4 `clientViewParamsArray`, `.data` `0x03060D50`, `[2][4][4]` x 0x10; the mod ships
+  that table as `ps4_view_params`) and index it `[aspect][viewCount - 1][viewIndex]`;
+  apply the letterbox to the two-view row only, as now.
+* **Mod workaround:** `chain_view_params_over_host` (`04_panes.inl`). When the entry is a
+  host jump followed by the stock prologue tail, a detour on top sends three and four
+  views to the engine body (still carrying the mod's patches; entered through a copy of
+  the replaced `mov [rsp+8], rbx` and a jump back) and every other count to ezz, so the
+  letterbox option keeps working for one and two players. On ezz 3.0 and official BOIII
+  the entry is the engine's own and nothing is hooked.
+
+Everything else ezz 3.1 hooks was checked against every mod site and every array the mod
+moves (88 hook sites new in 3.1; `.pdata` extents for the functions ezz replaces): the
+`IN_SetActiveDevice` detour and the `GPad_IsDurangoGamepad` replacement leave the mod's
+`clientGameStates` / `s_gamePads` references live (the latter calls `GamePad_Enabled` and
+`GPad_GetGamepadType`, whose references the mod moves), and the new
+`LobbyVoice_Update` / `TransmitQueuedVoiceData` byte patches change voice thresholds only.
+`cl_voiceCommunication` (the array the mod moves as `voice_comm`) is declared in 3.1 but
+not used. The new main-menu join script (`data/ui_scripts/splitscreen_join`) joins on an
+A release only for a controller not yet in use; how it meets the mod's own join is part
+of the pending game test.
+
+## 17. ezz 3.1 join message handlers index the moved `s_joinClient` - BLOCKER (worked around, verified)
+
+ezz v3.1.0 writes its own handlers into the client<-host lobby message table
+(`client_hostMessageHandlers`, `0x02F9EDA0`; `src/client/component/lobby/msg/handler.cpp`).
+`HandleAgreementRequest` and `HandleJoinComplete` (`src/client/game/impl/lobby/msg/handler.cpp`)
+index `(*join::s_joinClient)[controllerIndex]` at its original address (`0x156CB4B0`, `[2]` x
+0xB0). The mod moves that array to `[4]` (slot 2 of the original overlaps another object; the
+engine's agreement handler and the widened LobbyMsgTransport loop need slots 2/3 for players
+3/4). With the mod, ezz's handlers write the join agreement into the abandoned array while the
+engine's join state machine waits on the new one: every party join into a game lobby times out,
+"Failed to host lobby", even with one player. Measured: ezz 3.1 alone hosts; ezz 3.1 + the mod
+does not, until the workaround below.
+
+* **Fix in ezz:** size these handlers for four controllers and reach the join clients through
+  the engine's own accessor (the getter at `0x01ED8220`, PS4 `LobbyJoinClient_GetJoinClient`
+  equivalent) instead of a fixed `[2]` symbol, or move the array to `[4]` ezz-side.
+* **Mod workaround:** `restore_join_client_handlers` (`06_relocations_a.inl`): after the move,
+  the entries for `JOIN_AGREEMENT_REQUEST` (0x12) and `JOIN_COMPLETE` (0x14) get the engine's
+  wrappers back (`0x01EC5CF0` -> `0x01ED7C70`, `0x01EC5D10` -> `0x01ED7CC0`; PS4
+  `LobbyJoinClient_MsgAgreementRequest` / `LobbyJoinClient_MsgJoinComplete`), found by message
+  type and only while the entry points outside the game image. This bypasses ezz's validation
+  for these two host-to-client messages; the other handlers stay ezz's.

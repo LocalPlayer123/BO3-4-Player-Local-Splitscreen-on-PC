@@ -134,7 +134,10 @@ namespace splitscreen::ezz
 		}
 	}
 
-	// Bit per chained function: 1 GetXuid, 2 UserGetXuid, 4 GetClientName.
+	// Bit per chained function: 1 GetXuid, 2 UserGetXuid, 4 GetClientName; set
+	// elsewhere: 8 Storage_Pump (splitscreen.cpp), 512 GetLocalClientViewParams
+	// (ezz 3.1+, chain_view_params_over_host in splitscreen/04_panes.inl), 1024 join
+	// message handlers (ezz 3.1+, restore_join_client_handlers in 06_relocations_a.inl).
 	inline uint32_t chained = 0;
 
 	inline bool get_xuid_chained()

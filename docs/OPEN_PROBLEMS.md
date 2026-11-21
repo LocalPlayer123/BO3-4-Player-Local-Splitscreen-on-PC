@@ -2,7 +2,7 @@
 
 Everything known to be broken, unverified or unfinished, sorted by kind.
 Addresses are image RVAs of `BlackOps3.exe` build **0x06531394** (PE
-checksum; the exe ezz BOIII 3.0 runs, which the code targets since 2.0).
+checksum; the exe ezz BOIII 3.0 and 3.1 run, which the code targets since 2.0).
 Most points were measured on the previous build 0x06517980 and translated
 with a build-to-build instruction map; the method is given where it matters.
 Nothing here is guessed: each point says what was measured.
@@ -33,7 +33,28 @@ lighting objects, fixed after 2.6.9): re-test before closing.
 (`view+0xB267C` is the light-state index, copied from the refdef at
 `0x01CE01D0` - not a view index.)
 
-### A4. MP: panes 3/4 look overexposed - not reproduced (2.2.4)
+### A4. Panes 3/4 overexposed - REPRODUCIBLE per user reports (2026-10)
+Four independent reports (Kino der Toten, Der Eisendrache, Five Remastered,
+plus the earlier MP report): players 3/4 far too bright, players 1/2 fine.
+Kino der Toten: right at spawn (indoors); fine outside in the left alley,
+wrong again back inside. One report describes it as "white inverted
+contrast" on player 3's screen with 3 players. Same position dependence as
+the 09-29 measurement (pool/Kraken spawn broken, street fine).
+Ruled out 2026-10-14: A6 (already relocated); the CPU exposure target - PS4
+`R_UpdateExposureValue` 0xA0B8C0 / `R_SetExposure` 0xA1C660 write only into
+the client's own refdef (bank `refdef+0x1C9C94`, set per cg by
+`CG_SetExposureActiveBank`, cg +0x2F8A00), and the PC cg/refdef are per
+`cl_maxLocalClients`. Left: the GPU side (luminance RT 35 shared by all
+views, per-client exposure records).
+Measured 2026-10-14 on Der Eisendrache (4 players, `tools/pane_brightness.py`,
+luma percentiles per pane): spawn outdoors, a tunnel and the mine - panes 3/4
+match panes 1/2 (e.g. median 26 / 22 / 23 for three players at one spot,
+highlights 181 / 179 / 197, three captures 4 s apart). One earlier capture
+looked like missing indirect light on panes 3/4; the repetition showed it was
+the players' positions. **Not reproduced on Der Eisendrache** - every precise
+report is Kino der Toten (Zombies Chronicles) or a Workshop map. Help wanted:
+a 4-player capture on Kino der Toten with players 1 and 3 at the same spot.
+Earlier notes (2.2.4):
 Panes 3 and 4 looked too bright in Multiplayer (seen together with player 3's
 white HUD panels, which are fixed - B7). Re-measured with 2.2.3: 4-player
 offline MP on Rise, all four players moving, 30 captures; mean brightness per
@@ -51,13 +72,11 @@ show as the name (`+0x303BCA8` in 0x06531394). A per-controller xuid source
 still sized `[2]` is read on that path (slot 2 = a foreign object). Joins made inside the ZM/MP lobby get
 correct identities.
 
-### A6. Umbra visibility: two per-client int arrays still `[2]`
-`umbraGlob+0x12DC48` and `+0x12DC50` (PS4 `UmbraGlob.clientGates[4]`,
-`viewCount[4]`). Client 2 writes `+0x12DC48[2]` = `+0x12DC50[0]` (client 0's
-slot), client 3 the same for client 1; clients 2/3 read their `+0x12DC50`
-entry from padding (0). Users: `0x01C8CC72`, `0x01C8DA64`, `0x01C8DB20`,
-`0x01C8DB68`, `0x01C8CBB2` (same addresses in both builds). Relocate after a
-full reference scan.
+### A6. (already fixed - Umbra tome triggers `[2]`)
+`umbraGlob+0x12DC48` / `+0x12DC50` (PS4 `clientGates[4]`, `viewCount[4]`) are
+moved to `[4]` by the Umbra relocation (`umbra_disps`, since 2026-09-28). A
+byte scan of build 0x06531394 (2026-10-14) finds 7 + 4 references, all 11 in
+that table; this entry was written from older notes. Not the A4 cause.
 
 ### A8. (fixed in 2.6.1, see B12)
 Seen 2026-09-30 (2.6 test, Rise TDM, just after spawn): AV reading
@@ -73,9 +92,58 @@ list: `actorOverheadFade` `0x04945F30` [2][64] x 0x10, `centOverheadFade`
 (actor head traces of lc 2 start exactly at `drawNameEntities`). Reset in
 `0x00677B20` (five memsets).
 
+### A11. 4-player crash: Der Eisendrache power-on, Shangri-La (user reports 2026-10)
+Crash with 4 players, 3 players run fine: on Der Eisendrache when the power is
+turned on; on Shangri-La (Zombies Chronicles). No dump. 2026-10-14: a 4-player
+DE session (spawn, tunnel, mine, game over back to the lobby) ran without a
+crash; the power switch was not reached. Lead from the PS4 coverage list:
+`s_fxGpuClientData[4]` (GPU effects per client, 17 users) - its PC users are
+Arxan-encrypted in the static image, so they need a live code dump. Help
+wanted: an ezz crash zip (%LOCALAPPDATA%\boiii\minidumps) from this crash.
+
+### A12. Workshop maps and mods (user reports 2026-10)
+**Reproduced 2026-10-16 (2 of 2): 4 players on the Workshop map FIVE (zm_pentagon) crash while
+the map loads; 3 players load.** A read-only monitor of the per-client CG memory shows: at the
+match start CL_AllocatePerLocalClientMemory allocates correctly for 4 (cl_maxLocalClients 4);
+about 10 s later, while the clients load (states 9/10), the pointers `cg_viewModelArray`
+(`0x0495A428`, PS4 `Hunk_UserAlloc(count*0x3A0)`) and its neighbour `0x0495A420` become NULL in
+the same instant and are never set again; cl_maxLocalClients stays 4. The crash follows in
+`CG_Init(3)` (memset through NULL + 3*0x3A0, RVA `0x008F25B7`) or, if all clients got past it,
+on the first in-game read (RVA `0x00133F31`, read of 0x1C). Ruled out as the writer: the
+allocator (`0x0135D330`, no early exit), `CL_FreePerLocalClientMemory` (`0x0135DC20`, always
+zeroes cl_maxLocalClients), every `cg_weaponsArray` reference (all relocated) and the mod's own
+relocation code. The writer is in code that only exists decrypted at runtime. Next step: a
+write trap on those two qwords during a 4-player FIVE load names it.
+
+Europa and Leviathan: "a blue grate texture appears" and the player is kicked
+out of the map (several tries). Crashes with a Black Ops 1 weapon pack on
+Shangri-La and Call of the Dead Remastered. No dumps, mod version unknown.
+
 ### A7. User reports, not reproduced yet
 Hit indicator texture missing; players 1 and 2 sharing one controller with
 mixed third-party + Xbox pads (one pad probably seen through two APIs).
+
+### A13. ezz BOIII 3.1: panes 3/4 and "Failed to host lobby" (user report 2026-11-21) - fixed, verified with 3 players
+"After boiii 3.1 got released the mod stopped working." ezz v3.1.0 (2026-11-19) replaces
+`CG_GetLocalClientViewParams` (`0x010CB540`) with its own version, which has layouts for one
+and two views only; panes 3/4 read past its table and the mod's patches inside the engine
+function no longer run. The mod now chains a detour over ezz's jump and answers three and
+four views from the patched engine body (EZZ_REQUIRED_CHANGES item 16). The game exe is
+unchanged (0x06531394), and a check of every other hook ezz 3.1 adds found no further
+overlap with the mod (code hooks). A second break showed in the game: ezz 3.1's own lobby
+message handlers write the join agreement into the array the mod had moved, so no lobby could be
+hosted (EZZ_REQUIRED_CHANGES item 17; the mod gives those two handlers back to the engine).
+Verified 2026-11-21: ezz 3.1, 3 players in a Zombies match on Der Eisendrache, panes placed
+right. Still to test: 4 players, Multiplayer, ezz 3.1's main-menu "press A to join".
+
+### A14. Shadows of Evil Easter egg: swords missing for players 2/3 (user report 2026-10)
+3 players: after the flag step, two of the three players had no sword, so the fight
+against the Shadow Man could not be started. Not reproduced; no logs. A per-player
+script or a per-client array sized for 2 is the first guess - unverified.
+
+### A15. Steam Deck: plugin loads, splitscreen does not work (user report 2026-10)
+`plugins.log` shows the plugin loaded. No other details yet (which menu, how many
+controllers, PLAY OFFLINE or not).
 
 ### A3. Occasional silent exit ~20 s after launch
 Exit code 0, no dialog, no dump, inside the game's own `Com_Init` (the
@@ -443,6 +511,10 @@ for 4 class menus, command buffers for clients 2/3.
   4-player offline MP with bots works (tested on Safeguard and one other mode).
 * Console-style "Press A to join" label on the PC-only splitscreen button.
 * ESC opens the pause menu on all four panes (possibly stock PC behaviour).
+* Three players: a layout option with pane 3 across the whole bottom half (user wish
+  2026-10). The three-view rows of `ps4_view_params` decide it.
+* Keyboard and mouse as one of four players with three controllers (user question
+  2026-11). Keyboard player 1 plus one controller is tested; plus three is not.
 
 ## How to find the next one of these
 
