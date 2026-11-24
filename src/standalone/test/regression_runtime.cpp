@@ -1,12 +1,6 @@
 #include "regression_check.hpp"
 #include <cstddef>
 #include <cstdint>
-// The Windows build's void* -> function-pointer static_cast is an MSVC
-// extension. Adapt only casts in this declaration header for native GCC;
-// runtime.cpp and every tested runtime function body remain unmodified.
-#define static_cast reinterpret_cast
-#include "standalone/compat/utils/hook.hpp"
-#undef static_cast
 #include "standalone/runtime.cpp"
 #include <array>
 #include <string>

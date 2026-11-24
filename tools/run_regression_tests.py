@@ -31,6 +31,8 @@ def section(path: str, start: str, end: str) -> str:
 
 def generate(directory: Path) -> None:
     selections = {
+        "readiness": section("src/component/splitscreen.cpp",
+                     "\t\tbool critical_tables_ready", "\t\t// Marks the image as patched"),
         "stats": section("src/component/splitscreen/15_stats_cache.inl",
                          "\t\tstruct stats_change", "\t\t// Every slot-0 reference"),
         "update": section("src/component/splitscreen/16_update_check.inl",
@@ -77,6 +79,41 @@ def lua_test() -> bool:
         else:
             lua.execute("table.insert(t, 1, nil); assert(t[3] == 1 and calls == 3)")
     print("PASS optional Lua: select and documented ambiguous fallback", flush=True)
+    lobby_source = (ROOT / "src/ui_scripts/zz_splitscreen/__init__.lua").read_text(encoding="utf-8")
+    lobby_tests = (TEST / "regression_lobby.lua").read_text(encoding="utf-8")
+    names = sorted(LuaRuntime().execute(lobby_tests).keys())
+    for name in names:
+        # Fresh globals and production-local reservations for every scenario.
+        lua = LuaRuntime()
+        tests = lua.execute(lobby_tests, name="@src/standalone/test/regression_lobby.lua")
+        production = lua.compile(lobby_source, name="@src/ui_scripts/zz_splitscreen/__init__.lua")
+        try:
+            tests[name](production)
+        except Exception as error:
+            raise RuntimeError(f"Lua lobby scenario {name}: {error}") from error
+        print(f"PASS optional Lua lobby: {name}", flush=True)
+    settings_source = (ROOT / "src/ui_scripts/zz_splitscreen_settings/__init__.lua").read_text(encoding="utf-8")
+    settings_tests = (TEST / "regression_settings.lua").read_text(encoding="utf-8")
+    for name in sorted(LuaRuntime().execute(settings_tests).keys()):
+        lua = LuaRuntime()
+        tests = lua.execute(settings_tests, name="@src/standalone/test/regression_settings.lua")
+        production = lua.compile(settings_source, name="@src/ui_scripts/zz_splitscreen_settings/__init__.lua")
+        try:
+            tests[name](production)
+        except Exception as error:
+            raise RuntimeError(f"Lua settings scenario {name}: {error}") from error
+        print(f"PASS optional Lua settings: {name}", flush=True)
+    roster_source = (ROOT / "src/ui_scripts/zz_splitscreen_roster/__init__.lua").read_text(encoding="utf-8")
+    roster_tests = (TEST / "regression_roster.lua").read_text(encoding="utf-8")
+    for name in sorted(LuaRuntime().execute(roster_tests).keys()):
+        lua = LuaRuntime()
+        tests = lua.execute(roster_tests, name="@src/standalone/test/regression_roster.lua")
+        production = lua.compile(roster_source, name="@src/ui_scripts/zz_splitscreen_roster/__init__.lua")
+        try:
+            tests[name](production)
+        except Exception as error:
+            raise RuntimeError(f"Lua roster scenario {name}: {error}") from error
+        print(f"PASS optional Lua roster: {name}", flush=True)
     return True
 
 
@@ -95,8 +132,8 @@ def main() -> int:
         directory = Path(temp)
         generate(directory)
         for suite, scenarios in (
-            ("safety", [None]), ("stats", [None]), ("update", [None]),
-            ("lighting", [None]),
+            ("safety", [None]), ("names", [None]), ("stats", [None]), ("update", [None]),
+            ("lighting", [None]), ("readiness", [None]),
             ("runtime", ["hooks", "init-fail", "scheduler", "startup", "unsupported"]),
             ("plugin", ["imports", "retry", "exception", "concurrent"]),
         ):

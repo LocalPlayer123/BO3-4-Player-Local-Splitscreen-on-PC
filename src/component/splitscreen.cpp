@@ -11,6 +11,8 @@
 #include "scheduler.hpp"
 #include "splitscreen_addresses.hpp"
 #include "splitscreen_midhook.hpp"
+#include "splitscreen_safety.hpp"
+#include "splitscreen_names.hpp"
 
 #include <utils/hook.hpp>
 #include <utils/finally.hpp>
@@ -71,6 +73,34 @@ namespace splitscreen
 		#include "splitscreen/16_update_check.inl"
 		#include "splitscreen/17_lighting_and_restart.inl"
 		#include "splitscreen/18_controllers.inl"
+		#include "splitscreen/19_player_names.inl"
+
+		bool critical_tables_ready = false;
+
+		// Most relocations are startup-only; local entities explicitly support a
+		// safe retry after CL_FreePerLocalClientMemory. Do not permanently disable
+		// larger matches when that one deferred relocation subsequently succeeds.
+		bool enable_extra_clients_when_ready()
+		{
+			if (raise_local_client_count)
+			{
+				return true;
+			}
+			if (!critical_tables_ready || !local_entities_relocated || !entcoll_relocated || !cf_relocated
+				|| !percg_relocated || !lui_roots_relocated || !uielem_relocated
+				|| !scrplace_relocated || !perclient54_relocated || !aaglob_relocated || !lightobj_fix_installed)
+			{
+				return false;
+			}
+			raise_local_client_count = true;
+			install_active_count_fix();
+			apply_local_client_count_patches();
+			widen_client_ui_walker_bounds();
+			widen_client_shutdown_loops();
+			widen_lobby_max_local_players();
+			note("[splitscreen] critical storage ready - extra-client allocation enabled\n");
+			return true;
+		}
 
 		// Marks the image as patched: runtime.cpp's patched-twice check reads this
 		// magic and stands down instead of applying the component a second time.
@@ -90,7 +120,8 @@ namespace splitscreen
 		// full and writes nothing unless every reference matches.
 		bool ready()
 		{
-			return std::memcmp(reinterpret_cast<void*>(base() + stride_site_rva),
+			return readable(reinterpret_cast<void*>(base() + stride_site_rva), sizeof(stride_site_bytes))
+				&& std::memcmp(reinterpret_cast<void*>(base() + stride_site_rva),
 			                   stride_site_bytes, sizeof(stride_site_bytes)) == 0;
 		}
 
@@ -110,6 +141,7 @@ namespace splitscreen
 				const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base());
 				const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base() + dos->e_lfanew);
 				ezz::install(base());
+				install_player_names();
 				ezz::install_pools(base(), nt->OptionalHeader.SizeOfImage, &allocate_near_module);
 				const auto mask = ezz::install_client_command_guard(base());
 				note("host chain: mask 0x%X (1 GetXuid, 2 UserGetXuid, 4 GetClientName, "
@@ -327,21 +359,12 @@ namespace splitscreen
 
 			// Count patches only after every container relocation succeeded: raising
 			// the count over a still-[2] array is the known crash family.
-			const auto counts_ok = ok == std::size(reloc_tables);
-
-			// The cl_maxLocalClients hold has the same precondition.
-			raise_local_client_count = counts_ok;
-
-			if (counts_ok)
+			critical_tables_ready = ok == std::size(reloc_tables);
+			raise_local_client_count = false;
+			const auto counts_ok = enable_extra_clients_when_ready();
+			if (!counts_ok)
 			{
-				// Let the engine's own active count reach 3 and 4.
-				install_active_count_fix();
-
-				apply_local_client_count_patches();
-				// Walker end-bounds: safe only with voice_comm moved (implied by counts_ok).
-				widen_client_ui_walker_bounds();
-				// Same gate: the end-of-match loops walk clientUIActives slot 2.
-				widen_client_shutdown_loops();
+				note("[splitscreen] critical storage incomplete - extra-client allocation disabled\n");
 			}
 
 			// cl_maxLocalClients is not seeded here (not yet 2 at post_unpack); the
@@ -359,7 +382,10 @@ namespace splitscreen
 			install_pane_counts_and_bounds();
 			// Also after relocate_signin_field(): reads seat record 2.
 			widen_gamepad_button_models();
-			widen_lobby_max_local_players();
+			if (counts_ok)
+			{
+				widen_lobby_max_local_players();
+			}
 
 			// Hold the injected clients on both pipelines: async stops during a
 			// launch, and a hold registered only there hung the load. The hold only
@@ -376,6 +402,7 @@ namespace splitscreen
 			scheduler::loop(fill_scene_buffers, scheduler::pipeline::renderer, 100ms);
 			scheduler::loop(maintain_sun_trans_views, scheduler::pipeline::renderer, 100ms);
 			scheduler::loop(cl_init_watch, scheduler::pipeline::renderer, 250ms);
+			scheduler::loop(poll_player_names, scheduler::pipeline::renderer, 250ms);
 			scheduler::loop(mirror_signin_state, scheduler::pipeline::async, 50ms);
 			scheduler::loop(maintain_signin_seats, scheduler::pipeline::async, 50ms);
 
@@ -450,7 +477,7 @@ namespace splitscreen
 				{
 					ezz::chained |= 8;
 				}
-				storage_pump_hook.create(reinterpret_cast<void*>(pump), storage_pump_stub);
+				storage_pump_hook.create(reinterpret_cast<void*>(pump), reinterpret_cast<void*>(&storage_pump_stub));
 
 				// No async fallback pump: it would race the game's own pumping.
 			}

@@ -12,7 +12,7 @@
 		// guard stays as a backstop - an id below the first gate id skips the bit test and
 		// returns 1, the value the stock test gives a gate whose bit is clear.
 
-		uint32_t umbra_gate_guard_hits = 0;
+		std::atomic<uint32_t> umbra_gate_guard_hits{0};
 
 		void umbra_gate_guard(midhook::context& c)
 		{
@@ -21,10 +21,10 @@
 			{
 				return;   // a real gate id: run the stock bytes
 			}
-			++umbra_gate_guard_hits;
+			const auto hits = umbra_gate_guard_hits.fetch_add(1, std::memory_order_relaxed) + 1;
 #ifdef SS_DIAG
 			// First few hits, then every power of two, so a per-frame repeat cannot flood the trace.
-			const auto n = umbra_gate_guard_hits;
+			const auto n = hits;
 			if (n <= 8 || (n & (n - 1)) == 0)
 			{
 				uint64_t ret = 0;
@@ -62,47 +62,74 @@
 		// the Umbra gate id and read them back as their own values. Clients 2/3 get their own
 		// float and flag per object here, and every access indexed by client is redirected for
 		// them. Until a client's value is first written, it reads client 0's (same map state).
-		// Keyed by object index within the object array; a new array (map change) starts clean.
-		constexpr uint32_t lightobj_max = 4096;
+		// Key by the actual object address, not one current array per client. Switching
+		// between two lighting lists must not erase the first list's script-written state.
+		// Fixed storage avoids heap allocation/exception paths inside renderer hooks.
+		constexpr uint32_t lightobj_max = 32768;
 
 		struct lightobj_side
 		{
-			uint64_t objects = 0;
-			uint8_t value_set[lightobj_max]{};
-			uint8_t flag_set[lightobj_max]{};
-			uint8_t flag[lightobj_max]{};
-			float value[lightobj_max]{};
+			uint64_t object = 0;
+			uint8_t value_set[2]{};
+			uint8_t flag_set[2]{};
+			uint8_t flag[2]{};
+			float value[2]{};
 		};
-		lightobj_side lightobj_extra[2];   // clients 2 and 3
-
-		// Slot for (lc, object array), or nullptr for clients 0/1 or an index out of range. The
-		// renderer and the script thread may race on a map change; the worst case is one value
-		// read from the previous map's slot for one frame.
-		lightobj_side* lightobj_slot(const uint64_t lc, const uint64_t objects, const uint64_t index)
+		lightobj_side lightobj_extra[lightobj_max];
+		bool lightobj_capacity_reported = false;
+		// Process-lifetime lock: hooks may still run during DLL static teardown.
+		std::mutex& lightobj_mutex()
 		{
-			if (lc < 2 || lc > 3 || index >= lightobj_max || !objects)
+			static auto* mutex = new std::mutex;
+			return *mutex;
+		}
+
+		void reset_lightobj_state()
+		{
+			std::lock_guard lock(lightobj_mutex());
+			for (auto& s : lightobj_extra)
+			{
+				s = {};
+			}
+			lightobj_capacity_reported = false;
+		}
+
+		// Caller holds lightobj_mutex across lookup AND access. Reset after client memory
+		// is freed: a new map can reuse exactly the previous object address.
+		lightobj_side* lightobj_slot(const uint64_t lc, const uint64_t object)
+		{
+			if (lc < 2 || lc > 3 || !object)
 			{
 				return nullptr;
 			}
-			auto& s = lightobj_extra[lc - 2];
-			if (s.objects != objects)
+			static_assert((lightobj_max & (lightobj_max - 1)) == 0);
+			const auto first = ((object >> 3) * 0x9E3779B97F4A7C15ull) & (lightobj_max - 1);
+			for (uint32_t probe = 0; probe < lightobj_max; ++probe)
 			{
-				std::memset(s.value_set, 0, sizeof(s.value_set));
-				std::memset(s.flag_set, 0, sizeof(s.flag_set));
-				s.objects = objects;
+				auto& s = lightobj_extra[(first + probe) & (lightobj_max - 1)];
+				if (!s.object || s.object == object)
+				{
+					s.object = object;
+					return &s;
+				}
 			}
-			return &s;
+			if (!lightobj_capacity_reported)
+			{
+				lightobj_capacity_reported = true;
+				note("[splitscreen] lighting sidecar full - extra-client values may fall back to client 0\n");
+			}
+			return nullptr;
 		}
 
-		uint8_t lightobj_flag_of(lightobj_side& s, const uint64_t object, const uint64_t index)
+		uint8_t lightobj_flag_of(lightobj_side& s, const uint64_t object, const uint64_t lc)
 		{
-			return s.flag_set[index] ? s.flag[index]
+			return s.flag_set[lc - 2] ? s.flag[lc - 2]
 			                         : *reinterpret_cast<const uint8_t*>(object + lightobj_flags_off);
 		}
 
-		float lightobj_value_of(lightobj_side& s, const uint64_t object, const uint64_t index)
+		float lightobj_value_of(lightobj_side& s, const uint64_t object, const uint64_t lc)
 		{
-			return s.value_set[index] ? s.value[index]
+			return s.value_set[lc - 2] ? s.value[lc - 2]
 			                          : *reinterpret_cast<const float*>(object + lightobj_value_off);
 		}
 
@@ -114,7 +141,10 @@
 			return reinterpret_cast<float*>(frame + 0x20 + 0x10 * static_cast<uint64_t>(n));
 		}
 
-		// movss [rcx+rdx*4+0x138],xmm3 - script sets client r9's value of object r10.
+		// Derive the object from the displaced instruction's effective address, stripping
+		// the client offset. This works whether rcx is the list base or an individual object;
+		// no dependency on the compiler's representation of object index in r10.
+		// movss [rcx+rdx*4+0x138],xmm3 - script sets client r9's value.
 		void lightobj_value_set(midhook::context& c)
 		{
 			const auto lc = c.r9 & 0xFFFFFFFF;
@@ -122,19 +152,14 @@
 			{
 				return;
 			}
-			const auto index = c.r10 & 0xFFFFFFFF;
-			if (auto* s = lightobj_slot(lc, c.rcx, index))
+			const auto object = c.rcx + c.rdx * 4 - lc * 4;
+			std::lock_guard lock(lightobj_mutex());
+			if (auto* s = lightobj_slot(lc, object))
 			{
-				s->value[index] = *saved_xmm(c, 3);
-				s->value_set[index] = 1;
+				s->value[lc - 2] = *saved_xmm(c, 3);
+				s->value_set[lc - 2] = 1;
 			}
 			c.rip = base() + lightobj_value_set_next_rva;   // never write past the object's [2]
-		}
-
-		uint64_t view_objects(const uint64_t view)
-		{
-			const auto list = *reinterpret_cast<const uint64_t*>(view + lightobj_view_list_off);
-			return list ? *reinterpret_cast<const uint64_t*>(list + lightobj_list_objects_off) : 0;
 		}
 
 		// movss xmm0,[rbx+rax*4+0x138] - the per-view walk reads client rax's value of object rbx.
@@ -145,10 +170,9 @@
 			{
 				return;
 			}
-			const auto objects = view_objects(c.rsi);
-			const auto index = objects && c.rbx >= objects ? (c.rbx - objects) / lightobj_stride : lightobj_max;
-			auto* s = lightobj_slot(lc, objects, index);
-			*saved_xmm(c, 0) = s ? lightobj_value_of(*s, c.rbx, index)
+			std::lock_guard lock(lightobj_mutex());
+			auto* s = lightobj_slot(lc, c.rbx);
+			*saved_xmm(c, 0) = s ? lightobj_value_of(*s, c.rbx, lc)
 			                     : *reinterpret_cast<const float*>(c.rbx + lightobj_value_off);
 			c.rip = base() + lightobj_value_get_next_rva;
 		}
@@ -161,9 +185,9 @@
 			{
 				return;
 			}
-			const auto index = c.r14 / lightobj_stride;
-			auto* s = lightobj_slot(lc, c.rsi - c.r14, index);
-			const auto flag = s ? lightobj_flag_of(*s, c.rsi, index)
+			std::lock_guard lock(lightobj_mutex());
+			auto* s = lightobj_slot(lc, c.rsi);
+			const auto flag = s ? lightobj_flag_of(*s, c.rsi, lc)
 			                    : *reinterpret_cast<const uint8_t*>(c.rsi + lightobj_flags_off);
 			c.rip = base() + (flag != static_cast<uint8_t>(c.r13) ? lightobj_flag_test_set_rva
 			                                                      : lightobj_flag_test_clear_rva);
@@ -177,11 +201,11 @@
 			{
 				return;
 			}
-			const auto index = c.r11 & 0xFFFFFFFF;
-			if (auto* s = lightobj_slot(lc, c.rcx - index * lightobj_stride, index))
+			std::lock_guard lock(lightobj_mutex());
+			if (auto* s = lightobj_slot(lc, c.rcx))
 			{
-				s->flag[index] = static_cast<uint8_t>(c.rdx);
-				s->flag_set[index] = 1;
+				s->flag[lc - 2] = static_cast<uint8_t>(c.rdx);
+				s->flag_set[lc - 2] = 1;
 			}
 			c.rip = base() + lightobj_flag_set_next_rva;
 		}
@@ -195,11 +219,11 @@
 			{
 				return;
 			}
-			const auto index = c.rdi & 0xFFFFFFFF;
-			if (auto* s = lightobj_slot(lc, object - index * lightobj_stride, index))
+			std::lock_guard lock(lightobj_mutex());
+			if (auto* s = lightobj_slot(lc, object))
 			{
-				s->flag[index] = value;
-				s->flag_set[index] = 1;
+				s->flag[lc - 2] = value;
+				s->flag_set[lc - 2] = 1;
 			}
 			c.rip = base() + next;
 		}
@@ -222,15 +246,21 @@
 			{
 				return;
 			}
-			const auto index = (c.rbx & 0xFFFFFFFF) + 1;
-			auto* s = lightobj_slot(lc, c.rcx - index * lightobj_stride, index);
-			const auto flag = s ? lightobj_flag_of(*s, c.rcx, index)
+			std::lock_guard lock(lightobj_mutex());
+			auto* s = lightobj_slot(lc, c.rcx);
+			const auto flag = s ? lightobj_flag_of(*s, c.rcx, lc)
 			                    : *reinterpret_cast<const uint8_t*>(c.rcx + lightobj_flags_off);
 			c.rip = base() + (flag ? lightobj_flag_save_set_rva : lightobj_flag_save_clear_rva);
 		}
 
+		bool lightobj_fix_installed = false;
+
 		void install_lightobj_flag_fix()
 		{
+			if (lightobj_fix_installed)
+			{
+				return;
+			}
 			struct site
 			{
 				uint32_t rva;
@@ -260,10 +290,18 @@
 					return;
 				}
 			}
+			safety::patch transaction[std::size(sites)]{};
 			for (size_t i = 0; i < std::size(sites); ++i)
 			{
-				write_bytes(reinterpret_cast<void*>(b + sites[i].rva), patches[i], sites[i].len);
+				transaction[i] = {reinterpret_cast<void*>(b + sites[i].rva), sites[i].stock,
+				                  patches[i], sites[i].len};
 			}
+			if (!safety::apply_patches(transaction, std::size(transaction), write_bytes))
+			{
+				note("[splitscreen] lighting objects: write failed - rollback attempted\n");
+				return;
+			}
+			lightobj_fix_installed = true;
 			note("[splitscreen] lighting objects 2/3: own values and flags (7 sites)\n");
 		}
 

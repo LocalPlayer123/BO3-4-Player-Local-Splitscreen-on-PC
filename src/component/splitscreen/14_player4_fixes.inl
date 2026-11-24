@@ -147,6 +147,12 @@
 
 		int splitscreen_player_count_stub()
 		{
+			if (!raise_local_client_count)
+			{
+				// Seats or an archived dvar must not allocate clients beyond a failed
+				// critical relocation. The unmodified allocator retains its floor of two.
+				return std::clamp(stock_splitscreen_player_count(), 1, 2);
+			}
 			if (signin_relocated)
 			{
 				// Console semantics: PS4 CL_SplitscreenPlayerCount only reads the

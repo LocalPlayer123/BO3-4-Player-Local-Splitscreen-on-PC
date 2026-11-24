@@ -24,6 +24,10 @@ cl %CPP% /I"src\standalone\compat" /Foout\obj\ "src\component\splitscreen.cpp" |
 cl %CPP% /I"%MINHOOK%\include" /Foout\obj\ "src\standalone\runtime.cpp" "src\standalone\ezz_plugin.cpp" || exit /b 4
 link /nologo /DLL /LTCG /OPT:REF /OPT:ICF /DEBUG:NONE /Brepro /MANIFEST:NO /MACHINE:X64 /DEF:"src\standalone\ezz_plugin.def" /OUT:out\bo3_local_splitscreen.dll /IMPLIB:out\obj\bo3_local_splitscreen.lib out\obj\*.obj kernel32.lib || exit /b 5
 
+rem Validate the exact DLL just linked, not a stale test executable.
+cl /nologo /O1 /MT /std:c++20 /EHsc /W3 /Foout\obj\smoke.obj /Feout\smoke.exe "src\standalone\test\smoke.cpp" /link user32.lib kernel32.lib || exit /b 6
+out\smoke.exe || exit /b 7
+
 echo.
 echo Built out\bo3_local_splitscreen.dll
 echo Ship it as boiii\plugins\bo3_local_splitscreen.dll together with

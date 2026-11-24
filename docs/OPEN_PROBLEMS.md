@@ -1,5 +1,11 @@
 # Open problems
 
+Source-level hardening and offline regression results from 2026-11-23 are in
+[STABILITY_AUDIT.md](STABILITY_AUDIT.md). They do not close the unverified
+in-game reports below; Windows/game validation is still required.
+The follow-up targets Workshop startup timing, Kino lighting-state retention,
+and duplicate queued A joins; none is marked game-verified by the offline tests.
+
 Everything known to be broken, unverified or unfinished, sorted by kind.
 Addresses are image RVAs of `BlackOps3.exe` build **0x06531394** (PE
 checksum; the exe ezz BOIII 3.0 and 3.1 run, which the code targets since 2.0).
@@ -18,6 +24,32 @@ per-local-client array that the PC sized for 2 clients - see the last section.
 ---
 
 ## A. Real bugs, not fixed
+
+### A17. Follow-up UI limitations (2026-11-24)
+
+Live testing still reports that player 3 can require two A presses and that the
+join hint can disappear after player 2 joins. The A-release coordination and
+four-seat hint changes pass offline regression tests but have **not** resolved
+these reports in the user's game. These issues remain open; the user requested
+that further work focus on names instead.
+
+The settings menu opens and name editing appears to work. Earlier close-time
+name-refresh attempts did not update the displayed lobby names in live testing.
+The latest implementation writes only existing local-row name models in the
+global lobby tree, removing its dependency on previously captured UI widgets.
+This latest refresh, persistence across restart, and in-game name propagation
+still need live confirmation. See [settings details](SPLITSCREEN_SETTINGS.md).
+
+### A16. Cosmetic Zombies lobby row order after player 3 joins (2026-11-24)
+User screenshot shows three local players listed as guest `(3)`, host, guest `(2)`
+after the third player joins. The user confirms gameplay and split-screen positions
+are unaffected, and confirms the latest guest B-leave / A-rejoin hotfix is working.
+This is a lobby display-order issue only in the reported session; the sorting cause
+was not established from the screenshot. A presentation-only correction now sorts
+unambiguous local roster rows by `localController`, preserving remote row positions
+and copying stock data rather than mutating it. Controller assignments, local-client
+slots and lobby enrollment order are unchanged. Offline regression coverage passes;
+live confirmation of the new sorting is pending.
 
 ### A1. One crash in the main menu (seen once)
 40 s after launch, before any match: AV in a linked-list walk at `0x01D60534`

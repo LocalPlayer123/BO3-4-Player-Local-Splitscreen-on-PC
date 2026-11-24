@@ -69,11 +69,16 @@
 			const uint8_t bound = max_local >= 4 ? 3 : max_local == 3 ? 2 : 1;
 			if (bound != csc_lc_bound_applied)
 			{
-				for (const auto rva : csc_lc_check_imms)
+				safety::patch patches[std::size(csc_lc_check_imms)]{};
+				for (size_t i = 0; i < std::size(csc_lc_check_imms); ++i)
 				{
-					write_bytes(reinterpret_cast<uint8_t*>(b + rva), &bound, 1);
+					patches[i] = {reinterpret_cast<void*>(b + csc_lc_check_imms[i]),
+					              &csc_lc_bound_applied, &bound, 1};
 				}
-				csc_lc_bound_applied = bound;
+				if (safety::apply_patches(patches, std::size(patches), write_bytes))
+				{
+					csc_lc_bound_applied = bound;
+				}
 			}
 			for (size_t i = 0; i < std::size(odd_lc_checks); ++i)
 			{
@@ -83,8 +88,10 @@
 				const uint8_t want = held ? 1 : bound;
 				if (odd_lc_owned[i] && want != odd_lc_applied[i])
 				{
-					write_bytes(reinterpret_cast<uint8_t*>(b + c.rva + c.imm), &want, 1);
-					odd_lc_applied[i] = want;
+					if (write_bytes(reinterpret_cast<uint8_t*>(b + c.rva + c.imm), &want, 1))
+					{
+						odd_lc_applied[i] = want;
+					}
 				}
 			}
 		}
@@ -103,16 +110,22 @@
 		}
 
 		bool relocate_local_entities(bool require_empty);   // 12_relocations_ui.inl
+		void reset_lightobj_state();   // 17_lighting_and_restart.inl
+		bool enable_extra_clients_when_ready();   // splitscreen.cpp
 
 		uint64_t free_per_lc_stub(const bool a)
 		{
 			const auto r = free_per_lc_hook.invoke<uint64_t>(a);
+			reset_lightobj_state();
 			sync_csc_lc_bound();
 			// cg_localEntities [2] -> [4]: if the startup move was refused (its code sites not
 			// yet as recorded), retry now - no cgame runs between this free and the next match's
 			// CG_Inits. Without it client 2's CG_InitLocalEntities zeroed the client-field
 			// registry and cg_viewModelArray (user's PC, 2026-11-12: memset 0x0495A310, 0x7C00).
-			relocate_local_entities(false);
+			if (relocate_local_entities(false))
+			{
+				enable_extra_clients_when_ready();
+			}
 			return r;
 		}
 

@@ -220,7 +220,7 @@
 
 		bool steam_input_report_guarded()
 		{
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || (defined(__clang__) && defined(_WIN32))
 			__try
 			{
 				steam_input_report();
