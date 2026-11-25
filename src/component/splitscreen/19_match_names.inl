@@ -9,6 +9,11 @@
 		constexpr uint8_t names_match_formatter_bytes[] = {
 			0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,
 			0x49,0x63,0xF1,0x49,0x8B,0xF8,0x8B,0xDA,0x41,0xC6,0x00,0x00,0xE8,0x50,0xEA,0xC8,0xFE};
+		// ezz 3.1.0 already detours this formatter. Verified live host prologue,
+		// MinHook's 5-byte stock copy and absolute return/relay on 2026-11-24.
+		constexpr uint8_t names_formatter_host_bytes[] = {
+			0x55,0x41,0x57,0x41,0x56,0x41,0x55,0x41,0x54,0x56,0x57,0x53,
+			0x48,0x81,0xEC,0x38,0x01,0x00,0x00};
 		constexpr uint8_t names_cg_layout_bytes[] = {
 			0x44,0x3B,0x35,0xD8,0x60,0xC8,0x04,0x7C,0x04,0x33,0xDB,0xEB,0x0D,
 			0x49,0x8B,0xDE,0x48,0x69,0xDB,0x20,0x27,0x34,0x00,0x48,0x03,0xD8};
@@ -146,12 +151,42 @@
 			return target && readable(reinterpret_cast<const void*>(target), 4 * 18 * 0x68);
 		}
 
+		bool names_formatter_bytes_match()
+		{
+			if (engine_bytes_match(names_match_formatter_rva, names_match_formatter_bytes)) { return true; }
+			const auto address = base() + names_match_formatter_rva;
+			const auto* entry = reinterpret_cast<const uint8_t*>(address);
+			if (!readable(entry, sizeof(names_match_formatter_bytes)) || entry[0] != 0xE9
+				|| std::memcmp(entry + 5, names_match_formatter_bytes + 5,
+					sizeof(names_match_formatter_bytes) - 5) != 0) { return false; }
+			int32_t displacement{};
+			std::memcpy(&displacement, entry + 1, sizeof(displacement));
+			const auto relay = address + 5 + static_cast<intptr_t>(displacement);
+			if (relay < 19 || relay > UINTPTR_MAX - 14) { return false; }
+			const auto* trampoline = reinterpret_cast<const uint8_t*>(relay - 19);
+			constexpr uint8_t absolute_jump[] = {0xFF,0x25,0,0,0,0};
+			if (!readable(trampoline, 33)
+				|| std::memcmp(trampoline, names_match_formatter_bytes, 5) != 0
+				|| std::memcmp(trampoline + 5, absolute_jump, sizeof(absolute_jump)) != 0
+				|| std::memcmp(trampoline + 19, absolute_jump, sizeof(absolute_jump)) != 0) { return false; }
+			uintptr_t continuation{}, host{};
+			std::memcpy(&continuation, trampoline + 11, sizeof(continuation));
+			std::memcpy(&host, trampoline + 25, sizeof(host));
+			if (continuation != address + 5 || !host || host == reinterpret_cast<uintptr_t>(&names_match_stub))
+			{
+				return false;
+			}
+			const auto* host_code = reinterpret_cast<const void*>(host);
+			return readable(host_code, sizeof(names_formatter_host_bytes))
+				&& std::memcmp(host_code, names_formatter_host_bytes, sizeof(names_formatter_host_bytes)) == 0;
+		}
+
 		void install_match_names()
 		{
 			if (names_match_ready) { return; }
 			try
 			{
-				if (!engine_bytes_match(names_match_formatter_rva, names_match_formatter_bytes)
+				if (!names_formatter_bytes_match()
 					|| !engine_bytes_match(0x0069D641, names_cg_layout_bytes)
 					|| !engine_bytes_match(0x0069D7E7, names_cg_client_bytes)
 					|| !engine_bytes_match(names_cache_call_rva - 9, names_cache_call_bytes)
@@ -174,6 +209,8 @@
 				const auto rel32 = static_cast<int32_t>(distance);
 				std::memcpy(patch + 1, &rel32, sizeof(rel32));
 				names_cache_update = reinterpret_cast<names_cache_function>(base() + names_cache_update_rva);
+				// On the verified host form MinHook's new original preserves the
+				// existing ezz jump; invoke() still runs ezz and its stock trampoline.
 				names_match_hook.create(base() + names_match_formatter_rva, reinterpret_cast<void*>(&names_match_stub));
 				if (!write_bytes(reinterpret_cast<void*>(base() + names_cache_call_rva), patch, sizeof(patch)))
 				{

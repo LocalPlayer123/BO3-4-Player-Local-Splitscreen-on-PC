@@ -51,6 +51,14 @@ the previous context on return or unwinding. Other formatter consumers retain
 stock names, and no CG pointer is cached across map transitions. The complete
 updater body is byte-checked except its existing playerDetails relocation operand;
 that operand must agree with both the draw and reset LEAs to a readable array.
+ezz BOIII 3.1.0 also detours the formatter before the plugin initializes. A stock-only
+formatter guard caused the scoped adapter to remain disabled on that host. The
+adapter now accepts either the clean stock prologue or the verified ezz MinHook
+form: unchanged tail, exact five-byte stock trampoline, exact absolute return to
+the remaining stock body, exact absolute host relay, and the verified host code
+prologue. Unknown hooks still fail closed. The new detour chains through ezz;
+it does not bypass or restore over ezz's formatter. Saved names are published on
+frontend initialization even if no name string is edited during that launch.
 Stock clan prefixes are retained, UTF-8 truncation respects the supplied buffer
 capacity, and invalid/unready/ambiguous cases retain stock output. No actor,
 entity, session or identity record is written. The diagnostic dvar
@@ -76,10 +84,14 @@ overhead labels still retained stock names with the first native adapter.
 New regressions cover match client mapping, sorted scoreboard rows, all viewing
 controllers, clan tags, resets, late loading, and stock fallback behavior. Native
 tests also cover shuffled/duplicate seat mappings and bounded UTF-8/clan output.
-The corrected scoped native adapter has not yet been confirmed live. Run
+The initial scoped adapter also retained stock labels because its stock-only
+guard rejected ezz's existing hook. Read-only live inspection confirmed all four
+saved names were published and the scoped call relay was absent. The ezz-aware
+correction has not yet been confirmed to render custom labels live. Run
 tools/run_name_display_tests.py for an additional UBSan harness including the
 unchanged production overhead module. It exercises all viewers, shuffled clients
 and controllers, invalid/duplicate/unready mappings, stock formatter failures,
 clan/reset behavior, nested calls, thread-local lifetime, every byte guard,
-synchronized relocation operands, and checked relay installation failures.
+synchronized relocation operands, checked relay installation failures, and the
+actual ezz-hooked startup shape including malformed host/trampoline rejection.
 These mocks do not execute the Windows relay or establish live game behavior.

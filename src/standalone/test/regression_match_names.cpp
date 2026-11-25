@@ -107,6 +107,21 @@ void reset()
         put<uintptr_t>(reinterpret_cast<uintptr_t>(cg.data()) + i * names_cg_stride + 0x30, 0x123456);
     }
 }
+constexpr uint32_t host_relay_rva = 0x1500000, host_code_rva = 0x1600000;
+void seed_host_formatter()
+{
+    auto* entry = image + names_match_formatter_rva;
+    entry[0] = 0xE9;
+    put<int32_t>(base() + names_match_formatter_rva + 1, host_relay_rva - names_match_formatter_rva - 5);
+    auto* trampoline = image + host_relay_rva - 19;
+    std::memcpy(trampoline, names_match_formatter_bytes, 5);
+    const uint8_t jump[] = {0xFF,0x25,0,0,0,0};
+    std::memcpy(trampoline + 5, jump, sizeof(jump));
+    put<uintptr_t>(reinterpret_cast<uintptr_t>(trampoline + 11), base() + names_match_formatter_rva + 5);
+    std::memcpy(trampoline + 19, jump, sizeof(jump));
+    put<uintptr_t>(reinterpret_cast<uintptr_t>(trampoline + 25), base() + host_code_rva);
+    seed(host_code_rva, names_formatter_host_bytes);
+}
 int target_client = 1, target_viewer = 0;
 bool want_clan = false, throw_update = false, nested = false;
 void update(int viewer, int client)
@@ -240,6 +255,27 @@ int main()
     uintptr_t destination{}; std::memcpy(&destination, image + 0x1000000 + 9, 8);
     CHECK(destination == reinterpret_cast<uintptr_t>(&names_cache_stub));
     install_match_names(); CHECK(allocations == 1 && writes == 2 && creates == 1);
+    // Real deployment shape: ezz's formatter is already hooked before this
+    // plugin starts. The valid host form must install, not silently stand down.
+    reset(); seed_host_formatter(); CHECK(names_formatter_bytes_match());
+    install_match_names(); CHECK(names_match_ready && creates == 1 && writes == 2);
+    for (const auto guard : {std::pair<uint32_t, size_t>{host_relay_rva - 19, 33},
+        {host_code_rva, sizeof(names_formatter_host_bytes)},
+        {names_match_formatter_rva + 5, sizeof(names_match_formatter_bytes) - 5}})
+        for (size_t i = 0; i < guard.second; ++i)
+        {
+            reset(); seed_host_formatter(); image[guard.first + i] ^= 1;
+            install_match_names(); CHECK(!names_match_ready && allocations == 0 && writes == 0);
+        }
+    for (const auto bad : {uintptr_t(0), uintptr_t(1), reinterpret_cast<uintptr_t>(&names_match_stub)})
+    {
+        reset(); seed_host_formatter(); put<uintptr_t>(base() + host_relay_rva + 6, bad);
+        install_match_names(); CHECK(!names_match_ready && allocations == 0);
+    }
+    reset(); seed_host_formatter(); denied = base() + host_relay_rva - 19;
+    install_match_names(); CHECK(!names_match_ready && allocations == 0);
+    reset(); seed_host_formatter(); denied = base() + host_code_rva;
+    install_match_names(); CHECK(!names_match_ready && allocations == 0);
     munmap(image, image_size);
-    std::cout << "PASS production scoped overhead mapping/formatter, stock fallbacks, nested/thread-local lifetime, byte guards and checked relay install\n";
+    std::cout << "PASS production scoped overhead mapping/formatter, stock fallbacks, nested/thread-local lifetime, stock/ezz guards and checked relay install\n";
 }
