@@ -18,6 +18,50 @@
 		std::atomic<const names::slots*> names_published{nullptr};
 		utils::hook::detour names_stock_hook;
 		bool names_hook_ready = false;
+		utils::hook::detour names_match_hook;
+		bool names_match_ready = false;
+		constexpr uint32_t names_match_formatter_rva = 0x013E3160;
+		constexpr uint8_t names_match_formatter_bytes[] = {
+			0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,
+			0x49,0x63,0xF1,0x49,0x8B,0xF8,0x8B,0xDA,0x41,0xC6,0x00,0x00,0xE8,0x50,0xEA,0xC8,0xFE};
+		// CG_DrawNames subroutine: allocation count/base/stride and clientNum read.
+		constexpr uint8_t names_cg_layout_bytes[] = {
+			0x44,0x3B,0x35,0xD8,0x60,0xC8,0x04,0x7C,0x04,0x33,0xDB,0xEB,0x0D,
+			0x49,0x8B,0xDE,0x48,0x69,0xDB,0x20,0x27,0x34,0x00,0x48,0x03,0xD8};
+		constexpr uint8_t names_cg_client_bytes[] = {0x39,0x3B,0x75,0x38};
+
+		int names_match_controller(const int client)
+		{
+			if (!signin_relocated || client < 0 || client >= 64) { return -1; }
+			uint32_t count{};
+			uintptr_t cg{};
+			std::memcpy(&count, reinterpret_cast<const void*>(base() + cl_max_local_clients_rva), sizeof(count));
+			std::memcpy(&cg, reinterpret_cast<const void*>(base() + 0x04C98C80), sizeof(cg));
+			if (count < 1 || count > 4 || !cg) { return -1; }
+			std::array<names::match_seat, 4> seats{};
+			for (uint32_t lc = 0; lc < count; ++lc)
+			{
+				const auto* record = reinterpret_cast<const uint8_t*>(base() + signin_new_base + lc * signin_stride);
+				if (!readable(record, 12)) { return -1; }
+				uint32_t flags{}, local{};
+				int controller{};
+				std::memcpy(&flags, record + cgs_flags, sizeof(flags));
+				std::memcpy(&local, record + cgs_local_client_num, sizeof(local));
+				std::memcpy(&controller, record + cgs_controller_index, sizeof(controller));
+				if (!(flags & 1)) { continue; }
+				if (local != lc || controller < 0 || controller >= 4
+					|| cg > UINTPTR_MAX - (size_t(lc) * 0x342720 + 0x38)) { return -1; }
+				const auto* state = reinterpret_cast<const uint8_t*>(cg + size_t(lc) * 0x342720);
+				if (!readable(state, 0x38)) { return -1; }
+				int number{};
+				uintptr_t snapshot{};
+				std::memcpy(&number, state, sizeof(number));
+				std::memcpy(&snapshot, state + 0x30, sizeof(snapshot));
+				if (!snapshot || number < 0 || number >= 64) { return -1; }
+				seats[lc] = {true, controller, number};
+			}
+			return names::match_controller(seats, client);
+		}
 
 		bool names_offline()
 		{
@@ -39,8 +83,62 @@
 			return names_stock_hook.invoke<const char*>(controller);
 		}
 
+		int names_match_stub(const int viewer, const int client, char* buffer, const int capacity, const bool clan)
+		{
+			// Preserve stock validation and failure results; never write client/session data.
+			const int result = names_match_hook.invoke<int>(viewer, client, buffer, capacity, clan);
+			if (!result || !buffer || capacity < 2 || capacity > 1024 || viewer < 0 || viewer >= 4
+				|| game::Com_IsRunningUILevel() || !names_offline()) { return result; }
+			try
+			{
+				const int controller = names_match_controller(client);
+				const auto* snapshot = names_published.load(std::memory_order_acquire);
+				if (controller < 0 || !snapshot || (*snapshot)[controller].empty()
+					|| !readable(buffer, capacity)) { return result; }
+				const auto* end = static_cast<const char*>(std::memchr(buffer, 0, capacity));
+				if (!end) { return result; }
+				const std::string_view stock(buffer, static_cast<size_t>(end - buffer));
+				char plain[32]{};
+				std::string_view original = stock;
+				if (clan)
+				{
+					if (!names_match_hook.invoke<int>(viewer, client, plain, 32, false)) { return result; }
+					const auto* plain_end = static_cast<const char*>(std::memchr(plain, 0, sizeof(plain)));
+					if (!plain_end) { return result; }
+					original = std::string_view(plain, static_cast<size_t>(plain_end - plain));
+				}
+				std::string formatted;
+				if (names::format_match_name(stock, original, (*snapshot)[controller], capacity, formatted))
+				{
+					std::memcpy(buffer, formatted.c_str(), formatted.size() + 1);
+				}
+			}
+			catch (...) { /* allocation failure keeps stock output intact */ }
+			return result;
+		}
+
+		void install_match_names()
+		{
+			try
+			{
+				// Cache updater 0x006A7AD0 calls this twice, with capacities 32/40.
+				// Guard the formatter prologue separately from existing name hooks.
+				if (!engine_bytes_match(names_match_formatter_rva, names_match_formatter_bytes)
+					|| !engine_bytes_match(0x0069D641, names_cg_layout_bytes)
+					|| !engine_bytes_match(0x0069D7E7, names_cg_client_bytes))
+				{
+					note("[splitscreen] match names: bytes differ - stock display retained\n");
+					return;
+				}
+				names_match_hook.create(base() + names_match_formatter_rva, reinterpret_cast<void*>(&names_match_stub));
+				names_match_ready = true;
+			}
+			catch (...) { note("[splitscreen] match names: hook failed - stock display retained\n"); }
+		}
+
 		void install_player_names()
 		{
+			install_match_names();
 			try
 			{
 				if ((ezz::chained & 4) != 0)
@@ -151,6 +249,7 @@
 				if (!initialized)
 				{
 					for (size_t i = 0; i < 4; ++i) { names_set_dvar(names_dvars[i], current[i]); }
+					names_set_dvar("splitscreen_names_match_status", names_match_ready ? "ready" : "hook_error");
 					names_published.store(new const names::slots(current), std::memory_order_release);
 					initialized = true;
 				}

@@ -2,6 +2,7 @@
 
 // Portable protocol/storage codec. This file never executes config text.
 #include <array>
+#include <algorithm>
 #include <string>
 #include <string_view>
 
@@ -10,6 +11,53 @@ namespace splitscreen::names
 	using slots = std::array<std::string, 4>;
 	inline constexpr size_t max_bytes = 31;
 	inline constexpr std::string_view header = "splitscreen_names_v1\n";
+
+	struct match_seat
+	{
+		bool active = false;
+		int controller = -1;
+		int client = -1;
+	};
+
+	inline int match_controller(const std::array<match_seat, 4>& seats, const int client)
+	{
+		if (client < 0 || client >= 64) { return -1; }
+		int result = -1;
+		for (const auto& seat : seats)
+		{
+			if (!seat.active || seat.client != client) { continue; }
+			if (seat.controller < 0 || seat.controller >= 4 || result != -1) { return -1; }
+			result = seat.controller;
+		}
+		if (result >= 0)
+		{
+			size_t owners = 0;
+			for (const auto& seat : seats)
+			{
+				if (seat.active && seat.controller == result) { ++owners; }
+			}
+			if (owners != 1) { return -1; }
+		}
+		return result;
+	}
+
+	// Replace only the stock terminal name, retaining its cleaned clan prefix.
+	inline bool format_match_name(const std::string_view stock, const std::string_view plain,
+		const std::string_view replacement, const size_t capacity, std::string& result)
+	{
+		if (capacity < 2 || capacity > 1024 || replacement.empty() || plain.empty()
+			|| stock.size() >= capacity || stock.size() < plain.size()
+			|| stock.substr(stock.size() - plain.size()) != plain) { return false; }
+		const auto prefix = stock.substr(0, stock.size() - plain.size());
+		if (prefix.size() >= capacity - 1) { return false; }
+		size_t count = std::min(replacement.size(), capacity - 1 - prefix.size());
+		// Native snapshots contain sanitized UTF-8; do not cut a codepoint.
+		while (count < replacement.size() && count
+			&& (static_cast<unsigned char>(replacement[count]) & 0xC0) == 0x80) { --count; }
+		if (!count) { return false; }
+		result = std::string(prefix) + std::string(replacement.substr(0, count));
+		return true;
+	}
 
 	inline std::string sanitize(const std::string_view input)
 	{

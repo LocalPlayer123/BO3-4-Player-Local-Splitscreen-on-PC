@@ -10,6 +10,14 @@ end
 local function fixture(production, late, existing)
     local s = {network = 0, dvars = {splitscreen_names_status = "ready"}, timers = {}, calls = 0,
         now = 0, updates = 0, map = "core_frontend", inGame = false, writes = {}, models = {}}
+    s.active, s.clients = {[0] = true}, {[0] = 7, [1] = 2, [2] = 11, [3] = 4}
+    Enum = {scoreBoardColumns_e = {SCOREBOARD_COLUMN_CLIENTNUM = 99}}
+    GetClientName = function(controller, client, extra) return "stock:" .. tostring(client), extra end
+    GetClientClantag = function(controller, client) return "[clan]" end
+    GetClientNameAndClanTag = function(controller, client)
+        return GetClientClantag(controller, client) .. GetClientName(controller, client)
+    end
+    GetScoreboardPlayerName = function(controller, info, extra) return "stock-score:" .. tostring(info), extra end
     local function node()
         local n = {children = {}, closed = false}
         function n:addElement(child)
@@ -68,6 +76,13 @@ local function fixture(production, late, existing)
         GetLobbyNetworkMode = function() return s.network end,
         GetCurrentMap = function() return s.map end,
         IsInGame = function() return s.inGame end,
+        IsControllerBeingUsed = function(controller) return s.active[controller] or false end,
+        GetClientNum = function(controller) return s.clients[controller] end,
+        GetScoreboardTeamClientCount = function(team) assert(team == 0); return 4 end,
+        GetScoreboardPlayerData = function(index, team, column)
+            assert(team == 0 and column == 99)
+            return ({[0] = 11, [1] = 7, [2] = 4, [3] = 2})[index]
+        end,
         GetGlobalModel = function() return 1 end,
         GetModel = function(parent, path)
             assert(type(parent) == "number" and s.models[parent], "opaque existing model expected")
@@ -155,6 +170,105 @@ end
 local function order(list, expected)
     assert(#list == #expected)
     for i, controller in ipairs(expected) do assert(list[i].localController == controller, "wrong slot order") end
+end
+
+local function matchFixture(production)
+    local s = fixture(production)
+    s.inGame, s.map = true, "zm_test"
+    for controller = 0, 3 do
+        s.active[controller] = true
+        s.dvars["splitscreen_name_" .. (controller + 1)] = "Custom" .. controller
+    end
+    return s
+end
+
+function tests.match_names_resolve_client_not_row_or_viewer(production)
+    local s = matchFixture(production)
+    for viewer = 0, 3 do
+        for controller = 0, 3 do
+            assert(GetClientName(viewer, s.clients[controller]) == "Custom" .. controller)
+            assert(GetClientNameAndClanTag(viewer, s.clients[controller]) == "[clan]Custom" .. controller)
+        end
+    end
+    assert(#s.writes == 0)
+end
+
+function tests.match_scoreboard_resolves_sorted_team_index(production)
+    matchFixture(production)
+    for index, controller in ipairs({2, 0, 3, 1}) do
+        assert(GetScoreboardPlayerName(3, "team: 0 client: " .. (index - 1) .. " 12345")
+            == "[clan]Custom" .. controller)
+    end
+end
+
+function tests.match_online_and_frontend_keep_stock(production)
+    local s = matchFixture(production)
+    for _, mode in ipairs({2, 3, -1, "0"}) do
+        s.network = mode
+        local name, extra = GetClientName(0, 7, "forwarded")
+        assert(name == "stock:7" and extra == "forwarded")
+        assert(GetScoreboardPlayerName(0, "team: 0 client: 1 5") == "stock-score:team: 0 client: 1 5")
+    end
+    s.network, s.inGame = 0, false
+    assert(GetClientName(0, 7) == "stock:7")
+end
+
+function tests.match_remote_bot_and_ambiguous_names_unchanged(production)
+    local s = matchFixture(production)
+    assert(GetClientName(0, 38) == "stock:38")
+    s.clients[1] = s.clients[0]
+    assert(GetClientName(0, 7) == "stock:7")
+    s.active[1] = false
+    assert(GetClientName(0, 7) == "Custom0")
+    s.active[0] = false
+    assert(GetClientName(0, 7) == "stock:7")
+end
+
+function tests.match_reset_invalid_values_and_bridge_errors(production)
+    local s = matchFixture(production)
+    for _, value in ipairs({-1, 64, 1.5, "7", false}) do
+        assert(GetClientName(0, value) == "stock:" .. tostring(value))
+    end
+    assert(GetClientName(0, nil) == "stock:nil")
+    s.dvars.splitscreen_name_1 = ""
+    assert(GetClientName(0, 7) == "stock:7")
+    s.dvars.splitscreen_name_1 = "Fresh"
+    assert(GetClientName(0, 7) == "Fresh")
+    for _, status in ipairs({"load_error", "hook_error", "dvar_error", ""}) do
+        s.dvars.splitscreen_names_status = status
+        assert(GetClientName(0, 7) == "stock:7")
+    end
+    s.dvars.splitscreen_names_status = "save_error"
+    assert(GetClientName(0, 7) == "Fresh")
+end
+
+function tests.match_malformed_scoreboard_rows_fall_back(production)
+    matchFixture(production)
+    for _, info in ipairs({"", "team: 0 client: -1 5", "team: 0 client: 4 5",
+        "team: 0 client: 1", "team: 0 client: 1 garbage", "team: 999 client: 1 5", 7}) do
+        local name, extra = GetScoreboardPlayerName(0, info, "forwarded")
+        assert(name == "stock-score:" .. tostring(info) and extra == "forwarded")
+    end
+end
+
+function tests.match_late_install_and_chained_wrapper_no_recursion(production)
+    local s = matchFixture(production)
+    local predecessor = GetClientName
+    GetClientName = function(...) return predecessor(...) end
+    s:tick()
+    for i = 1, 4 do s:tick(); assert(GetClientName(0, 7) == "Custom0") end
+    GetClientName = nil
+    s:tick()
+    GetClientName = function() return "late-stock" end
+    s:tick()
+    assert(GetClientName(0, 7) == "Custom0")
+    assert(GetClientName(0, 38) == "late-stock")
+end
+
+function tests.match_missing_engine_api_preserves_stock(production)
+    matchFixture(production)
+    Engine.GetClientNum = nil
+    assert(GetClientName(0, 7) == "stock:7")
 end
 
 function tests.sorting_three_host_two(production)

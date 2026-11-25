@@ -103,8 +103,82 @@ local function present(source)
     return result
 end
 
+-- Stock modifyFunctions.lua:679-697 reads match client names, not lobby names.
+-- ScoreboardRowWidget.lua:95-99 uses GetClientNameAndClanTag -> GetClientName.
+-- Other scoreboard widgets use GetScoreboardPlayerName (modifyFunctions:2790).
+-- A scoreboard row index is NOT a client number (CoDScoreboardUtility:24-35).
+local function clientNumber(value)
+    return type(value) == "number" and value >= 0 and value <= 63 and value % 1 == 0
+end
+
+local function matchName(client)
+    if not clientNumber(client) or not Engine
+        or type(Engine.IsInGame) ~= "function" or type(Engine.GetLobbyNetworkMode) ~= "function"
+        or type(Engine.IsControllerBeingUsed) ~= "function" or type(Engine.GetClientNum) ~= "function"
+        or type(Engine.DvarString) ~= "function" then return nil end
+    local inGame, mode = Engine.IsInGame(), Engine.GetLobbyNetworkMode()
+    if (inGame ~= true and inGame ~= 1) or (mode ~= 0 and mode ~= 1) then return nil end
+    local status = Engine.DvarString(nil, "splitscreen_names_status")
+    if status ~= "ready" and status ~= "save_error" then return nil end
+    local owner
+    for controller = 0, 3 do
+        local used = Engine.IsControllerBeingUsed(controller)
+        if (used == true or used == 1) and Engine.GetClientNum(controller) == client then
+            if owner ~= nil then return nil end -- ambiguous mapping: keep stock
+            owner = controller
+        end
+    end
+    if owner == nil then return nil end
+    local name = sanitize(Engine.DvarString(nil, "splitscreen_name_" .. (owner + 1)))
+    return name ~= "" and name or nil
+end
+
+local nameWrapped = setmetatable({}, {__mode = "k"})
+local function installMatchNames()
+    local original = rawget(_G, "GetClientName")
+    if type(original) == "function" and not nameWrapped[original] then
+        local wrapper = function(controller, client, ...)
+            local name = matchName(client)
+            if name then return name end
+            return original(controller, client, ...)
+        end
+        nameWrapped[wrapper] = true
+        rawset(_G, "GetClientName", wrapper)
+    end
+    local scoreboard = rawget(_G, "GetScoreboardPlayerName")
+    if type(scoreboard) == "function" and not nameWrapped[scoreboard] then
+        local wrapper = function(controller, info, ...)
+            -- Stock clientInfo encodes team + team-relative row + timestamp.
+            -- Resolve only the documented format and existing scoreboard rows.
+            local team, index
+            if type(info) == "string" and #info <= 128 then
+                team, index = string.match(info, "^team:%s*(%d+)%s+client:%s*(%d+)%s+%d+$")
+            end
+            team, index = tonumber(team), tonumber(index)
+            local columns = Enum and Enum.scoreBoardColumns_e
+            if team and team <= 255 and clientNumber(index) and columns
+                and columns.SCOREBOARD_COLUMN_CLIENTNUM ~= nil
+                and Engine and type(Engine.GetScoreboardTeamClientCount) == "function"
+                and type(Engine.GetScoreboardPlayerData) == "function"
+                and type(GetClientClantag) == "function" then
+                local count = Engine.GetScoreboardTeamClientCount(team)
+                if type(count) == "number" and count >= 0 and count <= 64 and index < count then
+                    local client = tonumber(Engine.GetScoreboardPlayerData(index, team,
+                        columns.SCOREBOARD_COLUMN_CLIENTNUM))
+                    local name = matchName(client)
+                    if name then return GetClientClantag(controller, client) .. name end
+                end
+            end
+            return scoreboard(controller, info, ...)
+        end
+        nameWrapped[wrapper] = true
+        rawset(_G, "GetScoreboardPlayerName", wrapper)
+    end
+end
+
 local wrapped = setmetatable({}, {__mode = "k"})
 local function install()
+    installMatchNames()
     local utility = CoD and CoD.LobbyUtility
     local original = utility and utility.GetClientList
     if not utility then return end
