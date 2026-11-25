@@ -87,7 +87,10 @@ tests also cover shuffled/duplicate seat mappings and bounded UTF-8/clan output.
 The initial scoped adapter also retained stock labels because its stock-only
 guard rejected ezz's existing hook. Read-only live inspection confirmed all four
 saved names were published and the scoped call relay was absent. The ezz-aware
-correction has not yet been confirmed to render custom labels live. Run
+correction was subsequently installed and the user confirmed custom overhead
+names in a two-player Zombies match without editing the saved names again. This
+confirms saved-name startup and that tested display case; four-player, clan-tag,
+online-transition and map-change rendering still need separate live coverage. Run
 tools/run_name_display_tests.py for an additional UBSan harness including the
 unchanged production overhead module. It exercises all viewers, shuffled clients
 and controllers, invalid/duplicate/unready mappings, stock formatter failures,
