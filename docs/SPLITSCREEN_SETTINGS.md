@@ -42,6 +42,15 @@ The native overhead cache uses a different path again. For supported checksum
 byte-guarded detour now replaces successful formatter output for uniquely mapped
 active local players only. It reads the established seat records and CG client
 numbers (CG stride 0x342720); it does not assume local slot equals match client.
+The CG global is protected/encoded: reading it as a raw pointer was a bug in the
+first overhead adapter. The corrected adapter wraps only the overhead updater
+call at 0x0069D7D9. A checked near relay supplies the engine-decoded viewer CG
+already held in RBX, without changing the original call's stack or return address.
+A thread-local scope exists only for that stock updater invocation, restoring
+the previous context on return or unwinding. Other formatter consumers retain
+stock names, and no CG pointer is cached across map transitions. The complete
+updater body is byte-checked except its existing playerDetails relocation operand;
+that operand must agree with both the draw and reset LEAs to a readable array.
 Stock clan prefixes are retained, UTF-8 truncation respects the supplied buffer
 capacity, and invalid/unready/ambiguous cases retain stock output. No actor,
 entity, session or identity record is written. The diagnostic dvar
@@ -60,12 +69,17 @@ Windows cross-build and portable regression coverage exercise the name codec,
 four-slot settings UI, keyboard acceptance/cancellation, saved-name bridge status,
 roster ordering, online guards and existing ezz join/leave behavior. The user has
 confirmed that the settings menu opens and name editing appears to work. Corrected
-layout, physical one-press joining/hints, close-time roster refresh, disk
-save/restart, and the new scoreboard adapter still require live testing. The
-previous build's Zombies scoreboard was confirmed not to show custom names.
+layout, physical one-press joining/hints, close-time roster refresh, and disk
+save/restart still require live testing. A two-player Zombies screenshot confirmed
+the scoreboard displays the edited names after the Lua adapter, while both
+overhead labels still retained stock names with the first native adapter.
 New regressions cover match client mapping, sorted scoreboard rows, all viewing
 controllers, clan tags, resets, late loading, and stock fallback behavior. Native
 tests also cover shuffled/duplicate seat mappings and bounded UTF-8/clan output.
-The previous overhead label was confirmed to retain the original guest name;
-the new native overhead adapter has not yet been confirmed live. Offline
-tests do not establish those game behaviors.
+The corrected scoped native adapter has not yet been confirmed live. Run
+tools/run_name_display_tests.py for an additional UBSan harness including the
+unchanged production overhead module. It exercises all viewers, shuffled clients
+and controllers, invalid/duplicate/unready mappings, stock formatter failures,
+clan/reset behavior, nested calls, thread-local lifetime, every byte guard,
+synchronized relocation operands, and checked relay installation failures.
+These mocks do not execute the Windows relay or establish live game behavior.
