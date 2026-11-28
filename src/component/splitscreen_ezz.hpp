@@ -20,14 +20,20 @@
 
 #include <cstdint>
 #include <cstring>
+#include <atomic>
 #include <iterator>
 #include <vector>
 
 #include "splitscreen_addresses.hpp"
 #include "splitscreen_midhook.hpp"
+#include "splitscreen_safety.hpp"
 
 namespace splitscreen::ezz
 {
+	// Null means stock/default. Providers must return process-lifetime storage.
+	using client_name_provider = const char* (*)(int);
+	inline std::atomic<client_name_provider> name_provider{nullptr};
+
 	namespace detail
 	{
 		inline bool readable(const void* p, const size_t n)
@@ -38,8 +44,8 @@ namespace splitscreen::ezz
 			{
 				return false;
 			}
-			const auto end = reinterpret_cast<size_t>(mbi.BaseAddress) + mbi.RegionSize;
-			return reinterpret_cast<size_t>(p) + n <= end;
+			return safety::range_fits(reinterpret_cast<uintptr_t>(p), n,
+			                          reinterpret_cast<uintptr_t>(mbi.BaseAddress), mbi.RegionSize);
 		}
 
 		inline bool bytes_at(const size_t address, const uint8_t* bytes, const size_t n)
@@ -126,6 +132,10 @@ namespace splitscreen::ezz
 
 		inline const char* get_client_name_stub(const int controller)
 		{
+			if (const auto provider = name_provider.load(std::memory_order_acquire))
+			{
+				if (const auto* name = provider(controller)) { return name; }
+			}
 			if (engine_owns(controller))
 			{
 				return reinterpret_cast<const char* (*)(int)>(get_client_name_engine)(controller);

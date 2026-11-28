@@ -55,13 +55,13 @@ if table ~= nil and table.insert ~= nil then
 			if v == nil then
 				return
 			end
-			return rawinsert(t, pos, v)
+			return rawinsert(t, ...)
 		end
 	else
 		-- Fallback when select is not exposed. A 3-arg call whose value is
-		-- explicitly nil cannot be told apart from a 2-arg call here, so it is
-		-- dropped rather than guessed at - dropping matches what the nil case
-		-- does anyway, and the alternative would insert the POSITION as a value.
+		-- explicitly nil cannot be told apart from a 2-arg call here. Preserve
+		-- two-argument inserts (including numbers); full nil-value protection
+		-- therefore requires select. Do not claim this ambiguous case is dropped.
 		table.insert = function(t, a, b)
 			if t == nil then
 				return

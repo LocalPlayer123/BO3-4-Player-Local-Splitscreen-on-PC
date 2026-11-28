@@ -45,17 +45,30 @@
 		                      const int cache_only, const bool hwm)
 		{
 			const auto b = base();
+			if (!msg || !*msg || !safety::valid_cache_count(c.count, std::size(c.changes)))
+			{
+				note("[statscache] invalid message or cache count %d - cache cleared\n", c.count);
+				c.count = 0;
+				return;
+			}
 			if (c.count < 0x100)
 			{
 				auto& change = c.changes[c.count++];   // the count is stored before the decode, as stock
 				change.size = reinterpret_cast<int (*)(const char*, uint8_t*, int)>(b + com_decode_yenc_rva)(
 					msg + 1, change.data, static_cast<int>(sizeof(change.data)));
+				if (!safety::valid_decode_size(change.size, sizeof(change.data)))
+				{
+					--c.count;
+					note("[statscache] invalid decoded size %d - change dropped\n", change.size);
+					return;
+				}
 			}
 			else
 			{
 				reinterpret_cast<void (*)(const char*, int, int, const char*, ...)>(b + com_error_rva)(
 					reinterpret_cast<const char*>(b + str_empty_rva), 0, 2 /* ERR_DROP */,
 					reinterpret_cast<const char*>(b + str_statsoverflow_rva));
+				return;   // do not continue if ERR_DROP unexpectedly returns
 			}
 			if (cache_only)
 			{
@@ -77,6 +90,14 @@
 				b + set_stat_changed_internal_rva);
 			for (int i = 0; i < c.count; ++i)   // count re-read every pass, as stock
 			{
+				if (!safety::valid_cache_count(c.count, std::size(c.changes)))
+				{
+					break;
+				}
+				if (!safety::valid_decode_size(c.changes[i].size, sizeof(c.changes[i].data)))
+				{
+					continue;
+				}
 				internal(mode, ctrl, c.changes[i].data, c.changes[i].size, i != c.count - 1);
 			}
 			c.count = 0;

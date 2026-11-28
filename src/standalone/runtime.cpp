@@ -129,8 +129,10 @@ namespace component_loader
 
 		std::vector<std::unique_ptr<generic_component>>& components()
 		{
-			static std::vector<std::unique_ptr<generic_component>> list;
-			return list;
+			// Hooks and detached scheduler tasks can still reference components at
+			// process teardown. Keep their owners alive for the entire process.
+			static auto* list = new std::vector<std::unique_ptr<generic_component>>;
+			return *list;
 		}
 	}
 
@@ -183,10 +185,21 @@ namespace utils::hook
 		void write(void* place, const void* data, const size_t length)
 		{
 			DWORD old{};
-			VirtualProtect(place, length, PAGE_EXECUTE_READWRITE, &old);
+			if (!VirtualProtect(place, length, PAGE_EXECUTE_READWRITE, &old))
+			{
+				throw std::runtime_error("Unable to make hook memory writable");
+			}
 			std::memmove(place, data, length);
-			VirtualProtect(place, length, old, &old);
-			FlushInstructionCache(GetCurrentProcess(), place, length);
+			DWORD ignored{};
+			const auto restored = VirtualProtect(place, length, old, &ignored);
+			// Attempt both operations even if one fails: the bytes are already
+			// written, so failure is not a rollback and startup must not retry.
+			const auto flushed = FlushInstructionCache(GetCurrentProcess(), place, length);
+			if (!restored || !flushed)
+			{
+				throw std::runtime_error(!restored ? "Unable to restore hook memory protection"
+				                                  : "Unable to flush hook instruction cache");
+			}
 		}
 
 		// Executable memory within rel32 range of `near_to`, handed out in
@@ -265,10 +278,15 @@ namespace utils::hook
 		if (MH_CreateHook(this->place_, target, &this->original_) != MH_OK)
 		{
 			this->place_ = nullptr;
+			this->original_ = nullptr;
 			throw std::runtime_error("Unable to create hook");
 		}
 
-		MH_EnableHook(this->place_);
+		if (MH_EnableHook(this->place_) != MH_OK)
+		{
+			this->clear();
+			throw std::runtime_error("Unable to enable hook");
+		}
 	}
 
 	void detour::create(const size_t place, void* target)
@@ -326,7 +344,7 @@ namespace scheduler
 		{
 			std::function<bool()> handler{};
 			std::chrono::milliseconds interval{};
-			std::chrono::high_resolution_clock::time_point last_call{};
+			std::chrono::steady_clock::time_point last_call{};
 		};
 
 		class task_pipeline
@@ -345,7 +363,7 @@ namespace scheduler
 
 				for (auto i = this->tasks_.begin(); i != this->tasks_.end();)
 				{
-					const auto now = std::chrono::high_resolution_clock::now();
+					const auto now = std::chrono::steady_clock::now();
 					if (now - i->last_call < i->interval)
 					{
 						++i;
@@ -353,7 +371,16 @@ namespace scheduler
 					}
 
 					i->last_call = now;
-					if (i->handler() == cond_end)
+					bool finished = true;
+					try
+					{
+						finished = i->handler() == cond_end;
+					}
+					catch (...)
+					{
+						// A throwing callback is removed, not retried every frame.
+					}
+					if (finished)
 					{
 						i = this->tasks_.erase(i);
 					}
@@ -379,13 +406,31 @@ namespace scheduler
 			std::vector<task> new_tasks_;
 		};
 
-		task_pipeline pipelines[pipeline::count];
-		utils::hook::detour r_end_frame_hook;
+		task_pipeline* pipelines()
+		{
+			// Deliberately detached drivers must never observe static destruction.
+			static auto* list = new task_pipeline[pipeline::count];
+			return list;
+		}
+
+		utils::hook::detour& r_end_frame_hook()
+		{
+			static auto* hook = new utils::hook::detour;
+			return *hook;
+		}
 
 		void r_end_frame_stub()
 		{
-			pipelines[pipeline::renderer].execute();
-			r_end_frame_hook.invoke<void>();
+			try
+			{
+				pipelines()[pipeline::renderer].execute();
+			}
+			catch (...)
+			{
+				// Also contain scheduler bookkeeping/allocation failures. Always
+				// forward to the game's original renderer (outside this catch).
+			}
+			r_end_frame_hook().invoke<void>();
 		}
 	}
 
@@ -394,8 +439,8 @@ namespace scheduler
 		task t;
 		t.handler = callback;
 		t.interval = delay;
-		t.last_call = std::chrono::high_resolution_clock::now();
-		pipelines[type].add(std::move(t));
+		t.last_call = std::chrono::steady_clock::now();
+		pipelines()[type].add(std::move(t));
 	}
 
 	void loop(const std::function<void()>& callback, const pipeline type, const std::chrono::milliseconds delay)
@@ -418,21 +463,30 @@ namespace scheduler
 
 	void start(const size_t game_base)
 	{
+		// Allocate process-lifetime state and enable the renderer hook first.
+		// A hook failure must not leave an async worker behind.
+		(void)pipelines();
+		// BOIII hooks the same function; MinHook chains onto its jump.
+		constexpr size_t r_end_frame_rva = 0x02215FD0;
+		r_end_frame_hook().create(game_base + r_end_frame_rva, reinterpret_cast<void*>(&r_end_frame_stub));
+
 		// The same two drivers BOIII's scheduler uses. The async thread is never
 		// joined: it ends with the process, like the game's own threads.
 		std::thread([]
 		{
 			while (true)
 			{
-				pipelines[pipeline::async].execute();
+				try
+				{
+					pipelines()[pipeline::async].execute();
+				}
+				catch (...)
+				{
+					// Bookkeeping failure must not terminate the detached thread.
+				}
 				std::this_thread::sleep_for(std::chrono::milliseconds(10));
 			}
 		}).detach();
-
-		// BOIII: r_end_frame_hook.create(0x142272B00_g, r_end_frame_stub).
-		// BOIII hooks the same function; MinHook chains onto its jump.
-		constexpr size_t r_end_frame_rva = 0x02215FD0;
-		r_end_frame_hook.create(game_base + r_end_frame_rva, reinterpret_cast<void*>(&r_end_frame_stub));
 	}
 }
 
@@ -463,12 +517,20 @@ namespace runtime
 
 	bool start()
 	{
+		// Calls are serialized by the DPI stub, outside DllMain. True means
+		// consumed, not necessarily successful: never reapply partial patches.
+		static bool consumed = false;
+		if (consumed)
+		{
+			return true;
+		}
 		// By now BOIII has made the game the process's main module.
 		const auto game_module = GetModuleHandleW(nullptr);
 		if (!is_supported_game(game_module))
 		{
 			return false;
 		}
+		consumed = true;
 
 		const auto base = reinterpret_cast<size_t>(game_module);
 
@@ -495,8 +557,8 @@ namespace runtime
 		}
 		catch (...)
 		{
-			// Same as BOIII's loader: a failed component does not take the game
-			// down. Every patch verifies its original bytes before writing.
+			// Terminal/consumed failure: some hooks, writes, or tasks may already
+			// be installed. There is no transactional rollback; retry is unsafe.
 		}
 
 		return true;

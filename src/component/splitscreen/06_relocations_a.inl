@@ -863,7 +863,7 @@
 				note("[splitscreen] ui model string hunk: NOT hooked - Hunk_UserCreateFromBuffer bytes differ\n");
 				return false;
 			}
-			hunk_create_hook.create(reinterpret_cast<void*>(base() + hunk_create_rva), hunk_create_stub);
+			hunk_create_hook.create(reinterpret_cast<void*>(base() + hunk_create_rva), reinterpret_cast<void*>(&hunk_create_stub));
 			return true;
 		}
 

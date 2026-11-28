@@ -103,7 +103,7 @@
 			}
 			try
 			{
-				utils::hook::call(base() + save_read_callsite, save_read_stub);
+				utils::hook::call(base() + save_read_callsite, reinterpret_cast<void*>(&save_read_stub));
 			}
 			catch (...)
 			{

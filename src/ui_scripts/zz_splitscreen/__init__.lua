@@ -16,16 +16,11 @@
 -- controllers that have seats; PS4 4). This script takes the console branch of
 -- CoD.Menu.HandleButtonPress on PC as well - the stock body, unchanged otherwise.
 --
--- The PC-only button (LobbySplitscreenToggle, FE_ListAdditonal) only ever adds
--- or removes CONTROLLER 1. Its label (SplitscreenLobbyButtonPC) takes the first
--- matching state of Hide, MapController, Available (ACTIVATE: play available,
--- IsSplitscreenLobbyRoomAvailable(), any pad), Active (DEACTIVATE: more than one
--- player), AddController. Offline there is room for 4, so with 2 or 3 players
--- ACTIVATE always won and nobody could be removed. Now, with guests in the lobby,
--- there is "room" only while a connected pad has no seat; otherwise the label
--- reads DEACTIVATE. The click asks the same question as the label: ACTIVATE adds
--- that pad's controller through the stock join (alone: the stock toggle, which
--- also serves keyboard + one pad), DEACTIVATE removes every extra local player.
+-- Guest A is owned through physical release, using independent subscriptions
+-- even when stock/ezz captured a smaller controller bound during construction.
+-- The PC-only activate/deactivate button is hidden and disabled; the parent
+-- FE_ListAdditonal selects its stock StringA play-hint clip while a pad can join.
+-- (Hide/MapController belong to the child PC button, not that parent.)
 --
 -- BOIII's LUI sandbox has no pcall: every global is checked for nil first.
 -- The overrides are (re)installed from a timer, so load order does not matter.
@@ -33,12 +28,12 @@
 if rawget(_G, "__zz_splitscreen_loaded") then
 	return
 end
-rawset(_G, "__zz_splitscreen_loaded", true)
 
 if Engine == nil or Dvar == nil or LUI == nil or LUI.roots == nil
 	or LUI.UIElement == nil or LUI.UITimer == nil then
 	return
 end
+rawset(_G, "__zz_splitscreen_loaded", true)
 
 local SUPPORTED = 4   -- local players the component can seat (seat records 0..3)
 
@@ -68,6 +63,187 @@ local wrapped_toggle = nil
 local wrapped_add = nil
 local wrapped_handle_press = nil
 local wrapped_should_open = nil
+local wrapped_remove = nil
+local stock_remove = nil
+local wrapped_create_lobby = nil
+local toggle_widgets_wrapped = setmetatable({}, {__mode = "k"})
+local prompt_widgets = setmetatable({}, {__mode = "k"})
+local guest_a = {} -- One physical ButtonBits gesture, shared by every lobby/root.
+
+local function offline_frontend(menu)
+	local network = Engine.GetLobbyNetworkMode ~= nil and Engine.GetLobbyNetworkMode() or nil
+	return menu ~= nil and menu.menuName == "Lobby"
+		and (menu.getParent == nil or menu:getParent() ~= nil)
+		and (network == 0 or network == 1)
+		and (Engine.IsInGame == nil or not Engine.IsInGame())
+		and (Engine.GetCurrentMap == nil or Engine.GetCurrentMap() == "core_frontend")
+end
+
+local function lobby_accepts_input(menu)
+	return offline_frontend(menu) and not menu.occludedBy
+		and not menu.m_inputDisabled and not menu.m_disableAllButtonActions
+end
+
+-- A button-model update may reach more than one menu before the asynchronous
+-- lobby queue publishes the new seat. Reserve that controller (and known pad
+-- port) before calling stock code, with a bounded retry for failed joins.
+local join_pending = {}
+local join_epoch = 0
+local JOIN_RETRY_TICKS = 6   -- watcher ticks are 500 ms; no sandbox clock needed
+local JOIN_MAX_ATTEMPTS = 3 -- includes the initial stock call that acquires files
+local leave_pending = {}
+local join_call_in_progress = false
+local leave_call_in_progress = false
+
+local function lobby_queue_ready()
+	return LuaUtils == nil or LuaUtils.LobbyProcessQueueEmpty == nil
+		or LuaUtils.LobbyProcessQueueEmpty()
+end
+
+local function process_pending_leaves()
+	for c = 1, SUPPORTED - 1 do
+		local request = leave_pending[c]
+		if request ~= nil then
+			if Engine.IsControllerBeingUsed(c) ~= true then
+				leave_pending[c] = nil
+				join_pending[c] = nil
+			elseif request.expires <= join_epoch or (Engine.IsInGame ~= nil and Engine.IsInGame())
+				or Engine.GetLobbyNetworkMode == nil or Engine.GetLobbyNetworkMode() == 2 then
+				leave_pending[c] = nil
+			elseif request.last_attempt ~= join_epoch and lobby_queue_ready() and stock_remove ~= nil then
+				-- Publish before the call: model callbacks may re-enter this handler.
+				-- A refused leave must be retried, not mistaken for a completed one.
+				request.last_attempt = join_epoch
+				leave_call_in_progress = true
+				stock_remove(request.menu, c)
+				leave_call_in_progress = false
+			end
+		end
+	end
+end
+
+local function request_guest_leave(menu, controller)
+	if leave_pending[controller] == nil then
+		join_pending[controller] = nil
+		leave_pending[controller] = {menu = menu, expires = join_epoch + JOIN_RETRY_TICKS}
+	end
+	process_pending_leaves()
+end
+
+local function known_pad_port(controller)
+	if Engine.GamepadsConnectedPort == nil or Engine.GamepadsConnectedValidPort == nil then
+		return nil
+	end
+	local port = Engine.GamepadsConnectedPort(controller)
+	if port ~= nil and Engine.GamepadsConnectedValidPort(port) == true then
+		return port
+	end
+	return nil
+end
+
+local function lobby_nav_model()
+	if Engine.GetGlobalModel ~= nil and Engine.GetModel ~= nil then
+		return Engine.GetModel(Engine.GetGlobalModel(), "lobbyRoot.lobbyNav")
+	end
+	return nil
+end
+
+local function same_join_context(request, controller)
+	return offline_frontend(request.menu)
+		and Engine.GetLobbyNetworkMode() == request.network
+		and (request.port == nil or known_pad_port(controller) == request.port)
+		and (request.nav_model == nil or (lobby_nav_model() == request.nav_model
+			and Engine.GetModelValue(request.nav_model) == request.nav))
+end
+
+local function reserve_join(menu, controller, stock_add)
+	if type(controller) ~= "number" or controller < 0 or controller >= SUPPORTED
+		or controller % 1 ~= 0 or Engine.IsControllerBeingUsed(controller) == true then
+		return false
+	end
+	if leave_pending[controller] ~= nil then
+		if Engine.IsControllerBeingUsed(controller) ~= true then
+			leave_pending[controller] = nil
+			join_pending[controller] = nil
+		else
+			return false
+		end
+	end
+	if not offline_frontend(menu) then
+		return false
+	end
+	local max = Dvar.lobby_maxLocalPlayers ~= nil and Dvar.lobby_maxLocalPlayers:get() or 2
+	if Engine.GetUsedControllerCount() >= max then
+		return false
+	end
+	local port = known_pad_port(controller)
+	for c = 0, SUPPORTED - 1 do
+		local pending = join_pending[c]
+		if pending ~= nil and pending.expires <= join_epoch then
+			join_pending[c] = nil
+			pending = nil
+		end
+		if (c == controller and pending ~= nil)
+			or (c ~= controller and port ~= nil
+				and ((pending ~= nil and pending.port == port)
+					or (Engine.IsControllerBeingUsed(c) == true and known_pad_port(c) == port))) then
+			return false
+		end
+	end
+	-- Never replace this menu/callback on duplicate presses or late wrappers.
+	local nav_model = lobby_nav_model()
+	local request = {port = port, menu = menu, stock_add = stock_add,
+		network = Engine.GetLobbyNetworkMode(), nav_model = nav_model,
+		nav = nav_model ~= nil and Engine.GetModelValue(nav_model) or nil,
+		expires = join_epoch + JOIN_RETRY_TICKS, attempts = 0}
+	join_pending[controller] = request
+	return request
+end
+
+-- Installed ezz splitscreen_join arms on DOWN, then toggles on release. Never
+-- clear DOWN here: that re-enters its subscription before it can arm, and joining
+-- on DOWN lets later stock subscribers treat the very same press as seated A.
+-- Own all three guest models independently of the bound captured by stock/ezz.
+local function install_lobby_a_handlers(menu)
+	if menu == nil or menu.menuName ~= "Lobby" or menu.subscribeToModel == nil
+		or Engine.GetModelForController == nil or Engine.GetModel == nil
+		or Enum == nil or Enum.LUIButton == nil or Enum.LUIButtonFlags == nil
+		or CoD == nil or CoD.BitUtility == nil or CoD.BitUtility.IsBitwiseAndNonZero == nil then return end
+	local button, flag = Enum.LUIButton.LUI_KEY_XBA_PSCROSS, Enum.LUIButtonFlags.FLAG_DOWN
+	if button == nil or flag == nil then return end
+	menu.__zz_guest_join_models = menu.__zz_guest_join_models or {}
+	for c = 1, SUPPORTED - 1 do
+		local guest = c
+		local parent = Engine.GetModelForController(guest)
+		local model = parent ~= nil and Engine.GetModel(parent, "ButtonBits." .. button) or nil
+		if model == nil and parent ~= nil and Engine.CreateModel ~= nil then
+			model = Engine.CreateModel(parent, "ButtonBits." .. button)
+		end
+		if model ~= nil and menu.__zz_guest_join_models[guest] ~= model then
+			menu.__zz_guest_join_models[guest] = model
+			menu:subscribeToModel(model, function(value_model)
+				local gesture = guest_a[guest]
+				local down = CoD.BitUtility.IsBitwiseAndNonZero(Engine.GetModelValue(value_model) or 0, flag)
+				if down then
+					if gesture == nil and lobby_accepts_input(menu)
+						and (Engine.GetPrimaryController == nil or guest ~= Engine.GetPrimaryController())
+						and Engine.IsControllerBeingUsed(guest) ~= true then
+						local nav_model = lobby_nav_model()
+						guest_a[guest] = {menu = menu, model = value_model,
+							network = Engine.GetLobbyNetworkMode(), port = known_pad_port(guest),
+							nav_model = nav_model, nav = nav_model ~= nil and Engine.GetModelValue(nav_model) or nil}
+					end
+				elseif gesture ~= nil and gesture.menu == menu and gesture.model == value_model then
+					-- Retire BEFORE stock/model callbacks can re-enter; no synthetic reset.
+					guest_a[guest] = nil
+					if same_join_context(gesture, guest) and lobby_accepts_input(menu) and LobbyAddLocalClient ~= nil then
+						LobbyAddLocalClient(menu, guest)
+					end
+				end
+			end, false)
+		end
+	end
+end
 
 -- Lobby.lua's PostLoadFunc runs `if CoD.isPC then f0_local0(menu) end`, and the
 -- PC f0_local0 registers `unused_gamepad_button -> return true` on the Lobby
@@ -81,15 +257,49 @@ local function install_lobby_join_handler(menu, controller)
 	menu.__zz_console_join = true
 	log("Lobby: console join handler restored")
 	menu:registerEventHandler("unused_gamepad_button", function(self, event)
-		local handled = nil
 		log("Lobby unused_gamepad_button c" .. tostring(event.controller) .. " -> LobbyAddLocalClient")
-		LobbyAddLocalClient(self, event.controller or controller)
-		if not handled then
-			handled = self:dispatchEventToChildren(event)
+		if LobbyAddLocalClient ~= nil then
+			LobbyAddLocalClient(self, event.controller or controller)
 		end
-		return handled
+		-- This is a join request, not another navigation event. Do not send the
+		-- same press down to a child that may enqueue a second join/toggle.
+		return true
 	end)
 end
+	-- ezz adds its own A-release subscription to this very same Lobby menu (including
+	-- Zombies). Subscribe B explicitly too: stock subscriptions may have been built
+	-- before the extra-controller bound was available. Never handle an occluded menu.
+	local function install_lobby_leave_handlers(menu)
+		if menu == nil or menu.menuName ~= "Lobby" or menu.subscribeToModel == nil
+			or Engine.GetModelForController == nil or Engine.GetModel == nil
+			or Enum == nil or Enum.LUIButton == nil or Enum.LUIButtonFlags == nil
+			or CoD == nil or CoD.BitUtility == nil or CoD.BitUtility.IsBitwiseAndNonZero == nil then
+			return
+		end
+		local button = Enum.LUIButton.LUI_KEY_XBB_PSCIRCLE
+		local flag = Enum.LUIButtonFlags.FLAG_DOWN
+		if button == nil or flag == nil then return end
+		menu.__zz_guest_leave_models = menu.__zz_guest_leave_models or {}
+		for c = 1, SUPPORTED - 1 do
+			local guest = c
+			local model = Engine.GetModel(Engine.GetModelForController(guest), "ButtonBits." .. button)
+			if model ~= nil and not menu.__zz_guest_leave_models[guest] then
+				menu.__zz_guest_leave_models[guest] = true
+				menu:subscribeToModel(model, function(value_model)
+					if not menu.occludedBy and not menu.m_inputDisabled and not menu.m_disableAllButtonActions
+						and Engine.GetLobbyNetworkMode ~= nil and Engine.GetLobbyNetworkMode() ~= 2
+						and (Engine.IsInGame == nil or not Engine.IsInGame())
+						and (Engine.GetPrimaryController == nil or guest ~= Engine.GetPrimaryController())
+						and Engine.IsControllerBeingUsed(guest) == true
+						and CoD.BitUtility.IsBitwiseAndNonZero(Engine.GetModelValue(value_model) or 0, flag) then
+						Engine.SetModelValue(value_model, 0)
+						request_guest_leave(menu, guest)
+					end
+				end, false)
+			end
+		end
+	end
+
 
 
 -- The stock CoD.Menu.HandleButtonPress (CoDMenu.lua), with the console branch
@@ -102,6 +312,30 @@ end
 -- (2026-09-27): controller 1's A reached UIRootFull, Menu.Lobby (owner 0,
 -- anyControllerAllowed, own gamepad_button handler) and nothing followed.
 local function console_handle_button_press(menu, controller, button, model)
+	install_lobby_a_handlers(menu)
+	install_lobby_leave_handlers(menu)
+	local a = Enum ~= nil and Enum.LUIButton ~= nil and Enum.LUIButton.LUI_KEY_XBA_PSCROSS or nil
+	if a ~= nil and button == a and menu.__zz_guest_join_models ~= nil
+		and menu.__zz_guest_join_models[controller] == model
+		and (Engine.IsControllerBeingUsed(controller) ~= true or guest_a[controller] ~= nil) then
+		-- The independent subscription owns this physical DOWN/release, not select.
+		return
+	end
+	-- The PC's mapped B action is not reliably the console guest-leave action.
+	-- Handle only seated guests on the actual offline Lobby, never dialogs,
+	-- submenus, the primary controller, or in-game pause menus.
+	local buttons = Enum ~= nil and Enum.LUIButton or nil
+	if menu.menuName == "Lobby" and type(controller) == "number" and controller > 0 and controller < SUPPORTED
+		and (Engine.GetPrimaryController == nil or controller ~= Engine.GetPrimaryController())
+		and Engine.IsControllerBeingUsed(controller) == true
+		and buttons ~= nil and buttons.LUI_KEY_XBB_PSCIRCLE ~= nil and button == buttons.LUI_KEY_XBB_PSCIRCLE
+		and Engine.GetLobbyNetworkMode ~= nil and Engine.GetLobbyNetworkMode() ~= 2
+		and (Engine.IsInGame == nil or not Engine.IsInGame())
+		and LobbyRemoveLocalClientFromLobby ~= nil then
+		Engine.SetModelValue(model, 0)
+		request_guest_leave(menu, controller)
+		return
+	end
 	if Engine.IsControllerBeingUsed(controller) or menu.unusedControllerAllowed then
 		local list = menu:GetElementAndFunctionTableForButton(button, "buttonFunctions")
 		for _, entry in ipairs(list) do
@@ -123,12 +357,13 @@ local function console_handle_button_press(menu, controller, button, model)
 			return
 		end
 		-- A joins, nothing else (measured 2026-10-01: the D-pad of a freshly plugged
-		-- pad joined player 2). Without the enum the old behaviour stays.
+		-- pad joined player 2). Without the enum do not guess which button is A.
 		local a_button = Enum ~= nil and Enum.LUIButton ~= nil and Enum.LUIButton.LUI_KEY_XBA_PSCROSS or nil
 		log("unused press c" .. tostring(controller) .. " button " .. tostring(button) .. " A=" .. tostring(a_button))
-		if a_button ~= nil and button ~= a_button then
+		if a_button == nil or button ~= a_button then
 			return
 		end
+		Engine.SetModelValue(model, 0)
 		if IsGameTypeDOA ~= nil and IsGameTypeDOA() and Engine.IsSplitscreen() then
 			menu:setOwner(controller)
 		end
@@ -159,7 +394,8 @@ end
 local RESTRICTED_WARNING = "MENU_RESTRICTED_TO_LOCAL_GAMES"
 
 local function drop_offline_restricted_warning()
-	if Engine.GetLobbyNetworkMode == nil or Engine.GetLobbyNetworkMode() == 2 then
+	if Engine.GetLobbyNetworkMode == nil or Engine.GetLobbyNetworkMode() == 2
+		or Engine.GetGlobalModel == nil or Engine.GetModel == nil then
 		return false
 	end
 	local dialog = Engine.GetModel(Engine.GetGlobalModel(), "messageDialog")
@@ -175,6 +411,54 @@ local function drop_offline_restricted_warning()
 	log("dropped " .. RESTRICTED_WARNING .. " (offline)")
 	Engine.SetModelValue(pending, 0)
 	return true
+end
+
+local function attempt_join(request, controller)
+	-- Publish guards before stock: sign-in and prompt/model callbacks can re-enter.
+	request.last_attempt = join_epoch
+	request.attempts = request.attempts + 1
+	join_call_in_progress = true
+	if request.attempts > 1 then drop_offline_restricted_warning() end
+	local result = request.stock_add(request.menu, controller)
+	if Engine.IsControllerBeingUsed(controller) == true then request.seated = true end
+	if ForceLobbyButtonUpdate ~= nil then ForceLobbyButtonUpdate(controller) end
+	join_call_in_progress = false
+	return result
+end
+
+local function process_pending_joins()
+	if join_call_in_progress then return end
+	for c = 0, SUPPORTED - 1 do
+		local request = join_pending[c]
+		if request ~= nil then
+			local menu = request.menu
+			local network = Engine.GetLobbyNetworkMode ~= nil and Engine.GetLobbyNetworkMode() or nil
+			local max = Dvar.lobby_maxLocalPlayers ~= nil and Dvar.lobby_maxLocalPlayers:get() or 2
+			if request.expires <= join_epoch or leave_pending[c] ~= nil then
+				join_pending[c] = nil
+			elseif Engine.IsControllerBeingUsed(c) == true then
+				-- Stop retries, but retain the host-toggle dedup reservation to deadline.
+				if not request.seated then
+					request.seated = true
+					if ForceLobbyButtonUpdate ~= nil then ForceLobbyButtonUpdate(c) end
+				end
+			elseif not same_join_context(request, c) or menu == nil or menu.menuName ~= "Lobby"
+				or (menu.getParent ~= nil and menu:getParent() == nil)
+				or (network ~= 0 and network ~= 1)
+				or (Engine.IsInGame ~= nil and Engine.IsInGame())
+				or (Engine.GetCurrentMap ~= nil and Engine.GetCurrentMap() ~= "core_frontend")
+				or Engine.GetUsedControllerCount() >= max then
+				join_pending[c] = nil
+			elseif not request.seated and request.attempts < JOIN_MAX_ATTEMPTS
+				and request.last_attempt ~= join_epoch
+				and not menu.occludedBy and not menu.m_inputDisabled and not menu.m_disableAllButtonActions
+				and lobby_queue_ready() and (request.attempts == 0
+					or (Engine.AreLocalFilesReady ~= nil and Engine.AreLocalFilesReady(c) == true)) then
+				-- Bypass reservation only for this exact menu/controller and captured stock.
+				attempt_join(request, c)
+			end
+		end
+	end
 end
 
 -- A controller with a connected pad and no seat. Engine.GamepadsConnectedIsActive
@@ -363,7 +647,7 @@ local steam_pad_names = {
 }
 
 local function steam_pad_name(slot)
-	if Engine.GamepadType == nil then
+	if Engine.GamepadType == nil or pcall == nil then
 		return nil
 	end
 	local ok, answer = pcall(Engine.GamepadType, PAD_TYPE_QUERY_BASE + slot)
@@ -392,6 +676,95 @@ end
 local wrapped_localize = nil
 
 local function install()
+	-- Keep ezz's press-A hint, but remove the clickable PC-only activate/deactivate
+	-- control. Its constructor owner is the host, not the pad that pressed A.
+	-- Keep LobbySplitscreenToggle itself: ezz invokes it with the guest on release.
+	local additional = CoD ~= nil and CoD.FE_ListAdditonal or nil
+	local make_additional = additional ~= nil and additional.new or nil
+	if type(make_additional) == "function" and not toggle_widgets_wrapped[make_additional] then
+		local wrapper = function(menu, controller)
+			local widget = make_additional(menu, controller)
+			local button = widget.SplitscreenLobbyButtonPC
+			if button ~= nil then
+				-- Parent state clips call setAlpha again after construction. A one-time
+				-- hide leaves an invisible but clickable control, or reappears later.
+				local set_alpha = button.setAlpha
+				if set_alpha ~= nil then
+					button.setAlpha = function(self) return set_alpha(self, 0) end
+					button:setAlpha(0)
+				end
+				if button.setMouseDisabled ~= nil then button:setMouseDisabled(true) end
+				if button.makeNotFocusable ~= nil then button:makeNotFocusable() end
+				if button.registerEventHandler ~= nil then
+					button:registerEventHandler("button_action", function() return true end)
+					button:registerEventHandler("mouse_left_click", function() return true end)
+				end
+			end
+			local function hint_eligible()
+				local max = Dvar.lobby_maxLocalPlayers ~= nil and Dvar.lobby_maxLocalPlayers:get() or 2
+				return lobby_accepts_input(menu) and Engine.GetUsedControllerCount() < max
+					and free_pad_controller() ~= nil
+			end
+			for _, state in ipairs(widget.stateConditions or {}) do
+				local original = state.condition
+				if state.stateName == "SplitscreenButtonPC" then
+					state.condition = function() return false end
+				elseif state.stateName == "AddControllerState_Play" then
+					state.condition = function(...)
+						if offline_frontend(menu) then return hint_eligible() end
+						return original == nil or original(...)
+					end
+				else
+					state.condition = function(...)
+						-- CoD.Menu.updateElementState stops at the FIRST match. A late
+						-- integration's Hide/MapController must not beat the eligible hint.
+						if hint_eligible() then return false end
+						return original == nil or original(...)
+					end
+				end
+			end
+			-- Stock PC ship FE_ListAdditonal's play clip sets StringA alpha=1 and
+			-- PLATFORM_FEEDER_SECONDARY_CONTROLLER_PLAY. Use that actual clip, not
+			-- a second text widget. Refresh now and on ticks as well as stock models.
+			prompt_widgets[widget] = menu
+			if menu.updateElementState ~= nil then
+				menu:updateElementState(widget, {name = "model_validation", menu = menu})
+			end
+			return widget
+		end
+		toggle_widgets_wrapped[wrapper] = true
+		additional.new = wrapper
+	end
+	-- Wrap the action as well as button dispatch: the Zombies lobby's existing
+	-- B callback and host UI integrations can call this without passing our handler.
+	if LobbyRemoveLocalClientFromLobby ~= nil and LobbyRemoveLocalClientFromLobby ~= wrapped_remove then
+		local remove_client = LobbyRemoveLocalClientFromLobby
+		stock_remove = remove_client
+		wrapped_remove = function(menu, controller)
+			if leave_call_in_progress then return remove_client(menu, controller) end
+			if type(controller) == "number" and controller > 0 and controller < SUPPORTED
+				and controller % 1 == 0
+				and (Engine.GetPrimaryController == nil or controller ~= Engine.GetPrimaryController())
+				and Engine.GetLobbyNetworkMode ~= nil and Engine.GetLobbyNetworkMode() ~= 2
+				and (Engine.IsInGame == nil or not Engine.IsInGame()) then
+				request_guest_leave(menu, controller)
+				return
+			end
+			return remove_client(menu, controller)
+		end
+		LobbyRemoveLocalClientFromLobby = wrapped_remove
+	end
+	if LUI.createMenu ~= nil and LUI.createMenu.Lobby ~= nil and LUI.createMenu.Lobby ~= wrapped_create_lobby then
+		local create_lobby = LUI.createMenu.Lobby
+		wrapped_create_lobby = function(controller)
+			local menu = create_lobby(controller)
+			install_lobby_join_handler(menu, controller)
+			install_lobby_a_handlers(menu)
+			install_lobby_leave_handlers(menu)
+			return menu
+		end
+		LUI.createMenu.Lobby = wrapped_create_lobby
+	end
 	-- Controller names: whatever text reads "XINPUT Controller N" when the menu localizes it
 	-- gets Steam's name for that pad.
 	if Engine.Localize ~= nil and Engine.Localize ~= wrapped_localize then
@@ -435,8 +808,33 @@ local function install()
 	end
 
 	if LobbySplitscreenToggle ~= nil and LobbySplitscreenToggle ~= wrapped_toggle then
-		local stock_toggle = LobbySplitscreenToggle
 		wrapped_toggle = function(menu, controller)
+			-- ezz's splitscreen_join calls this on A RELEASE with the guest's ID.
+			-- This is not a host/mouse click: never choose some other free pad and
+			-- never turn a guest's repeated A into DEACTIVATE ALL.
+			if type(controller) == "number" and controller > 0 and controller < SUPPORTED
+				and controller % 1 == 0
+				and (Engine.GetPrimaryController == nil or controller ~= Engine.GetPrimaryController()) then
+				-- Our model subscription owns release, even if ezz runs first, the
+				-- stock add is refused, or its reservation expires while A is held.
+				if menu ~= nil and menu.__zz_guest_join_models ~= nil
+					and menu.__zz_guest_join_models[controller] ~= nil then return end
+				if not join_call_in_progress and LobbyAddLocalClient ~= nil then
+					LobbyAddLocalClient(menu, controller)
+				end
+				return
+			end
+			-- A join can synchronously publish a seat and then reach a focused
+			-- toggle callback in another root. It must not also add a different pad.
+			if join_call_in_progress then
+				return
+			end
+			for c = 0, SUPPORTED - 1 do
+				if (join_pending[c] ~= nil and join_pending[c].expires > join_epoch)
+					or leave_pending[c] ~= nil then
+					return
+				end
+			end
 			if LuaUtils ~= nil and LuaUtils.LobbyProcessQueueEmpty ~= nil
 				and not LuaUtils.LobbyProcessQueueEmpty() then
 				return
@@ -448,16 +846,14 @@ local function install()
 				if LobbyRemoveLocalClientFromLobby ~= nil then
 					for c = 1, SUPPORTED - 1 do
 						if Engine.IsControllerBeingUsed(c) == true then
-							LobbyRemoveLocalClientFromLobby(menu, c)
+							request_guest_leave(menu, c)
 						end
 					end
 				end
 				return
 			end
-			if not guests_seated() then
-				log("toggle: activate controller 1 (stock)")
-				return stock_toggle(menu, controller)
-			end
+			-- Never call the PC stock toggle: it hard-codes controller 1 and
+			-- bypasses our per-controller pending reservation on a fresh rejoin.
 			-- ACTIVATE with guests already in: the controller of a pad without a seat
 			-- joins through the stock join (the same call its own A press makes).
 			local c = free_pad_controller()
@@ -483,10 +879,20 @@ local function install()
 	if LobbyAddLocalClient ~= nil and LobbyAddLocalClient ~= wrapped_add then
 		local stock_add = LobbyAddLocalClient
 		wrapped_add = function(menu, controller)
+			-- A model refresh inside stock is not a second physical join request.
+			if join_call_in_progress then return end
+			local request = reserve_join(menu, controller, stock_add)
+			if not request then
+				return
+			end
 			local max = Dvar.lobby_maxLocalPlayers ~= nil and Dvar.lobby_maxLocalPlayers:get() or -1
 			log("LobbyAddLocalClient c" .. tostring(controller) .. " used="
 				.. tostring(Engine.GetUsedControllerCount()) .. " max=" .. tostring(max))
-			return stock_add(menu, controller)
+			-- Preserve a physical release while another lobby operation is busy.
+			-- First attempt must still call stock to acquire local profile files.
+			if not join_call_in_progress and lobby_queue_ready() and lobby_accepts_input(menu) then
+				return attempt_join(request, controller)
+			end
 		end
 		LobbyAddLocalClient = wrapped_add
 	end
@@ -554,7 +960,31 @@ local function attach_watcher(root, id)
 	local watcher = LUI.UIElement.new()
 	watcher.id = id
 	watcher:registerEventHandler("zz_splitscreen_tick", function(self, event)
+		join_epoch = join_epoch + 1
 		install()
+		-- Also cover a Lobby that existed before this script/constructor wrapper.
+		local function visit(node)
+			install_lobby_a_handlers(node)
+			install_lobby_leave_handlers(node)
+			if node.getFirstChild ~= nil then
+				local child = node:getFirstChild()
+				while child ~= nil do
+					visit(child)
+					child = child:getNextSibling()
+				end
+			end
+		end
+		visit(root)
+		for c = 1, SUPPORTED - 1 do
+			if guest_a[c] ~= nil and not lobby_accepts_input(guest_a[c].menu) then guest_a[c] = nil end
+		end
+		process_pending_joins()
+		process_pending_leaves()
+		for widget, menu in pairs(prompt_widgets) do
+			if menu.updateElementState ~= nil and (menu.getParent == nil or menu:getParent() ~= nil) then
+				menu:updateElementState(widget, {name = "model_validation", menu = menu})
+			end
+		end
 		update_notice()
 		return true
 	end)

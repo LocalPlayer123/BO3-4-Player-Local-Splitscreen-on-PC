@@ -143,6 +143,22 @@ frees plugins at exit while game threads may still run through its hooks).
 
 ---
 
+## Linux cross-build for Proton testing
+
+[tools/build_cross.py](tools/build_cross.py) builds a Windows x64 DLL and smoke
+executable using an existing LLVM-MinGW toolchain and MinHook source checkout.
+It does not download dependencies or install files into the game.
+
+Pass `--toolchain <LLVM-MinGW folder> --minhook <MinHook source folder>` to the
+script. The default diagnostic output is under `out/cross-diag`; `--release`
+selects `out/cross-release`. The C++ runtime is linked statically; Windows UCRT
+and WinHTTP remain system dependencies. A PDB is generated beside the DLL.
+
+Run the generated smoke executable under Windows or Proton before installing the
+DLL. A passing smoke test validates loading/exports/startup redirection/pinning,
+not live game patches or map compatibility. This path was built with LLVM-MinGW
+20261117 and MinHook v1.3.4 and smoke-tested with GE-Proton11-14.
+
 ## Memory the component uses inside the image
 
 * `0x1A828D00`: the magic `0xB03C0FFE`, written once. The plugin checks it
@@ -154,6 +170,14 @@ Both lie in the unused tail of the last `.data` page.
 
 ## Testing notes
 
+* Source-level stability changes and remaining validation requirements:
+   [STABILITY_AUDIT.md](docs/STABILITY_AUDIT.md).
+* Offline production-code regressions: run `python3 tools/run_regression_tests.py`.
+   Requires Python and a C++ compiler; optional Lua checks use `lupa`. See
+   [test boundaries](src/standalone/test/REGRESSION.md). These mocked tests do not
+   replace Windows or in-game validation.
+* The Windows build now compiles and runs the plugin smoke test before reporting
+   success; a failed smoke test fails the build.
 * Four real controllers need Steam Input on; Steam decides the XInput order.
 * Virtual pads (ViGEm) work well for automated tests.
 * Pad input is ignored while the game window is not in the foreground.

@@ -40,6 +40,10 @@
 		bool parse_version(const char* text, int (&out)[3])
 		{
 			out[0] = out[1] = out[2] = 0;
+			if (!text)
+			{
+				return false;
+			}
 			if (*text == 'v' || *text == 'V')
 			{
 				++text;
@@ -111,6 +115,7 @@
 
 		bool fetch_latest_release(std::string& body)
 		{
+			body.clear();
 			const auto session = WinHttpOpen(update_agent, WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
 			                                 WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
 			if (!session)
@@ -154,9 +159,17 @@
 
 			char chunk[4096];
 			DWORD read = 0;
-			while (WinHttpReadData(request, chunk, sizeof(chunk), &read) && read)
+			for (;;)
 			{
-				if (body.size() + read > update_body_max)
+				if (!WinHttpReadData(request, chunk, sizeof(chunk), &read))
+				{
+					return false;   // a truncated response is not a completed release
+				}
+				if (!read)
+				{
+					break;
+				}
+				if (read > update_body_max - body.size())
 				{
 					return false;
 				}
@@ -166,6 +179,7 @@
 		}
 
 		void run_update_check()
+		try
 		{
 			int current[3];
 			int latest[3];
@@ -180,6 +194,11 @@
 			}
 			update_result.store(update_none, std::memory_order_release);
 		}
+		catch (...)
+		{
+			// Network/allocator failures on a detached thread must never terminate the game.
+			update_result.store(update_none, std::memory_order_release);
+		}
 
 		void start_update_check()
 		{
@@ -190,7 +209,14 @@
 				note("update check: off (%s)", update_off_switch);
 				return;
 			}
-			std::thread(run_update_check).detach();
+			try
+			{
+				std::thread(run_update_check).detach();
+			}
+			catch (...)
+			{
+				update_result.store(update_none, std::memory_order_release);
+			}
 		}
 
 		// The Lua shows the notice on "splitscreen_update" (and on its own timers, which

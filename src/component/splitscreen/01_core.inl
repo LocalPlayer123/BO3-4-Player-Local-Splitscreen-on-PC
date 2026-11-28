@@ -91,9 +91,8 @@
 			{
 				return false;
 			}
-			const auto start = reinterpret_cast<size_t>(mbi.BaseAddress);
-			const auto end = start + mbi.RegionSize;
-			return reinterpret_cast<size_t>(p) + size <= end;
+			return safety::range_fits(reinterpret_cast<uintptr_t>(p), size,
+			                          reinterpret_cast<uintptr_t>(mbi.BaseAddress), mbi.RegionSize);
 		}
 
 		bool write_bytes(void* target, const void* data, const size_t size)
@@ -111,6 +110,7 @@
 			});
 
 			std::memcpy(target, data, size);
+			FlushInstructionCache(GetCurrentProcess(), target, size);
 			return true;
 		}
 
@@ -128,6 +128,10 @@
 
 		void* allocate_near_module(const size_t size)
 		{
+			if (!size || size > SIZE_MAX - 2 * reloc_padding)
+			{
+				return nullptr;
+			}
 			const auto module_base = base();
 
 			const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(module_base);
@@ -276,7 +280,8 @@
 		                   F* stub)
 		{
 			const auto place = base() + rva;
-			if (std::memcmp(reinterpret_cast<const void*>(place), prologue, N) != 0)
+			if (!readable(reinterpret_cast<const void*>(place), N)
+			    || std::memcmp(reinterpret_cast<const void*>(place), prologue, N) != 0)
 			{
 				note("[splitscreen] 0x%zX: prologue differs - not hooked\n", rva);
 				return false;
@@ -311,6 +316,10 @@
 
 		bool relocate(const reloc_table& t, const size_t slot)
 		{
+			if (t.new_size < t.old_size || !readable(reinterpret_cast<void*>(base() + t.base_rva), t.old_size))
+			{
+				return false;
+			}
 			auto* fresh = allocate_near_module(t.new_size);
 
 			if (!fresh)
@@ -363,45 +372,40 @@
 				return false;
 			}
 
-			size_t done = 0;
+			// Prepare all operands before writing. A failed write must restore earlier
+			// operands, not leave half the engine using each of two different arrays.
+			const auto count = t.count + t.end_count;
+			std::vector<int32_t> before(count), after(count);
+			std::vector<safety::patch> patches(count);
 			for (size_t i = 0; i < t.count; ++i)
 			{
 				const auto& r = t.refs[i];
 				const auto moved = new_rva + (r.target_rva - t.base_rva);
-				const auto value = r.rip_relative
+				after[i] = r.rip_relative
 					                   ? static_cast<int32_t>(moved - (r.insn_rva + r.length))
 					                   : static_cast<int32_t>(moved);
-
-				if (write_bytes(reinterpret_cast<void*>(base() + r.insn_rva + r.disp_offset),
-				                &value, sizeof(value)))
-				{
-					++done;
-				}
+				auto* field = reinterpret_cast<void*>(base() + r.insn_rva + r.disp_offset);
+				std::memcpy(&before[i], field, sizeof(int32_t));
+				patches[i] = {field, &before[i], &after[i], sizeof(int32_t)};
 			}
 
 			// End-bound references: loops like `for (p = &a[0]; p < &a[N]; p++)` bake
 			// in the end address. They get new base + NEW size; shifting them like
 			// ordinary refs would still walk the old element count.
-			size_t end_done = 0;
 			for (size_t i = 0; i < t.end_count; ++i)
 			{
 				const auto& r = t.end_refs[i];
 				auto* field = reinterpret_cast<void*>(base() + r.insn_rva + r.disp_offset);
-				if (!readable(field, sizeof(int32_t)))
-				{
-					continue;
-				}
 				const auto moved = new_rva + t.new_size;
-				const auto value = r.rip_relative
+				const auto j = t.count + i;
+				after[j] = r.rip_relative
 					                   ? static_cast<int32_t>(moved - (r.insn_rva + r.length))
 					                   : static_cast<int32_t>(moved);
-				if (write_bytes(field, &value, sizeof(value)))
-				{
-					++end_done;
-				}
+				std::memcpy(&before[j], field, sizeof(int32_t));
+				patches[j] = {field, &before[j], &after[j], sizeof(int32_t)};
 			}
 
-			if (done == t.count && end_done == t.end_count)
+			if (safety::apply_patches(patches.data(), patches.size(), write_bytes))
 			{
 				if (slot < std::size(new_base_rva))
 				{
@@ -409,8 +413,7 @@
 				}
 				return true;
 			}
-			note("[splitscreen] %s: only %zu/%zu references and %zu/%zu end bounds moved to RVA 0x%zX\n",
-			       t.name, done, t.count, end_done, t.end_count, new_rva);
+			note("[splitscreen] %s: write failed - rollback attempted, count not widened\n", t.name);
 			return false;
 		}
 
